@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="creative-medium" content="interactive-prototype" />
+  <title>君主之刃 · 自由移動 MMORPG</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet" />
+  <script src="lang.js"></script>
+</head>
+<body>
+  <div id="game-root">
+    <!-- 顶部状态栏：Lv徽章 + HP/MP + 攻防 + 鑽石 + 地圖 -->
+    <header class="top-bar">
+      <div class="top-left">
+        <div class="lv-badge">
+          <div class="lv-badge-num" id="player-level">1</div>
+          <div class="lv-badge-exp" id="exp-pct">0%</div>
+        </div>
+        <div class="stat-bars-col">
+          <div class="stat-bar hp-bar">
+            <div class="stat-bar-fill hp-fill" id="hp-fill" style="width:100%"></div>
+            <span class="stat-bar-text" id="hp-text">100/100</span>
+          </div>
+          <div class="stat-bar mp-bar">
+            <div class="stat-bar-fill mp-fill" id="mp-fill" style="width:100%"></div>
+            <span class="stat-bar-text" id="mp-text">80/80</span>
+          </div>
+          <div class="atk-def-row">
+            <span class="atk-def-item atk">
+              <svg class="ad-icon" viewBox="0 0 24 24" fill="none" stroke="#ff8060" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.5 17.5L3 6V3h3l11.5 11.5-3 3z"/>
+                <path d="M19 21l2-2-4-4"/>
+              </svg>
+              <span id="mini-atk">18</span>
+            </span>
+            <span class="atk-def-item def">
+              <svg class="ad-icon" viewBox="0 0 24 24" fill="none" stroke="#60b0ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              <span id="mini-def">12</span>
+            </span>
+            <span class="atk-def-item cp">
+              <svg class="ad-icon cp-icon" viewBox="0 0 24 24" fill="none" stroke="#ffd860" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9"/>
+              </svg>
+              <span id="cp-value">320</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-right">
+        <div class="gem-pill">
+          <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhdzab2js_ve_miaoda" class="gem-icon-img" alt="鑽石"/>
+          <span class="gem-num" id="gem-count">300,000</span>
+        </div>
+        <button class="map-badge-btn" id="map-btn">
+          <span class="map-name" id="location-name">古魯丁村莊</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 戰鬥场景 -->
+    <main class="battle-scene" id="battle-scene">
+      <div class="scene-bg" id="scene-bg"></div>
+      <div class="scene-fog"></div>
+
+      <div class="npc-layer" id="npc-layer"></div>
+      <div class="world-layer" id="world-layer"></div>
+      <div class="damage-layer" id="damage-layer"></div>
+      <div class="effect-layer" id="effect-layer"></div>
+
+      <!-- 左侧工具栏 + 選單按钮 -->
+      <div class="side-tools left-tools">
+        <button class="side-btn" id="menu-btn" title="選單">
+          <svg class="side-btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <button class="side-btn" id="bag-btn" title="背包">
+          <svg class="side-btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="8" width="16" height="14" rx="2"/>
+            <path d="M8 8V6a4 4 0 0 1 8 0v2"/>
+            <line x1="12" y1="13" x2="12" y2="17"/>
+          </svg>
+        </button>
+        <div class="buff-bar" id="buff-bar"></div>
+      </div>
+
+      <!-- 自動挂机按钮 -->
+      <div class="auto-btn-wrap" id="auto-btn-wrap">
+        <button class="auto-btn" id="auto-btn" style="margin:0">
+          <div class="auto-icon">
+            <svg class="auto-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <polyline points="12 7 12 12 15 14"/>
+            </svg>
+          </div>
+          <span class="auto-label" id="auto-label">自動</span>
+        </button>
+        <button class="auto-skill-btn" id="auto-skill-btn" title="自動技能：開啟後自動模式下技能CD好了自動施放">
+          <svg class="auto-skill-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span class="auto-skill-label" id="auto-skill-label">自動技</span>
+        </button>
+      </div>
+
+      <!-- 当前目標显示 -->
+      <div class="target-display" id="target-display" style="display:none">
+        <div class="target-name" id="target-name">-</div>
+        <div class="target-hp-bar">
+          <div class="target-hp-fill" id="target-hp-fill" style="width:100%"></div>
+        </div>
+      </div>
+
+      <!-- 任務追踪 -->
+      <div class="quest-tracker" id="quest-tracker">
+        <div class="quest-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhellu6fs_ve_miaoda" class="quest-icon-img" alt="任務"/></div>
+        <div class="quest-info">
+          <div class="quest-name" id="quest-name">討伐哥布林</div>
+          <div class="quest-progress">
+            <span id="quest-current">0</span>/<span id="quest-total">5</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 击杀数 -->
+      <div class="kill-counter" id="kill-counter">
+        <span class="kill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhhp4kwps_ve_miaoda" class="kill-icon-img" alt="擊殺"/></span>
+        <span class="kill-count" id="kill-count">0</span>
+      </div>
+
+      <!-- 攻城戰HUD -->
+      <div class="siege-hud" id="siege-hud" style="display:none">
+        <div class="siege-hud-title" id="siege-hud-title">攻城戰 20:00</div>
+        <div class="siege-hud-phase" id="siege-hud-phase">第一階段：擊破城門</div>
+        <button class="siege-retreat-btn" id="siege-retreat-btn">撤退</button>
+      </div>
+
+      <!-- 迷你地圖 -->
+      <div class="minimap" id="minimap">
+        <div class="minimap-title" id="minimap-title">古魯丁村莊</div>
+        <canvas class="minimap-canvas" id="minimap-canvas" width="120" height="90"></canvas>
+      </div>
+
+      <!-- 缩放控制 -->
+      <div class="zoom-controls" id="zoom-controls">
+        <button class="zoom-btn" id="zoom-in" title="放大">+</button>
+        <button class="zoom-btn" id="zoom-out" title="缩小">−</button>
+        <button class="zoom-btn" id="zoom-reset" title="重置">⟲</button>
+      </div>
+
+      <!-- 快捷栏（底部） -->
+      <div class="skill-bar" id="skill-bar">
+        <button class="skill-btn" data-skill="0" title="普通攻擊">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg7agpycu_ve_miaoda" class="skill-icon-img" alt="普攻"/></div>
+          <div class="skill-key">1</div>
+          <div class="skill-cd" id="skill-cd-0"></div>
+          <div class="skill-count" id="skill-count-0"></div>
+        </button>
+        <button class="skill-btn" data-skill="1">
+          <div class="skill-icon" id="skill-icon-1"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5vdv4kw_ve_miaoda" class="skill-icon-img" alt="技能1"/></div>
+          <div class="skill-key">2</div>
+          <div class="skill-cd" id="skill-cd-1"></div>
+          <div class="skill-count" id="skill-count-1"></div>
+        </button>
+        <button class="skill-btn" data-skill="2">
+          <div class="skill-icon" id="skill-icon-2"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhadazias_ve_miaoda" class="skill-icon-img" alt="技能2"/></div>
+          <div class="skill-key">3</div>
+          <div class="skill-cd" id="skill-cd-2"></div>
+          <div class="skill-count" id="skill-count-2"></div>
+        </button>
+        <button class="skill-btn" data-skill="3">
+          <div class="skill-icon" id="skill-icon-3"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsms_ve_miaoda" class="skill-icon-img" alt="技能3"/></div>
+          <div class="skill-key">4</div>
+          <div class="skill-cd" id="skill-cd-3"></div>
+          <div class="skill-count" id="skill-count-3"></div>
+        </button>
+        <button class="skill-btn" data-skill="4">
+          <div class="skill-icon" id="skill-icon-4"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsns_ve_miaoda" class="skill-icon-img" alt="技能4"/></div>
+          <div class="skill-key">5</div>
+          <div class="skill-cd" id="skill-cd-4"></div>
+          <div class="skill-count" id="skill-count-4"></div>
+        </button>
+        <button class="skill-btn" data-skill="5">
+          <div class="skill-icon" id="skill-icon-5"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能5"/></div>
+          <div class="skill-key">6</div>
+          <div class="skill-cd" id="skill-cd-5"></div>
+          <div class="skill-count" id="skill-count-5"></div>
+        </button>
+        <button class="skill-btn" data-skill="6">
+          <div class="skill-icon" id="skill-icon-6"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能6"/></div>
+          <div class="skill-key">7</div>
+          <div class="skill-cd" id="skill-cd-6"></div>
+          <div class="skill-count" id="skill-count-6"></div>
+        </button>
+        <button class="skill-btn" data-skill="7">
+          <div class="skill-icon" id="skill-icon-7"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能7"/></div>
+          <div class="skill-key">8</div>
+          <div class="skill-cd" id="skill-cd-7"></div>
+          <div class="skill-count" id="skill-count-7"></div>
+        </button>
+      </div>
+
+    </main>
+
+    <!-- 戰鬥日志栏 -->
+    <section class="battle-log-bar" id="battle-log-bar">
+      <div class="log-bar-slot hero-slot" id="hero-slot" title="出戰英雄">
+        <div class="slot-empty" id="hero-slot-empty">+</div>
+        <div class="slot-filled" id="hero-slot-filled" style="display:none">
+          <img id="hero-slot-img" src="" alt="hero" />
+        </div>
+        <div class="log-bar-slot-label">英雄</div>
+      </div>
+
+      <div class="log-main-area">
+        <div class="log-tab-bar">
+          <button class="log-tab active" data-log-tab="battle">戰鬥</button>
+          <button class="log-tab" data-log-tab="general">一般</button>
+          <button class="log-tab" data-log-tab="guild">軍團</button>
+          <button class="log-tab" data-log-tab="nation">國家</button>
+          <button class="log-toggle-btn" id="log-toggle-btn" title="展開/收起">▾</button>
+        </div>
+        <div class="battle-log-scroll" id="battle-log-scroll">
+          <div class="log-content" id="log-content"></div>
+        </div>
+        <div class="chat-input-row" id="chat-input-row" style="display:none">
+          <input type="text" id="chat-input" class="chat-input" placeholder="輸入訊息..." maxlength="60"/>
+          <button class="chat-send-btn" id="chat-send-btn">發送</button>
+        </div>
+      </div>
+
+      <div class="log-bar-slot pet-slot" id="pet-slot" title="守護寵物">
+        <div class="slot-empty" id="pet-slot-empty">+</div>
+        <div class="slot-filled" id="pet-slot-filled" style="display:none">
+          <div id="pet-slot-emoji" style="font-size:22px;line-height:1"></div>
+        </div>
+        <div class="log-bar-slot-label">守護</div>
+      </div>
+    </section>
+
+    <!-- 底部导航栏 -->
+    <nav class="bottom-nav">
+      <div class="nav-buttons">
+        <button class="nav-btn active" data-page="hero">
+          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbuwxsas_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="人物"/></div>
+          <span>人物</span>
+        </button>
+        <button class="nav-btn" data-page="bag">
+          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrettaiwci_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="背包"/></div>
+          <span>背包</span>
+        </button>
+        <button class="nav-btn gacha-btn" data-page="gacha">
+          <div class="nav-icon-gacha"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreo4cpwaq_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="召喚"/></div>
+          <span>召喚</span>
+        </button>
+        <button class="nav-btn" data-page="shop">
+          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhcc4tsks_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="商店"/></div>
+          <span>商店</span>
+        </button>
+        <button class="nav-btn" data-page="dungeon">
+          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhekzl2pu_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="副本"/></div>
+          <span>副本</span>
+        </button>
+        <button class="nav-btn" id="settings-btn">
+          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/></div>
+          <span>設定</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- 侧边页面 -->
+    <div class="side-page" id="side-page">
+      <div class="page-header">
+        <button class="back-btn" id="back-btn">←</button>
+        <h2 id="page-title">英雄</h2>
+      </div>
+      <div class="page-content side-page-content" id="page-content"></div>
+    </div>
+
+    <!-- 侧边選單（从左侧滑入） -->
+    <div class="side-menu" id="side-menu">
+      <div class="side-menu-header">
+        <span class="side-menu-title">遊戲選單</span>
+        <button class="modal-close" id="side-menu-close">✕</button>
+      </div>
+      <div class="side-menu-list">
+        <button class="side-menu-item" data-menu="nation">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhhpqp6au_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="國家"/></span>
+          <span class="menu-text">國家</span>
+          <span class="menu-arrow">›</span>
+        </button>
+        <button class="side-menu-item" data-menu="class">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhihjjamu_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="職業"/></span>
+          <span class="menu-text">職業</span>
+          <span class="menu-arrow">›</span>
+        </button>
+        <button class="side-menu-item" data-menu="ranking">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbjjeudw_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="排行榜"/></span>
+          <span class="menu-text">排行榜</span>
+          <span class="menu-arrow">›</span>
+        </button>
+        <button class="side-menu-item" id="menu-codex-btn">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhdxc3opw_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="圖鑑"/></span>
+          <span class="menu-text">圖鑑</span>
+          <span class="menu-arrow">›</span>
+        </button>
+        <button class="side-menu-item" id="menu-synth-btn">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhihcnigw_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="合成"/></span>
+          <span class="menu-text">合成</span>
+          <span class="menu-arrow">›</span>
+        </button>
+        <button class="side-menu-item" id="menu-settings-btn">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/></span>
+          <span class="menu-text">設定</span>
+          <span class="menu-arrow">›</span>
+        </button>
+      </div>
+    </div>
+    <div class="side-menu-overlay" id="side-menu-overlay"></div>
+
+    <!-- 地圖弹窗 -->
+    <div class="map-modal" id="map-modal">
+      <div class="map-modal-content">
+        <div class="modal-header">
+          <span class="modal-title">世界地圖</span>
+          <button class="modal-close" id="map-close">✕</button>
+        </div>
+        <div class="map-modal-body">
+          <div class="map-section-title">🏘 安全区域</div>
+          <div class="map-list safe-list" id="safe-map-list"></div>
+          <div class="map-section-title"><span style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:4px;"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhajdtwmu_ve_miaoda" style="width:100%;height:100%;object-fit:contain;display:block;" alt=""/></span>戰鬥區域</div>
+          <div class="map-list battle-list" id="battle-map-list"></div>
+          <div class="map-section-title">🏰 攻城区域</div>
+          <div class="map-list siege-list" id="siege-map-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 抽卡结果弹窗 -->
+    <div class="gacha-modal" id="gacha-modal">
+      <div class="gacha-modal-inner">
+        <div class="modal-close gacha-close" id="gacha-close">✕</div>
+        <div class="gacha-result" id="gacha-result"></div>
+      </div>
+    </div>
+
+    <!-- 裝備詳情彈窗 -->
+    <div class="equip-detail-modal" id="equip-detail-modal">
+      <div class="equip-detail-card">
+        <button class="modal-close equip-detail-close" id="equip-detail-close">✕</button>
+        <div id="equip-detail-body"></div>
+      </div>
+    </div>
+
+    <!-- 攻城战场景 -->
+    <div class="siege-modal" id="siege-modal">
+      <div class="siege-content">
+        <div class="modal-header">
+          <span class="modal-title" id="siege-title">攻城战</span>
+          <button class="modal-close" id="siege-close">✕</button>
+        </div>
+        <div class="siege-battlefield" id="siege-battlefield">
+          <div class="siege-castle" id="siege-castle">
+            <div class="castle-gate" id="castle-gate">
+              <div class="gate-hp-bar">
+                <div class="gate-hp-fill" id="gate-hp-fill" style="width:100%"></div>
+              </div>
+              <div class="gate-label">城门</div>
+            </div>
+            <div class="castle-wall"></div>
+            <div class="castle-tower left"></div>
+            <div class="castle-tower right"></div>
+            <div class="castle-lord" id="castle-lord">
+              <div style="font-size:32px">👑</div>
+              <div class="castle-lord-name" id="castle-lord-name">城主</div>
+            </div>
+          </div>
+          <div class="siege-army" id="siege-army"></div>
+          <div class="siege-defenders" id="siege-defenders"></div>
+        </div>
+        <div class="siege-info">
+          <div class="siege-info-row">
+            <span>攻方统帅</span><span id="siege-attacker">-</span>
+          </div>
+          <div class="siege-info-row">
+            <span>剩余守军</span><span id="siege-defenders-left">-</span>
+          </div>
+          <div class="siege-info-row">
+            <span>城门耐久</span><span id="siege-gate-hp">-</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 攻城战场景（全屏，替代 battle-scene） -->
+    <div class="siege-scene" id="siege-scene" style="display:none">
+      <div class="siege-scene-bg" id="siege-scene-bg"></div>
+      <div class="scene-fog"></div>
+      <div class="siege-structures" id="siege-structures"></div>
+      <div class="npc-layer" id="siege-npc-layer"></div>
+      <div class="world-layer" id="siege-world-layer"></div>
+      <div class="damage-layer" id="siege-damage-layer"></div>
+      <div class="effect-layer" id="siege-effect-layer"></div>
+
+      <!-- 攻城战 HUD -->
+      <div class="siege-hud">
+        <div class="siege-hud-left">
+          <div class="siege-hud-title" id="siege-hud-title">攻城戰 - 古魯丁城堡</div>
+          <div class="siege-hud-phase" id="siege-hud-phase">攻城阶段</div>
+        </div>
+        <div class="siege-hud-right">
+          <button class="siege-retreat-btn" id="siege-retreat-btn">撤退</button>
+        </div>
+      </div>
+
+      <!-- 技能栏（攻城战共用） -->
+      <div class="skill-bar" id="siege-skill-bar">
+        <button class="skill-btn" data-skill="0" title="普通攻擊">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg7agpycu_ve_miaoda" class="skill-icon-img" alt="普攻"/></div>
+          <div class="skill-key">1</div>
+          <div class="skill-cd" id="siege-skill-cd-0"></div>
+        </button>
+        <button class="skill-btn" data-skill="1">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5vdv4kw_ve_miaoda" class="skill-icon-img" alt="技能1"/></div>
+          <div class="skill-key">2</div>
+          <div class="skill-cd" id="siege-skill-cd-1"></div>
+        </button>
+        <button class="skill-btn" data-skill="2">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhadazias_ve_miaoda" class="skill-icon-img" alt="技能2"/></div>
+          <div class="skill-key">3</div>
+          <div class="skill-cd" id="siege-skill-cd-2"></div>
+        </button>
+        <button class="skill-btn" data-skill="3">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsms_ve_miaoda" class="skill-icon-img" alt="技能3"/></div>
+          <div class="skill-key">4</div>
+          <div class="skill-cd" id="siege-skill-cd-3"></div>
+        </button>
+        <button class="skill-btn" data-skill="4">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能4"/></div>
+          <div class="skill-key">5</div>
+          <div class="skill-cd" id="siege-skill-cd-4"></div>
+        </button>
+        <button class="skill-btn" data-skill="5">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能5"/></div>
+          <div class="skill-key">6</div>
+          <div class="skill-cd" id="siege-skill-cd-5"></div>
+        </button>
+        <button class="skill-btn" data-skill="6">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能6"/></div>
+          <div class="skill-key">7</div>
+          <div class="skill-cd" id="siege-skill-cd-6"></div>
+        </button>
+        <button class="skill-btn" data-skill="7">
+          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能7"/></div>
+          <div class="skill-key">8</div>
+          <div class="skill-cd" id="siege-skill-cd-7"></div>
+        </button>
+      </div>
+
+      <!-- 迷你地圖 -->
+      <div class="minimap siege-minimap" id="siege-minimap">
+        <div class="minimap-title">攻城戰地圖</div>
+        <canvas class="minimap-canvas" id="siege-minimap-canvas" width="120" height="90"></canvas>
+      </div>
+    </div>
+
+    <!-- 攻城战结果弹窗 -->
+    <div class="siege-result-modal" id="siege-result-modal" style="display:none">
+      <div class="siege-result-inner">
+        <div class="siege-result-title" id="siege-result-title">胜利！</div>
+        <div class="siege-result-desc" id="siege-result-desc">你占领了城堡！</div>
+        <div class="siege-result-rewards" id="siege-result-rewards"></div>
+        <button class="siege-result-btn" id="siege-result-btn">确定</button>
+      </div>
+    </div>
+
+    <!-- 快捷栏設定弹窗 -->
+    <div class="settings-panel" id="quickbar-settings-modal">
+      <div style="background:rgba(20,14,8,0.98);border:2px solid var(--gold);border-radius:10px;padding:16px;width:320px">
+        <div class="settings-panel-title">快捷欄設置</div>
+        <div id="quickbar-config-list" style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;margin-top:10px">
+        </div>
+        <div style="margin-top:12px;display:flex;gap:6px">
+          <button class="castle-card-btn" id="quickbar-settings-close" style="flex:1;padding:6px;font-size:11px">關閉</button>
+        </div>
+        <div style="margin-top:8px;font-size:10px;color:var(--parchment-dark);text-align:center">點擊格子可以選擇技能或道具放置</div>
+      </div>
+    </div>
+
+    <!-- 設定面板 -->
+    <div class="settings-panel" id="settings-panel">
+      <div style="background:rgba(20,14,8,0.98);border:2px solid var(--gold);border-radius:10px;padding:16px 20px 24px;width:320px;max-width:90vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div class="settings-panel-title" style="flex-shrink:0">設置</div>
+        <div id="settings-scroll-area" style="flex:1;overflow-y:auto;overflow-x:hidden;padding-right:4px;margin-right:-4px">
+        <div class="settings-row">
+          <span class="settings-label">角色名稱</span>
+          <div style="display:flex;gap:4px">
+            <input type="text" id="player-name-input" maxlength="12" style="width:120px;padding:4px 8px;background:rgba(0,0,0,0.5);border:1px solid var(--gold-dark);border-radius:4px;color:var(--parchment);font-size:11px;font-family:inherit">
+            <button class="lang-btn" id="change-name-btn" style="font-size:10px;padding:4px 8px">修改</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">語言</span>
+          <div class="lang-buttons">
+            <button class="lang-btn" data-lang="zh-CN">簡中</button>
+            <button class="lang-btn active" data-lang="zh-TW">繁中</button>
+            <button class="lang-btn" data-lang="en-US">EN</button>
+          </div>
+        </div>
+        <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+          <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">自動戰鬥設置</div>
+          <div class="settings-row">
+            <span class="settings-label">自動戰鬥</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-fight-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">自動技能</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-skill-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">自動喝水 (HP&lt;50%)</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-potion-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">自動回魔 (MP&lt;30%)</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-mp-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+           <div class="settings-row">
+             <span class="settings-label">自動購買藥水</span>
+             <label class="toggle-switch">
+               <input type="checkbox" id="auto-buy-potion-toggle" checked>
+               <span class="toggle-slider"></span>
+             </label>
+           </div>
+           <div style="margin-top:8px">
+             <div style="font-size:11px;font-weight:600;color:var(--parchment-light);margin-bottom:6px">PVP 模式</div>
+             <div class="pvp-mode-row" id="pvp-mode-row">
+               <button class="pvp-mode-btn active" data-pvp-mode="counter">被動反擊</button>
+               <button class="pvp-mode-btn" data-pvp-mode="active">主動攻擊</button>
+               <button class="pvp-mode-btn" data-pvp-mode="off">不參與</button>
+             </div>
+           </div>
+         </div>
+         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+           <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">自動道具設置</div>
+           <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">8個欄位自由配置：選擇道具、設定閾值、開啟自動使用/自動購買</div>
+            <div class="auto-items-grid" id="auto-items-grid" style="display:flex;flex-direction:column;gap:6px;padding-right:2px">
+            </div>
+          </div>
+        <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+          <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">音效與音樂</div>
+          <div class="settings-row">
+            <span class="settings-label">音效</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="sfx-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row settings-volume-row">
+            <span class="settings-label">音效音量</span>
+            <div style="flex:1;max-width:140px;display:flex;align-items:center;gap:8px">
+              <input type="range" id="sfx-volume" min="0" max="100" value="70" class="volume-slider">
+              <span id="sfx-volume-value" class="volume-value">70</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">背景音樂</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="music-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row settings-volume-row">
+            <span class="settings-label">音樂音量</span>
+            <div style="flex:1;max-width:140px;display:flex;align-items:center;gap:8px">
+              <input type="range" id="music-volume" min="0" max="100" value="40" class="volume-slider">
+              <span id="music-volume-value" class="volume-value">40</span>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div style="flex-shrink:0;margin-top:12px">
+          <button class="lang-btn" id="settings-close-btn" style="width:100%;padding:6px">關閉</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 职业選擇初始弹窗 -->
+    <div class="class-select-modal" id="class-select-modal">
+      <div class="class-select-inner">
+        <div class="class-select-title">選擇你的職業</div>
+        <div class="class-select-desc">每種職業都有獨特的戰鬥風格與技能</div>
+        <div class="class-grid" id="class-grid"></div>
+      </div>
+    </div>
+
+    <!-- 角色創建界面（手机竖屏优化版） -->
+    <div class="char-create-screen" id="char-create-screen">
+      <div class="char-create-bg"></div>
+      <div class="char-create-panel-mobile">
+        <!-- 顶部标题 -->
+        <div class="cc-header-mobile">
+          <div class="cc-title-mobile">君主之刃</div>
+          <div class="cc-subtitle-mobile">LINEAGE OF MONARCHS</div>
+        </div>
+
+        <!-- 角色预览区（大） -->
+        <div class="cc-preview-section">
+          <div class="cc-preview-stage-mobile">
+            <div class="cc-preview-bg-glow"></div>
+            <div class="cc-character-sprite-mobile" id="cc-character-sprite"></div>
+            <div class="cc-stage-ring"></div>
+          </div>
+          <div class="cc-class-tag-mobile">
+            <span class="cc-class-name-mobile" id="cc-current-class">戰士</span>
+          </div>
+        </div>
+
+        <!-- 名称输入 -->
+        <div class="cc-name-section">
+          <input type="text" id="cc-name-input" class="cc-name-input-mobile" maxlength="10" placeholder="輸入角色名稱" />
+        </div>
+
+        <!-- 职业選擇：2x3网格 -->
+        <div class="cc-class-section">
+          <div class="cc-section-label">選擇職業</div>
+          <div class="cc-class-grid" id="cc-class-list"></div>
+        </div>
+
+        <!-- 屬性分配（可折叠） -->
+        <div class="cc-stats-section">
+          <div class="cc-stats-header" id="cc-stats-toggle">
+            <span>屬性分配</span>
+            <span class="cc-stats-remain">剩餘 <b id="cc-points-remain">30</b> 點</span>
+          </div>
+          <div class="cc-stats-grid-mobile" id="cc-stat-grid">
+            <div class="cc-stat-row-mobile" data-stat="str">
+              <span class="cc-stat-name">力量 STR</span>
+              <div class="cc-stat-controls">
+                <button class="cc-stat-btn minus" data-action="minus">−</button>
+                <span class="cc-stat-val" id="cc-stat-str">10</span>
+                <button class="cc-stat-btn plus" data-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="cc-stat-row-mobile" data-stat="dex">
+              <span class="cc-stat-name">敏捷 DEX</span>
+              <div class="cc-stat-controls">
+                <button class="cc-stat-btn minus" data-action="minus">−</button>
+                <span class="cc-stat-val" id="cc-stat-dex">10</span>
+                <button class="cc-stat-btn plus" data-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="cc-stat-row-mobile" data-stat="con">
+              <span class="cc-stat-name">體質 CON</span>
+              <div class="cc-stat-controls">
+                <button class="cc-stat-btn minus" data-action="minus">−</button>
+                <span class="cc-stat-val" id="cc-stat-con">10</span>
+                <button class="cc-stat-btn plus" data-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="cc-stat-row-mobile" data-stat="int">
+              <span class="cc-stat-name">智力 INT</span>
+              <div class="cc-stat-controls">
+                <button class="cc-stat-btn minus" data-action="minus">−</button>
+                <span class="cc-stat-val" id="cc-stat-int">10</span>
+                <button class="cc-stat-btn plus" data-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="cc-stat-row-mobile" data-stat="wis">
+              <span class="cc-stat-name">智慧 WIS</span>
+              <div class="cc-stat-controls">
+                <button class="cc-stat-btn minus" data-action="minus">−</button>
+                <span class="cc-stat-val" id="cc-stat-wis">10</span>
+                <button class="cc-stat-btn plus" data-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="cc-stat-row-mobile" data-stat="cha">
+              <span class="cc-stat-name">魅力 CHA</span>
+              <div class="cc-stat-controls">
+                <button class="cc-stat-btn minus" data-action="minus">−</button>
+                <span class="cc-stat-val" id="cc-stat-cha">10</span>
+                <button class="cc-stat-btn plus" data-action="plus">＋</button>
+              </div>
+            </div>
+          </div>
+          <button class="cc-dice-btn-mobile" id="cc-dice-btn">🎲 隨機分配</button>
+        </div>
+
+        <!-- 創建按钮 -->
+        <div class="cc-footer-mobile">
+          <button class="cc-create-btn-mobile" id="cc-confirm-btn">開 始 冒 險</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="transform.js"></script>
+  <script src="audio.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
