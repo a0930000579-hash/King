@@ -1,6 +1,240 @@
 /* ============================================================
-   君主之刃 · 自由移動 MMORPG - 主逻辑 v3
-   ============================================================ */
+    君主之刃 · 自由移動 MMORPG - 主逻辑 v3
+    ============================================================ */
+
+// ==================== 離線模式 / 本地圖資支援 ====================  
+let USE_LOCAL_ASSETS = false;
+try { USE_LOCAL_ASSETS = localStorage.getItem('useLocal') === '1'; } catch(e) {}
+
+// ========== 環境偵測：判斷是否應該優先走 CDN ==========
+// 規則：
+//   1. file:// 離線開啟 → 一定走本地（因為 CDN 可能被 CORS 擋 / 離線無網路）
+//   2. http(s) 網域 → 預設優先 CDN（避免本地 404 閃爍）；若玩家手動開啟離線模式則走本地
+//   3. 本地 assets/ 是否存在會在啟動時用一張探針圖偵測，結果緩存在 _LOCAL_ASSETS_AVAILABLE
+const CDN_BASE = 'https://aka.doubaocdn.com/s/';
+
+function _isFileProtocol() {
+  return location.protocol === 'file:';
+}
+
+let _LOCAL_ASSETS_AVAILABLE = null; // null=未偵測, true=存在, false=不存在
+function detectLocalAssets() {
+  if (_LOCAL_ASSETS_AVAILABLE !== null) return Promise.resolve(_LOCAL_ASSETS_AVAILABLE);
+  return new Promise(function (resolve) {
+    if (_isFileProtocol()) {
+      _LOCAL_ASSETS_AVAILABLE = true;
+      resolve(true);
+      return;
+    }
+    // 用一張體積小、一定存在的圖做探針（effects 裡的 gold-circle 或戰士 idle）
+    const probe = new Image();
+    probe.onload = function () { _LOCAL_ASSETS_AVAILABLE = true; resolve(true); };
+    probe.onerror = function () { _LOCAL_ASSETS_AVAILABLE = false; resolve(false); };
+    probe.src = 'assets/warrior/idle.png?_t=' + Date.now();
+    // 超時保護（3 秒）
+    setTimeout(function () {
+      if (_LOCAL_ASSETS_AVAILABLE === null) {
+        _LOCAL_ASSETS_AVAILABLE = false;
+        resolve(false);
+      }
+    }, 3000);
+  });
+}
+
+// 是否「應該優先走 CDN」（網域模式 + 本地 assets 不存在 / 未開啟離線模式）
+function _preferCdn() {
+  if (_isFileProtocol()) return false;        // file:// 一定走本地
+  if (USE_LOCAL_ASSETS) return false;         // 玩家手動開啟離線模式 → 走本地
+  if (_LOCAL_ASSETS_AVAILABLE === true) return false; // 本地 assets 存在 → 走本地
+  return true; // 其餘（http(s) + 本地沒有 / 未偵測到）→ 優先 CDN
+}
+
+function assetUrl(id) {
+  if (!id) return '';
+  if (typeof id !== 'string') return id;
+  // 已經是完整 URL / data URI → 原樣回傳
+  if (id.startsWith('http') || id.startsWith('data:')) return id;
+  // 以 / 開頭的絕對路徑（平台靜資 /spark/...） → 原樣回傳（由 onerror fallback 處理）
+  if (id.startsWith('/')) return id;
+  // 已經是 assets/ 開頭的本地路徑 → 原樣回傳（由 onerror fallback 處理）
+  if (id.startsWith('assets/')) return id;
+  // 從完整 CDN URL 中萃取出純 ID（防止重複包前綴）
+  if (id.indexOf('aka.doubaocdn.com/s/') !== -1) {
+    const m = id.match(/aka\.doubaocdn\.com\/s\/([^?#/\s"'<>]+)/);
+    if (m && m[1]) id = m[1];
+  }
+  // 去除副檔名（png/jpg/jpeg/webp/gif）
+  const pureId = id.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
+  // 根據環境決定優先路徑
+  if (_preferCdn()) {
+    return CDN_BASE + pureId;
+  }
+  return 'assets/' + pureId + '.png';
+}
+
+// 從一個失敗的圖片 URL 中萃取出 CDN ID（用於 fallback 重試）
+function _extractCdnId(src) {
+  if (!src) return '';
+  // CDN URL → 直接取最後一段
+  if (src.indexOf('aka.doubaocdn.com/s/') !== -1) {
+    const m = src.match(/aka\.doubaocdn\.com\/s\/([^?#/\s"'<>]+)/);
+    if (m && m[1]) return m[1].replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
+  }
+  // 本地 assets/ 路徑 → 取檔名去掉副檔名作為 ID
+  // 例：assets/warrior/idle.png → warrior_idle （拼出組合 ID，CDN 上若有同名檔可載入）
+  // 但更常見的是「檔名即 ID」的情況，所以這裡優先取 basename
+  if (src.indexOf('assets/') !== -1) {
+    // 取最後一段檔名去掉副檔名
+    const m = src.match(/assets\/.*\/([^./?#]+)\.(png|jpg|jpeg|webp|gif)/i);
+    if (m && m[1]) return m[1];
+    // 另一種：assets/ID.png（根目錄）
+    const m2 = src.match(/assets\/([^./?#]+)\.(png|jpg|jpeg|webp|gif)/i);
+    if (m2 && m2[1]) return m2[1];
+  }
+  // 平台靜資 /spark/.../static%2FID_ve_miaoda → 取 ID_ve_miaoda 當作 cdn id 試試
+  if (src.indexOf('/spark/') !== -1) {
+    const m = src.match(/static%2F([^/?#]+)/);
+    if (m && m[1]) return decodeURIComponent(m[1]);
+    const m2 = src.match(/static\/([^/?#]+)/);
+    if (m2 && m2[1]) return m2[1];
+  }
+  return '';
+}
+
+// 圖片載入失敗備援：
+//   本地 assets/ 失敗 → 切換到 CDN
+//   CDN 失敗 → 隱藏圖片並為父層加上背景占位（避免顯示破裂圖示）
+function handleImgError(img) {
+  if (!img || img.dataset.errFallback === 'fail') return;
+  const src = img.src || '';
+
+  // 如果已經走過一次 CDN 還是失敗 → 最終 fallback：隱藏 + 父層背景
+  if (img.dataset.errFallback === 'cdn') {
+    img.dataset.errFallback = 'fail';
+    img.style.visibility = 'hidden';
+    img.style.opacity = '0';
+    if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
+      img.parentElement.dataset.imgErrorBg = '1';
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    }
+    return;
+  }
+
+  // 第一次失敗：嘗試切換到 CDN（不論本來是本地還是 /spark/ 還是 CDN 都試一次 CDN ID）
+  const cdnId = _extractCdnId(src);
+  if (cdnId && img.dataset.errFallback !== 'cdn') {
+    img.dataset.errFallback = 'cdn';
+    img.src = CDN_BASE + cdnId;
+    return;
+  }
+
+  // 連 CDN ID 都抽不出來 → 直接最終 fallback
+  img.dataset.errFallback = 'fail';
+  img.style.visibility = 'hidden';
+  img.style.opacity = '0';
+  if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
+    img.parentElement.dataset.imgErrorBg = '1';
+    img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+  }
+}
+
+// 全域 img 錯誤捕獲：補捉所有沒寫 onerror 的 <img>
+// 使用 capture 階段攔截，確保比元素自身的 onerror 更早觸發（或補足沒寫的）
+document.addEventListener('error', function (e) {
+  const target = e.target;
+  if (!target || target.tagName !== 'IMG') return;
+  // 已經由 handleImgError 處理過的就跳過
+  if (target.dataset.errFallback === 'fail' || target.dataset.errFallback === 'cdn') return;
+  // 標註由全域監聽處理，避免和元素自帶的 onerror 重複
+  if (!target.dataset.globalErr) {
+    target.dataset.globalErr = '1';
+    handleImgError(target);
+  }
+}, true);
+
+// 背景圖（CSS background-image）失敗偵測：用 Image 對象預載
+// safeBackgroundUrl 快取：已確認可用的 URL 直接設定，不再重複預載
+const _bgUrlCache = new Map(); // key: url, value: 'ok' | 'cdn_ok' | 'fail'
+const _bgPending = new Map();  // key: url, value: Promise
+
+// 用法：safeBackgroundUrl(element, url) — 設背景圖，失敗時自動 fallback CDN
+// 支援三類 URL：本地 assets/、CDN URL、/spark/ 平台靜資路徑
+// fallback 順序：原 URL → CDN（用 _extractCdnId 抽 ID 重試）→ 柔和漸層占位
+function safeBackgroundUrl(el, url) {
+  if (!el || !url) return;
+  // 先查快取：確認過可用的 URL 直接套用
+  const cached = _bgUrlCache.get(url);
+  if (cached === 'ok') {
+    el.style.backgroundImage = 'url(' + url + ')';
+    return;
+  }
+  if (cached === 'cdn_ok') {
+    const cdnId = _extractCdnId(url);
+    if (cdnId) {
+      el.style.backgroundImage = 'url(' + CDN_BASE + cdnId + ')';
+      return;
+    }
+  }
+  if (cached === 'fail') {
+    el.style.backgroundImage = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    return;
+  }
+  // 相同 URL 正在載入中：複用 Promise，不重複 new Image
+  const pending = _bgPending.get(url);
+  if (pending) {
+    pending.then(function(result) {
+      if (result === 'ok') {
+        el.style.backgroundImage = 'url(' + url + ')';
+      } else if (result === 'cdn_ok') {
+        const cdnId = _extractCdnId(url);
+        if (cdnId) el.style.backgroundImage = 'url(' + CDN_BASE + cdnId + ')';
+      } else {
+        el.style.backgroundImage = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+      }
+    });
+    return;
+  }
+
+  const testImg = new Image();
+  const promise = new Promise(function(resolve) {
+    testImg.onload = function () {
+      _bgUrlCache.set(url, 'ok');
+      el.style.backgroundImage = 'url(' + url + ')';
+      resolve('ok');
+    };
+    testImg.onerror = function () {
+      // 第一次失敗：嘗試 CDN（不論是 assets/ 還是 /spark/ 還是 CDN 本身）
+      const cdnId = _extractCdnId(url);
+      if (cdnId && !url.startsWith(CDN_BASE)) {
+        const cdnUrl = CDN_BASE + cdnId;
+        const test2 = new Image();
+        test2.onload = function () {
+          _bgUrlCache.set(url, 'cdn_ok');
+          el.style.backgroundImage = 'url(' + cdnUrl + ')';
+          resolve('cdn_ok');
+        };
+        test2.onerror = function () {
+          _bgUrlCache.set(url, 'fail');
+          el.style.backgroundImage = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+          resolve('fail');
+        };
+        test2.src = cdnUrl;
+      } else {
+        _bgUrlCache.set(url, 'fail');
+        el.style.backgroundImage = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+        resolve('fail');
+      }
+    };
+    testImg.src = url;
+  }).then(function(r) {
+    _bgPending.delete(url);
+    return r;
+  });
+  _bgPending.set(url, promise);
+}
+
+// 啟動時偵測一次本地 assets（非阻塞，結果用於後續 assetUrl 優先級判斷）
+detectLocalAssets();
 
 (() => {
 'use strict';
@@ -11,468 +245,486 @@
 const SPRITE = {
   // ========== 玩家職業 ==========
   warrior: { 
-    idle: 'assets/warrior/idle.png',
-    walk: 'assets/warrior/walk.png',
-    walk2: 'assets/warrior/walk2.png',
-    walk3: 'assets/warrior/walk3.png',
-    walk4: 'assets/warrior/walk4.png',
-    attack: 'assets/warrior/attack.png',
-    attack2: 'assets/warrior/attack2.png',
-    hit: 'assets/warrior/hit.png',
-    color: '#c03020', glow: '#ff7040', useImg: true,
-    multiFrame: true, // 启用多帧动画
-    coverMode: true, // 使用 object-fit:cover 显示竖版图
+    idle: assetUrl('EH6NSfRHy5'),
+    walk: assetUrl('EH6NSfRHy5'),
+    walk2: assetUrl('do7DZ6uWlZ'),
+    walk3: assetUrl('WAGYLQHVL9'),
+    walk4: assetUrl('1TRczedt8q'),
+    attack: assetUrl('04hM2yqOUB'),
+    attack2: assetUrl('RbZnbsfeUP'),
+    hit: assetUrl('9wFUciLZbv'),
+    color: '#cc2222', glow: '#ff4444', useImg: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#ffd880',
   },
   mage: {
-    idle: 'assets/mage/idle.png',
-    walk: 'assets/mage/walk.png',
-    walk2: 'assets/mage/walk2.png',
-    walk3: 'assets/mage/walk3.png',
-    walk4: 'assets/mage/walk4.png',
-    attack: 'assets/mage/attack.png',
-    attack2: 'assets/mage/attack2.png',
-    hit: 'assets/mage/hit.png',
-    color: '#8040c0', glow: '#c080ff', useImg: true,
+    idle: assetUrl('6lmBqi1fPd'),
+    walk: assetUrl('6lmBqi1fPd'),
+    walk2: assetUrl('i6qnP4zskJ'),
+    walk3: assetUrl('BE6nspfFXV'),
+    walk4: assetUrl('JBvHrUS91w'),
+    attack: assetUrl('NewNWSVXfS'),
+    attack2: assetUrl('yv76SqEKwK'),
+    hit: assetUrl('CcVOGxaAdm'),
+    color: '#8844cc', glow: '#bb66ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80c0ff',
   },
   archer: {
-    idle: 'assets/archer/idle.png',
-    walk: 'assets/archer/walk.png',
-    walk2: 'assets/archer/walk2.png',
-    walk3: 'assets/archer/walk3.png',
-    walk4: 'assets/archer/walk4.png',
-    attack: 'assets/archer/attack.png',
-    attack2: 'assets/archer/attack2.png',
-    hit: 'assets/archer/hit.png',
-    color: '#408040', glow: '#80c060', useImg: true,
+    idle: assetUrl('ArNbUPLU6U'),
+    walk: assetUrl('ArNbUPLU6U'),
+    walk2: assetUrl('RtauX9ExPG'),
+    walk3: assetUrl('OziaGFobVL'),
+    walk4: assetUrl('zmlt6wRxQ6'),
+    attack: assetUrl('0rkIrVa7ze'),
+    attack2: assetUrl('FftY8v8Jwb'),
+    hit: assetUrl('SL6QCntdHb'),
+    color: '#338844', glow: '#55bb66', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ff80',
   },
   rogue: {
-    idle: 'assets/rogue/idle.png',
-    walk: 'assets/rogue/walk.png',
-    walk2: 'assets/rogue/walk2.png',
-    walk3: 'assets/rogue/walk3.png',
-    walk4: 'assets/rogue/walk4.png',
-    attack: 'assets/rogue/attack.png',
-    attack2: 'assets/rogue/attack2.png',
-    hit: 'assets/rogue/hit.png',
-    color: '#602030', glow: '#a04060', useImg: true,
+    idle: assetUrl('GPRL9j6N2h'),
+    walk: assetUrl('GPRL9j6N2h'),
+    walk2: assetUrl('FpNCpR5u6u'),
+    walk3: assetUrl('dBTU62gvba'),
+    walk4: assetUrl('LTXxZxsro9'),
+    attack: assetUrl('mkQsvB8hGu'),
+    attack2: assetUrl('cAMkL8UcNO'),
+    hit: assetUrl('sRUlVGqmIF'),
+    color: '#444444', glow: '#888888', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff6060',
   },
   paladin: {
-    idle: 'assets/paladin/idle.png',
-    walk: 'assets/paladin/walk.png',
-    walk2: 'assets/paladin/walk2.png',
-    walk3: 'assets/paladin/walk3.png',
-    walk4: 'assets/paladin/walk4.png',
-    attack: 'assets/paladin/attack.png',
-    attack2: 'assets/paladin/attack2.png',
-    hit: 'assets/paladin/hit.png',
-    color: '#e0c060', glow: '#fff0a0', useImg: true,
+    idle: assetUrl('imCnzdid9j'),
+    walk: assetUrl('imCnzdid9j'),
+    walk2: assetUrl('6HYp22y9go'),
+    walk3: assetUrl('hHyhIm5Ol9'),
+    walk4: assetUrl('Z7osFolCcB'),
+    attack: assetUrl('YLQCi28fvv'),
+    attack2: assetUrl('QtS48eeKRr'),
+    hit: assetUrl('0RHsHujNVl'),
+    color: '#ccaa44', glow: '#ffdd66', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   warlock: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd2udyyco_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd2udyyco_ve_miaoda',
-    color: '#602080', glow: '#a060e0', useImg: true
+    idle: assetUrl('dZWJfSco9X'),
+    walk: assetUrl('dZWJfSco9X'),
+    walk2: assetUrl('C3zZq0esCU'),
+    walk3: assetUrl('Li6SXCqcqq'),
+    walk4: assetUrl('KrtUF6VTD8'),
+    attack: assetUrl('vuQCCL3kBJ'),
+    attack2: assetUrl('3nvwV8TVFg'),
+    hit: assetUrl('J0pJgpRpWE'),
+    color: '#8844cc', glow: '#bb66ff', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== 變身形態（8幀完整動畫） ==========
   // ---------- 金色神話 ----------
   death_knight: {
-    idle: 'https://aka.doubaocdn.com/s/sZCb8OB6bL',
-    walk: 'https://aka.doubaocdn.com/s/sZCb8OB6bL',
-    walk2: 'https://aka.doubaocdn.com/s/kjXnwP6c6Q',
-    walk3: 'https://aka.doubaocdn.com/s/9L5kJRdXkU',
-    walk4: 'https://aka.doubaocdn.com/s/GsVeRxnwhk',
-    attack: 'https://aka.doubaocdn.com/s/95MOzrPXE4',
-    attack2: 'https://aka.doubaocdn.com/s/5V9228QzVY',
-    hit: 'https://aka.doubaocdn.com/s/QUmDnQmu2V',
-    color: '#2a2030', glow: '#60ff60', useImg: true,
+    idle: assetUrl('5IOLvbsXwW'),
+    walk: assetUrl('5IOLvbsXwW'),
+    walk2: assetUrl('8H1b89EXdY'),
+    walk3: assetUrl('0aEPBNMAjs'),
+    walk4: assetUrl('KWKxSZEuoL'),
+    attack: assetUrl('Rei3nUl68F'),
+    attack2: assetUrl('JsAMlghL1g'),
+    hit: assetUrl('f2eqJYANgu'),
+    color: '#44aaff', glow: '#66ccff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#60ff80',
   },
   ishti: {
-    idle: 'https://aka.doubaocdn.com/s/3bD1z9o8eg',
-    walk: 'https://aka.doubaocdn.com/s/3bD1z9o8eg',
-    walk2: 'https://aka.doubaocdn.com/s/Bb4unEW6Or',
-    walk3: 'https://aka.doubaocdn.com/s/5qCBEK1sLt',
-    walk4: 'https://aka.doubaocdn.com/s/PblYU3LYWK',
-    attack: 'https://aka.doubaocdn.com/s/IVTvgZd0UQ',
-    attack2: 'https://aka.doubaocdn.com/s/LPEiyQx9Rw',
-    hit: 'https://aka.doubaocdn.com/s/tYgMztu4TJ',
-    color: '#508070', glow: '#80d0b0', useImg: true,
+    idle: assetUrl('mCjwFU7sH3'),
+    walk: assetUrl('mCjwFU7sH3'),
+    walk2: assetUrl('XuqiFJ7Op1'),
+    walk3: assetUrl('Z6u0oZoY1s'),
+    walk4: assetUrl('S7IOuBsYkV'),
+    attack: assetUrl('HAdRkH7ast'),
+    attack2: assetUrl('RxwVHYpUBy'),
+    hit: assetUrl('WTf0hxHzTr'),
+    color: '#88ccff', glow: '#aaeeff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ffd0',
   },
   reya: {
-    idle: 'https://aka.doubaocdn.com/s/fyAgs0rT2U',
-    walk: 'https://aka.doubaocdn.com/s/fyAgs0rT2U',
-    walk2: 'https://aka.doubaocdn.com/s/ipvu758c68',
-    walk3: 'https://aka.doubaocdn.com/s/rUNpaVcNTV',
-    walk4: 'https://aka.doubaocdn.com/s/JopDfIOw63',
-    attack: 'https://aka.doubaocdn.com/s/JXKMtQDjka',
-    attack2: 'https://aka.doubaocdn.com/s/teo6Rq0FDT',
-    hit: 'https://aka.doubaocdn.com/s/twKeG7UsnN',
-    color: '#402030', glow: '#ff70a0', useImg: true,
+    idle: assetUrl('jUCeNhLR2u'),
+    walk: assetUrl('jUCeNhLR2u'),
+    walk2: assetUrl('WkPzfdfBUr'),
+    walk3: assetUrl('xyUs6KN6V8'),
+    walk4: assetUrl('UNApdDllMS'),
+    attack: assetUrl('5FXyIK5xsd'),
+    attack2: assetUrl('bfyGxrCUUb'),
+    hit: assetUrl('g9gM4nu3k7'),
+    color: '#aa44ff', glow: '#cc66ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff90c0',
   },
   baphomet: {
-    idle: 'https://aka.doubaocdn.com/s/8KOIwItpMd',
-    walk: 'https://aka.doubaocdn.com/s/8KOIwItpMd',
-    walk2: 'https://aka.doubaocdn.com/s/IRN6nMGdEI',
-    walk3: 'https://aka.doubaocdn.com/s/TzCUCDhjcu',
-    walk4: 'https://aka.doubaocdn.com/s/6PUkZUgPkd',
-    attack: 'https://aka.doubaocdn.com/s/nYsO49hDwZ',
-    attack2: 'https://aka.doubaocdn.com/s/p930ZQKLDY',
-    hit: 'https://aka.doubaocdn.com/s/JktTBAZnKa',
-    color: '#501060', glow: '#c060ff', useImg: true,
+    idle: assetUrl('oQGDNJrRGb'),
+    walk: assetUrl('oQGDNJrRGb'),
+    walk2: assetUrl('yjCv6PTl53'),
+    walk3: assetUrl('URWgbxczyS'),
+    walk4: assetUrl('DsxV4nNArA'),
+    attack: assetUrl('2lfd3DgWWJ'),
+    attack2: assetUrl('IrILzX6WFb'),
+    hit: assetUrl('1VLpSC7TlE'),
+    color: '#ff4400', glow: '#ff6600', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c080ff',
   },
   // ---------- 紫色傳說 ----------
   demon_hunter: {
-    idle: 'https://aka.doubaocdn.com/s/X25020KITK',
-    walk: 'https://aka.doubaocdn.com/s/X25020KITK',
-    walk2: 'https://aka.doubaocdn.com/s/cUjFPtZ0qW',
-    walk3: 'https://aka.doubaocdn.com/s/tVVnum1RHF',
-    walk4: 'https://aka.doubaocdn.com/s/UNXOnnvtkr',
-    attack: 'https://aka.doubaocdn.com/s/oDD0P2I05N',
-    attack2: 'https://aka.doubaocdn.com/s/oDD0P2I05N',
-    hit: 'https://aka.doubaocdn.com/s/libIUSPFdr',
-    color: '#701a1a', glow: '#e04040', useImg: true,
+    idle: assetUrl('qWnNUVJHjt'),
+    walk: assetUrl('qWnNUVJHjt'),
+    walk2: assetUrl('GQiVtSUkGM'),
+    walk3: assetUrl('xF49Pin6zA'),
+    walk4: assetUrl('1UZKpoQt4D'),
+    attack: assetUrl('jMG2E9M5GC'),
+    attack2: assetUrl('yALOugPi8M'),
+    hit: assetUrl('bx9Mhx02ok'),
+    color: '#cc2222', glow: '#ff4444', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff8060',
   },
   illusionist: {
-    idle: 'https://aka.doubaocdn.com/s/hkUGU9PcrJ',
-    walk: 'https://aka.doubaocdn.com/s/hkUGU9PcrJ',
-    walk2: 'https://aka.doubaocdn.com/s/8hLX21hIX7',
-    walk3: 'https://aka.doubaocdn.com/s/VIhy8YlPG3',
-    walk4: 'https://aka.doubaocdn.com/s/fo7IkKOdCV',
-    attack: 'https://aka.doubaocdn.com/s/DQ2zKd6PlE',
-    attack2: 'https://aka.doubaocdn.com/s/DQ2zKd6PlE',
-    hit: 'https://aka.doubaocdn.com/s/ymSWLgEVKA',
-    color: '#6040a0', glow: '#a080ff', useImg: true,
+    idle: assetUrl('D8IK9SlSiW'),
+    walk: assetUrl('D8IK9SlSiW'),
+    walk2: assetUrl('RMvUnPUllP'),
+    walk3: assetUrl('FskOyZckMz'),
+    walk4: assetUrl('HruKYKXKR4'),
+    attack: assetUrl('dnXjUwFRcz'),
+    attack2: assetUrl('T1GQok0mRG'),
+    hit: assetUrl('qgw3ZgKID0'),
+    color: '#22ccaa', glow: '#44eebb', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0a0ff',
   },
   anubis: {
-    idle: 'https://aka.doubaocdn.com/s/MD0YV0uUp3',
-    walk: 'https://aka.doubaocdn.com/s/MD0YV0uUp3',
-    walk2: 'https://aka.doubaocdn.com/s/77Di514UHF',
-    walk3: 'https://aka.doubaocdn.com/s/UHhTcjVpkB',
-    walk4: 'https://aka.doubaocdn.com/s/EesMLrHMPq',
-    attack: 'https://aka.doubaocdn.com/s/qzfRRcBskj',
-    attack2: 'https://aka.doubaocdn.com/s/qzfRRcBskj',
-    hit: 'https://aka.doubaocdn.com/s/hFbVk7Wv8K',
-    color: '#303020', glow: '#e0c060', useImg: true,
+    idle: assetUrl('uWVpLtw83e'),
+    walk: assetUrl('uWVpLtw83e'),
+    walk2: assetUrl('cYtJbElVs8'),
+    walk3: assetUrl('cVrwZiXkl0'),
+    walk4: assetUrl('gWHXi4D2KR'),
+    attack: assetUrl('yT0VMafbdE'),
+    attack2: assetUrl('UG62bf0JNu'),
+    hit: assetUrl('3pD82uqAfo'),
+    color: '#ddaa22', glow: '#ffcc44', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffd880',
   },
   chaos_knight: {
-    idle: 'https://aka.doubaocdn.com/s/ZOAUXTCkwq',
-    walk: 'https://aka.doubaocdn.com/s/ZOAUXTCkwq',
-    walk2: 'https://aka.doubaocdn.com/s/sXiSWjgOUW',
-    walk3: 'https://aka.doubaocdn.com/s/1mwrtdUjUW',
-    walk4: 'https://aka.doubaocdn.com/s/EVisbZLQtX',
-    attack: 'https://aka.doubaocdn.com/s/fOknq8rtA6',
-    attack2: 'https://aka.doubaocdn.com/s/tIU5IOjXsC',
-    hit: 'https://aka.doubaocdn.com/s/pr2EY6HfKb',
-    color: '#302030', glow: '#a04060', useImg: true,
+    idle: assetUrl('dgZiU5ybp0'),
+    walk: assetUrl('dgZiU5ybp0'),
+    walk2: assetUrl('tXJSEwWVsy'),
+    walk3: assetUrl('yV45js1CzO'),
+    walk4: assetUrl('GmhHzyM35a'),
+    attack: assetUrl('1zfYw9YO2l'),
+    attack2: assetUrl('JwUkzb2ULU'),
+    hit: assetUrl('9QIYbWxUek'),
+    color: '#cc1111', glow: '#ff3333', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c06060',
   },
   shadow_assassin: {
-    idle: 'https://aka.doubaocdn.com/s/iY86u9q36V',
-    walk: 'https://aka.doubaocdn.com/s/iY86u9q36V',
-    walk2: 'https://aka.doubaocdn.com/s/IgQ8xDV3U4',
-    walk3: 'https://aka.doubaocdn.com/s/3qi2k1tCkD',
-    walk4: 'https://aka.doubaocdn.com/s/VMWbMkUyXH',
-    attack: 'https://aka.doubaocdn.com/s/L0GFiAC4BR',
-    attack2: 'https://aka.doubaocdn.com/s/xpE72e816U',
-    hit: 'https://aka.doubaocdn.com/s/JHRLHgLeB7',
-    color: '#202030', glow: '#6060a0', useImg: true,
+    idle: assetUrl('Qt3jPiUHWB'),
+    walk: assetUrl('Qt3jPiUHWB'),
+    walk2: assetUrl('iLLSI4Ugp4'),
+    walk3: assetUrl('z29DBTuv6u'),
+    walk4: assetUrl('BBIRZaDf3w'),
+    attack: assetUrl('XELd2NyONv'),
+    attack2: assetUrl('KnhgNV0Vpg'),
+    hit: assetUrl('wYvHwdI66x'),
+    color: '#8822cc', glow: '#aa44ee', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#8080d0',
   },
   holy_envoy: {
-    idle: 'https://aka.doubaocdn.com/s/UZK9QQSG8O',
-    walk: 'https://aka.doubaocdn.com/s/UZK9QQSG8O',
-    walk2: 'https://aka.doubaocdn.com/s/Qph4YNxnpW',
-    walk3: 'https://aka.doubaocdn.com/s/IpcEagfwmT',
-    walk4: 'https://aka.doubaocdn.com/s/aNZwWxt8wX',
-    attack: 'https://aka.doubaocdn.com/s/VQQHfjBleU',
-    attack2: 'https://aka.doubaocdn.com/s/Ffq0Ozp9WT',
-    hit: 'https://aka.doubaocdn.com/s/WJDNaGLHAt',
-    color: '#c0a040', glow: '#fff0a0', useImg: true,
+    idle: assetUrl('MV7BqtB99J'),
+    walk: assetUrl('MV7BqtB99J'),
+    walk2: assetUrl('VG3McWxGjS'),
+    walk3: assetUrl('QhpgNeRnxD'),
+    walk4: assetUrl('AabmhFFskx'),
+    attack: assetUrl('xisa2l3L81'),
+    attack2: assetUrl('fsRV73Zlc2'),
+    hit: assetUrl('tRzhWyINkC'),
+    color: '#ffdd44', glow: '#ffee88', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   divine_envoy: {
-    idle: 'https://aka.doubaocdn.com/s/K5xHlNU28s',
-    walk: 'https://aka.doubaocdn.com/s/K5xHlNU28s',
-    walk2: 'https://aka.doubaocdn.com/s/tfleZSU2QM',
-    walk3: 'https://aka.doubaocdn.com/s/XqAIeRurL0',
-    walk4: 'https://aka.doubaocdn.com/s/tyr9eGSGRp',
-    attack: 'https://aka.doubaocdn.com/s/8neMJjtvhr',
-    attack2: 'https://aka.doubaocdn.com/s/FizXHwVIDs',
-    hit: 'https://aka.doubaocdn.com/s/NsjVkvEGJF',
-    color: '#d0c080', glow: '#fff8c0', useImg: true,
+    idle: assetUrl('wbVe3TL0Us'),
+    walk: assetUrl('wbVe3TL0Us'),
+    walk2: assetUrl('zwacAmuGuC'),
+    walk3: assetUrl('vt1sWuAPjU'),
+    walk4: assetUrl('2UJcZM4bVX'),
+    attack: assetUrl('8KkfFpRmlG'),
+    attack2: assetUrl('cn1JRTsp1r'),
+    hit: assetUrl('w9NoGKlwkf'),
+    color: '#ffffff', glow: '#ffffaa', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#fff8d0',
   },
   // ---------- 紅色史詩 ----------
   balrog: {
-    idle: 'https://aka.doubaocdn.com/s/tdkg3als9P',
-    walk: 'https://aka.doubaocdn.com/s/tdkg3als9P',
-    walk2: 'https://aka.doubaocdn.com/s/K9NBB7cGSb',
-    walk3: 'https://aka.doubaocdn.com/s/YzTgNSPMxr',
-    walk4: 'https://aka.doubaocdn.com/s/a9s53qaahR',
-    attack: 'https://aka.doubaocdn.com/s/s88OAtsBTM',
-    attack2: 'https://aka.doubaocdn.com/s/UkrwvfPntT',
-    hit: 'https://aka.doubaocdn.com/s/rU1ioEhNRd',
-    color: '#601010', glow: '#ff6030', useImg: true,
+    idle: assetUrl('bwenVF50Ra'),
+    walk: assetUrl('bwenVF50Ra'),
+    walk2: assetUrl('y2aDT1QdqC'),
+    walk3: assetUrl('0aE8Uy4zcS'),
+    walk4: assetUrl('KkEUNrhHF9'),
+    attack: assetUrl('hd5eWW3oGA'),
+    attack2: assetUrl('ZezX8UaHA9'),
+    hit: assetUrl('minclzzMDJ'),
+    color: '#ff4400', glow: '#ff6600', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff9040',
   },
   dark_knight_red: {
-    idle: 'https://aka.doubaocdn.com/s/MGWIDhAmHM',
-    walk: 'https://aka.doubaocdn.com/s/MGWIDhAmHM',
-    walk2: 'https://aka.doubaocdn.com/s/dr9VJVQW76',
-    walk3: 'https://aka.doubaocdn.com/s/tjZe2VQqCV',
-    walk4: 'https://aka.doubaocdn.com/s/i4rVzQcOe5',
-    attack: 'https://aka.doubaocdn.com/s/BODZUpyXSI',
-    attack2: 'https://aka.doubaocdn.com/s/je8dqUMZZI',
-    hit: 'https://aka.doubaocdn.com/s/nqcRUI3qJU',
-    color: '#201028', glow: '#ff3030', useImg: true,
+    idle: assetUrl('o3iGZH3Cy0'),
+    walk: assetUrl('o3iGZH3Cy0'),
+    walk2: assetUrl('aERk9PVdap'),
+    walk3: assetUrl('q4CcGLViUH'),
+    walk4: assetUrl('eqeb7UTVyC'),
+    attack: assetUrl('K6tz7arcIU'),
+    attack2: assetUrl('8joAeHfhWH'),
+    hit: assetUrl('3VfPIUl9MH'),
+    color: '#cc1111', glow: '#ff3333', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff4040',
   },
   dark_mage_red: {
-    idle: 'https://aka.doubaocdn.com/s/zrnCCihNJt',
-    walk: 'https://aka.doubaocdn.com/s/zrnCCihNJt',
-    walk2: 'https://aka.doubaocdn.com/s/BiBfVufViZ',
-    walk3: 'https://aka.doubaocdn.com/s/nIVWCJVzvT',
-    walk4: 'https://aka.doubaocdn.com/s/kfSS24e8lc',
-    attack: 'https://aka.doubaocdn.com/s/YifczyXetY',
-    attack2: 'https://aka.doubaocdn.com/s/DCr5DPCmxk',
-    hit: 'https://aka.doubaocdn.com/s/CRvwT4vtVx',
-    color: '#300040', glow: '#c040ff', useImg: true,
+    idle: assetUrl('06IFpCmc14'),
+    walk: assetUrl('06IFpCmc14'),
+    walk2: assetUrl('y72KlnSj1F'),
+    walk3: assetUrl('pHrkeD5CZZ'),
+    walk4: assetUrl('ZUG8O1EYV6'),
+    attack: assetUrl('JIo0NQJyMB'),
+    attack2: assetUrl('P4GxGCsuAh'),
+    hit: assetUrl('mDlj9NvC3K'),
+    color: '#8822cc', glow: '#aa44ee', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#d060ff',
   },
   dark_sorcerer: {
-    idle: 'https://aka.doubaocdn.com/s/gZssWp0Yaq',
-    walk: 'https://aka.doubaocdn.com/s/gZssWp0Yaq',
-    walk2: 'https://aka.doubaocdn.com/s/iTVLHzirHU',
-    walk3: 'https://aka.doubaocdn.com/s/FfzUQzcUjH',
-    walk4: 'https://aka.doubaocdn.com/s/Ni2RrhDZ1j',
-    attack: 'https://aka.doubaocdn.com/s/8hb1wWKeFd',
-    attack2: 'https://aka.doubaocdn.com/s/yzizeV2vZe',
-    hit: 'https://aka.doubaocdn.com/s/9j6fRyQNOL',
+    idle: assetUrl('gZssWp0Yaq'),
+    walk: assetUrl('gZssWp0Yaq'),
+    walk2: assetUrl('iTVLHzirHU'),
+    walk3: assetUrl('FfzUQzcUjH'),
+    walk4: assetUrl('Ni2RrhDZ1j'),
+    attack: assetUrl('8hb1wWKeFd'),
+    attack2: assetUrl('yzizeV2vZe'),
+    hit: assetUrl('9j6fRyQNOL'),
     color: '#401050', glow: '#ff50c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff80d0',
   },
+  dark_warlock: {
+    idle: assetUrl('Vz0tjoN3CV'),
+    walk: assetUrl('Vz0tjoN3CV'),
+    walk2: assetUrl('DUGV885PVj'),
+    walk3: assetUrl('ABmg3UdUtX'),
+    walk4: assetUrl('IP20rvDTem'),
+    attack: assetUrl('iIv0XB8Fwn'),
+    attack2: assetUrl('OBwQLtVKAd'),
+    hit: assetUrl('6vUu4Qxv4R'),
+    color: '#22aa22', glow: '#44cc44', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#60ff60',
+  },
   dark_assassin_red: {
-    idle: 'https://aka.doubaocdn.com/s/ZOURHhq9xO',
-    walk: 'https://aka.doubaocdn.com/s/ZOURHhq9xO',
-    walk2: 'https://aka.doubaocdn.com/s/8UiDnbHq3e',
-    walk3: 'https://aka.doubaocdn.com/s/UGv0OG7wbW',
-    walk4: 'https://aka.doubaocdn.com/s/KXQqHrFfFL',
-    attack: 'https://aka.doubaocdn.com/s/EIpWEIeVMj',
-    attack2: 'https://aka.doubaocdn.com/s/WaGtGiouSs',
-    hit: 'https://aka.doubaocdn.com/s/9dOsER3iAQ',
-    color: '#101018', glow: '#ff2060', useImg: true,
+    idle: assetUrl('tAPperojqB'),
+    walk: assetUrl('tAPperojqB'),
+    walk2: assetUrl('VXrkmeX6PR'),
+    walk3: assetUrl('ADpfZE1an1'),
+    walk4: assetUrl('QmkvrrFzNG'),
+    attack: assetUrl('UDUgYvLahT'),
+    attack2: assetUrl('129Iba81fB'),
+    hit: assetUrl('1cggz90lgT'),
+    color: '#cc2222', glow: '#ff4444', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff4080',
   },
   ghost_archer: {
-    idle: 'https://aka.doubaocdn.com/s/P9nRBRY0yz',
-    walk: 'https://aka.doubaocdn.com/s/P9nRBRY0yz',
-    walk2: 'https://aka.doubaocdn.com/s/3jWWxnd4sb',
-    walk3: 'https://aka.doubaocdn.com/s/T6U5hG7RQH',
-    walk4: 'https://aka.doubaocdn.com/s/X6JwwPTJvv',
-    attack: 'https://aka.doubaocdn.com/s/Z6uaGG4xJS',
-    attack2: 'https://aka.doubaocdn.com/s/oqrXlRj3Z5',
-    hit: 'https://aka.doubaocdn.com/s/AKVEuZjd4f',
-    color: '#203040', glow: '#60c0ff', useImg: true,
+    idle: assetUrl('yp76je2sRV'),
+    walk: assetUrl('yp76je2sRV'),
+    walk2: assetUrl('BIGWnZpFlk'),
+    walk3: assetUrl('cHlfroDsYk'),
+    walk4: assetUrl('pL1VfcXxsV'),
+    attack: assetUrl('ES8VrGKwNp'),
+    attack2: assetUrl('l1IhVtVrYO'),
+    hit: assetUrl('UDWVV99LsP'),
+    color: '#22ccdd', glow: '#44eeff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80e0ff',
   },
   silver_knight_galahad: {
-    idle: 'https://aka.doubaocdn.com/s/LEtxcl2amQ',
-    walk: 'https://aka.doubaocdn.com/s/LEtxcl2amQ',
-    walk2: 'https://aka.doubaocdn.com/s/1BinCuwimp',
-    walk3: 'https://aka.doubaocdn.com/s/vaVKLURbXq',
-    walk4: 'https://aka.doubaocdn.com/s/VlwJcbZBZg',
-    attack: 'https://aka.doubaocdn.com/s/c2pcXyCAoC',
-    attack2: 'https://aka.doubaocdn.com/s/UBsEfc2hXx',
-    hit: 'https://aka.doubaocdn.com/s/MwmmkPb6gf',
-    color: '#c0c0e0', glow: '#fff0a0', useImg: true,
+    idle: assetUrl('oa3EwFSiXq'),
+    walk: assetUrl('oa3EwFSiXq'),
+    walk2: assetUrl('QHirhzODvt'),
+    walk3: assetUrl('UzyGWNuIXG'),
+    walk4: assetUrl('kpZ8td4p6c'),
+    attack: assetUrl('BnE6LCjrAh'),
+    attack2: assetUrl('qZU5ELfxSd'),
+    hit: assetUrl('ZqZ6j72UWj'),
+    color: '#4488ff', glow: '#66aaff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
 
   // ---------- 藍色稀有（新變身） ----------
   frost_knight: {
-    idle: 'https://aka.doubaocdn.com/s/AXY4DIQe2G',
-    walk: 'https://aka.doubaocdn.com/s/AXY4DIQe2G',
-    walk2: 'https://aka.doubaocdn.com/s/G3QcnMpuCP',
-    walk3: 'https://aka.doubaocdn.com/s/ef7gCUKojx',
-    walk4: 'https://aka.doubaocdn.com/s/KfG4vGHfBg',
-    attack: 'https://aka.doubaocdn.com/s/F9QCsN3SUJ',
-    attack2: 'https://aka.doubaocdn.com/s/DagRO0Zu0O',
-    hit: 'https://aka.doubaocdn.com/s/GP2tFT10gV',
+    idle: assetUrl('AXY4DIQe2G'),
+    walk: assetUrl('AXY4DIQe2G'),
+    walk2: assetUrl('G3QcnMpuCP'),
+    walk3: assetUrl('ef7gCUKojx'),
+    walk4: assetUrl('KfG4vGHfBg'),
+    attack: assetUrl('F9QCsN3SUJ'),
+    attack2: assetUrl('DagRO0Zu0O'),
+    hit: assetUrl('GP2tFT10gV'),
     color: '#204060', glow: '#60c0ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80d0ff',
   },
   berserker_blue: {
-    idle: 'https://aka.doubaocdn.com/s/WoJbCl806L',
-    walk: 'https://aka.doubaocdn.com/s/WoJbCl806L',
-    walk2: 'https://aka.doubaocdn.com/s/lJuFzWMxAU',
-    walk3: 'https://aka.doubaocdn.com/s/0behWSGxwq',
-    walk4: 'https://aka.doubaocdn.com/s/hZVlq8jqks',
-    attack: 'https://aka.doubaocdn.com/s/il72r9FzSj',
-    attack2: 'https://aka.doubaocdn.com/s/D6U5t601Rd',
-    hit: 'https://aka.doubaocdn.com/s/RuWfBBWE3q',
+    idle: assetUrl('WoJbCl806L'),
+    walk: assetUrl('WoJbCl806L'),
+    walk2: assetUrl('lJuFzWMxAU'),
+    walk3: assetUrl('0behWSGxwq'),
+    walk4: assetUrl('hZVlq8jqks'),
+    attack: assetUrl('il72r9FzSj'),
+    attack2: assetUrl('D6U5t601Rd'),
+    hit: assetUrl('RuWfBBWE3q'),
     color: '#304060', glow: '#70a0ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#90b0ff',
   },
   frost_mage: {
-    idle: 'https://aka.doubaocdn.com/s/5S1tUIsls4',
-    walk: 'https://aka.doubaocdn.com/s/5S1tUIsls4',
-    walk2: 'https://aka.doubaocdn.com/s/4im8YcndVt',
-    walk3: 'https://aka.doubaocdn.com/s/yavRrKoSfb',
-    walk4: 'https://aka.doubaocdn.com/s/MwULW9MFX6',
-    attack: 'https://aka.doubaocdn.com/s/OncrG5zfYk',
-    attack2: 'https://aka.doubaocdn.com/s/J9PLJTHNOp',
-    hit: 'https://aka.doubaocdn.com/s/4FHggRV3UL',
+    idle: assetUrl('5S1tUIsls4'),
+    walk: assetUrl('5S1tUIsls4'),
+    walk2: assetUrl('4im8YcndVt'),
+    walk3: assetUrl('yavRrKoSfb'),
+    walk4: assetUrl('MwULW9MFX6'),
+    attack: assetUrl('OncrG5zfYk'),
+    attack2: assetUrl('J9PLJTHNOp'),
+    hit: assetUrl('4FHggRV3UL'),
     color: '#203060', glow: '#80c0ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0d0ff',
   },
   lightning_mage: {
-    idle: 'https://aka.doubaocdn.com/s/Ke1R2tYyYi',
-    walk: 'https://aka.doubaocdn.com/s/Ke1R2tYyYi',
-    walk2: 'https://aka.doubaocdn.com/s/i9ohDah6fK',
-    walk3: 'https://aka.doubaocdn.com/s/1yaLUBo60m',
-    walk4: 'https://aka.doubaocdn.com/s/Jf0iOCYab0',
-    attack: 'https://aka.doubaocdn.com/s/qdmsMhWgqS',
-    attack2: 'https://aka.doubaocdn.com/s/vnhVMY1Mbl',
-    hit: 'https://aka.doubaocdn.com/s/zZYmJKREfl',
+    idle: assetUrl('Ke1R2tYyYi'),
+    walk: assetUrl('Ke1R2tYyYi'),
+    walk2: assetUrl('i9ohDah6fK'),
+    walk3: assetUrl('1yaLUBo60m'),
+    walk4: assetUrl('Jf0iOCYab0'),
+    attack: assetUrl('qdmsMhWgqS'),
+    attack2: assetUrl('vnhVMY1Mbl'),
+    hit: assetUrl('zZYmJKREfl'),
     color: '#302060', glow: '#a080ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#b090ff',
   },
   elf_archer_blue: {
-    idle: 'https://aka.doubaocdn.com/s/DA1JiUu25C',
-    walk: 'https://aka.doubaocdn.com/s/DA1JiUu25C',
-    walk2: 'https://aka.doubaocdn.com/s/mKkn8z5w9j',
-    walk3: 'https://aka.doubaocdn.com/s/QzBWNKPsY4',
-    walk4: 'https://aka.doubaocdn.com/s/boUCARKlUK',
-    attack: 'https://aka.doubaocdn.com/s/uzOCokO05x',
-    attack2: 'https://aka.doubaocdn.com/s/L2mcusQPUi',
-    hit: 'https://aka.doubaocdn.com/s/lVvCMQkXCa',
+    idle: assetUrl('DA1JiUu25C'),
+    walk: assetUrl('DA1JiUu25C'),
+    walk2: assetUrl('mKkn8z5w9j'),
+    walk3: assetUrl('QzBWNKPsY4'),
+    walk4: assetUrl('boUCARKlUK'),
+    attack: assetUrl('uzOCokO05x'),
+    attack2: assetUrl('L2mcusQPUi'),
+    hit: assetUrl('lVvCMQkXCa'),
     color: '#205060', glow: '#60e0d0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80f0e0',
   },
   wind_walker: {
-    idle: 'https://aka.doubaocdn.com/s/A9YN2hiCuY',
-    walk: 'https://aka.doubaocdn.com/s/A9YN2hiCuY',
-    walk2: 'https://aka.doubaocdn.com/s/BxhqoNBsy9',
-    walk3: 'https://aka.doubaocdn.com/s/DInQE4sGfT',
-    walk4: 'https://aka.doubaocdn.com/s/k5L5nRvfAz',
-    attack: 'https://aka.doubaocdn.com/s/RPBVhIBi7V',
-    attack2: 'https://aka.doubaocdn.com/s/RPBVhIBi7V',
-    hit: 'https://aka.doubaocdn.com/s/A9YN2hiCuY',
+    idle: assetUrl('A9YN2hiCuY'),
+    walk: assetUrl('A9YN2hiCuY'),
+    walk2: assetUrl('BxhqoNBsy9'),
+    walk3: assetUrl('DInQE4sGfT'),
+    walk4: assetUrl('k5L5nRvfAz'),
+    attack: assetUrl('RPBVhIBi7V'),
+    attack2: assetUrl('RPBVhIBi7V'),
+    hit: assetUrl('A9YN2hiCuY'),
     color: '#206040', glow: '#80e0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0f0c0',
   },
   silver_knight_blue: {
-    idle: 'https://aka.doubaocdn.com/s/wLT8tzjGBp',
-    walk: 'https://aka.doubaocdn.com/s/wLT8tzjGBp',
-    walk2: 'https://aka.doubaocdn.com/s/YxXoXhdLmS',
-    walk3: 'https://aka.doubaocdn.com/s/cN3E5Nquah',
-    walk4: 'https://aka.doubaocdn.com/s/ci6rXRx8DG',
-    attack: 'https://aka.doubaocdn.com/s/OSap9erVl0',
-    attack2: 'https://aka.doubaocdn.com/s/QRytegQ1Oe',
-    hit: 'https://aka.doubaocdn.com/s/JIGsfqs5tQ',
+    idle: assetUrl('wLT8tzjGBp'),
+    walk: assetUrl('wLT8tzjGBp'),
+    walk2: assetUrl('YxXoXhdLmS'),
+    walk3: assetUrl('cN3E5Nquah'),
+    walk4: assetUrl('ci6rXRx8DG'),
+    attack: assetUrl('OSap9erVl0'),
+    attack2: assetUrl('QRytegQ1Oe'),
+    hit: assetUrl('JIGsfqs5tQ'),
     color: '#c0c0d8', glow: '#e0e8ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#f0f0ff',
   },
   temple_knight: {
-    idle: 'https://aka.doubaocdn.com/s/nPAX4om6CQ',
-    walk: 'https://aka.doubaocdn.com/s/nPAX4om6CQ',
-    walk2: 'https://aka.doubaocdn.com/s/72qwU65Xsa',
-    walk3: 'https://aka.doubaocdn.com/s/UNCvpUlZe3',
-    walk4: 'https://aka.doubaocdn.com/s/BG9V2u0zRc',
-    attack: 'https://aka.doubaocdn.com/s/IVxWqYtCFv',
-    attack2: 'https://aka.doubaocdn.com/s/9aJxLBlYSk',
-    hit: 'https://aka.doubaocdn.com/s/bSTo2dlMbK',
+    idle: assetUrl('nPAX4om6CQ'),
+    walk: assetUrl('nPAX4om6CQ'),
+    walk2: assetUrl('72qwU65Xsa'),
+    walk3: assetUrl('UNCvpUlZe3'),
+    walk4: assetUrl('BG9V2u0zRc'),
+    attack: assetUrl('IVxWqYtCFv'),
+    attack2: assetUrl('9aJxLBlYSk'),
+    hit: assetUrl('bSTo2dlMbK'),
     color: '#d0c080', glow: '#ffe8a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#fff0c0',
   },
   shadow_assassin_blue: {
-    idle: 'https://aka.doubaocdn.com/s/cRVH78jrX4',
-    walk: 'https://aka.doubaocdn.com/s/cRVH78jrX4',
-    walk2: 'https://aka.doubaocdn.com/s/owA0PPIkhb',
-    walk3: 'https://aka.doubaocdn.com/s/rCn1Xg8QwR',
-    walk4: 'https://aka.doubaocdn.com/s/QO6k6TReK3',
-    attack: 'https://aka.doubaocdn.com/s/uiC3MCWbCM',
-    attack2: 'https://aka.doubaocdn.com/s/3E5L92SGX8',
-    hit: 'https://aka.doubaocdn.com/s/FEaYTU3HUH',
+    idle: assetUrl('cRVH78jrX4'),
+    walk: assetUrl('cRVH78jrX4'),
+    walk2: assetUrl('owA0PPIkhb'),
+    walk3: assetUrl('rCn1Xg8QwR'),
+    walk4: assetUrl('QO6k6TReK3'),
+    attack: assetUrl('uiC3MCWbCM'),
+    attack2: assetUrl('3E5L92SGX8'),
+    hit: assetUrl('FEaYTU3HUH'),
     color: '#202030', glow: '#6080c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80a0e0',
   },
   poison_blade: {
-    idle: 'https://aka.doubaocdn.com/s/qRmnQyhsHF',
-    walk: 'https://aka.doubaocdn.com/s/qRmnQyhsHF',
-    walk2: 'https://aka.doubaocdn.com/s/IIMkBDTmaj',
-    walk3: 'https://aka.doubaocdn.com/s/RBtLFeKz3n',
-    walk4: 'https://aka.doubaocdn.com/s/StSWxwsuyL',
-    attack: 'https://aka.doubaocdn.com/s/uQMK2b8OQV',
-    attack2: 'https://aka.doubaocdn.com/s/DEI5Znr00s',
-    hit: 'https://aka.doubaocdn.com/s/mO6nx6RVMn',
+    idle: assetUrl('qRmnQyhsHF'),
+    walk: assetUrl('qRmnQyhsHF'),
+    walk2: assetUrl('IIMkBDTmaj'),
+    walk3: assetUrl('RBtLFeKz3n'),
+    walk4: assetUrl('StSWxwsuyL'),
+    attack: assetUrl('uQMK2b8OQV'),
+    attack2: assetUrl('DEI5Znr00s'),
+    hit: assetUrl('mO6nx6RVMn'),
     color: '#204020', glow: '#80d060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0e080',
   },
   gargoyle: {
-    idle: 'https://aka.doubaocdn.com/s/Qz5xkyMung',
-    walk: 'https://aka.doubaocdn.com/s/Qz5xkyMung',
-    walk2: 'https://aka.doubaocdn.com/s/SiOQl1qSHv',
-    walk3: 'https://aka.doubaocdn.com/s/FXdRQ4zYcV',
-    walk4: 'https://aka.doubaocdn.com/s/kgBNXt4Xoo',
-    attack: 'https://aka.doubaocdn.com/s/vQNYtfo6e9',
-    attack2: 'https://aka.doubaocdn.com/s/gLa19G08zS',
-    hit: 'https://aka.doubaocdn.com/s/PABlGUtHZI',
+    idle: assetUrl('Qz5xkyMung'),
+    walk: assetUrl('Qz5xkyMung'),
+    walk2: assetUrl('SiOQl1qSHv'),
+    walk3: assetUrl('FXdRQ4zYcV'),
+    walk4: assetUrl('kgBNXt4Xoo'),
+    attack: assetUrl('vQNYtfo6e9'),
+    attack2: assetUrl('gLa19G08zS'),
+    hit: assetUrl('PABlGUtHZI'),
     color: '#404050', glow: '#a0a0c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0c0d0',
   },
   werewolf: {
-    idle: 'https://aka.doubaocdn.com/s/GMxsqLaCGt',
-    walk: 'https://aka.doubaocdn.com/s/GMxsqLaCGt',
-    walk2: 'https://aka.doubaocdn.com/s/q3MAJiktJq',
-    walk3: 'https://aka.doubaocdn.com/s/P8x4odPP2g',
-    walk4: 'https://aka.doubaocdn.com/s/xipd7571LS',
-    attack: 'https://aka.doubaocdn.com/s/qaasdrxeR4',
-    attack2: 'https://aka.doubaocdn.com/s/Z3K4JEOsj7',
-    hit: 'https://aka.doubaocdn.com/s/khEwYymEiA',
+    idle: assetUrl('GMxsqLaCGt'),
+    walk: assetUrl('GMxsqLaCGt'),
+    walk2: assetUrl('q3MAJiktJq'),
+    walk3: assetUrl('P8x4odPP2g'),
+    walk4: assetUrl('xipd7571LS'),
+    attack: assetUrl('qaasdrxeR4'),
+    attack2: assetUrl('Z3K4JEOsj7'),
+    hit: assetUrl('khEwYymEiA'),
     color: '#503020', glow: '#c08060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0a080',
@@ -480,66 +732,66 @@ const SPRITE = {
 
   // ---------- 綠色精良（新變身） ----------
   forest_guardian: {
-    idle: 'https://aka.doubaocdn.com/s/1daCVmkSeg',
-    walk: 'https://aka.doubaocdn.com/s/1daCVmkSeg',
-    walk2: 'https://aka.doubaocdn.com/s/7rkggQtVva',
-    walk3: 'https://aka.doubaocdn.com/s/7EMmttpXtt',
-    walk4: 'https://aka.doubaocdn.com/s/rUD0POkJta',
-    attack: 'https://aka.doubaocdn.com/s/rFGDkDOZRB',
-    attack2: 'https://aka.doubaocdn.com/s/0yfRk9msfe',
-    hit: 'https://aka.doubaocdn.com/s/u8C4FDxAzq',
+    idle: assetUrl('1daCVmkSeg'),
+    walk: assetUrl('1daCVmkSeg'),
+    walk2: assetUrl('7rkggQtVva'),
+    walk3: assetUrl('7EMmttpXtt'),
+    walk4: assetUrl('rUD0POkJta'),
+    attack: assetUrl('rFGDkDOZRB'),
+    attack2: assetUrl('0yfRk9msfe'),
+    hit: assetUrl('u8C4FDxAzq'),
     color: '#205030', glow: '#60c080', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80e0a0',
   },
   wind_spirit: {
-    idle: 'https://aka.doubaocdn.com/s/jkm5kDZZyi',
-    walk: 'https://aka.doubaocdn.com/s/jkm5kDZZyi',
-    walk2: 'https://aka.doubaocdn.com/s/s1b9NsVUNP',
-    walk3: 'https://aka.doubaocdn.com/s/rY6t9P8rRQ',
-    walk4: 'https://aka.doubaocdn.com/s/u5eemtHJJk',
-    attack: 'https://aka.doubaocdn.com/s/Vn6NQ5HTfP',
-    attack2: 'https://aka.doubaocdn.com/s/C3VstdT6dQ',
-    hit: 'https://aka.doubaocdn.com/s/n7NjzUEXzg',
+    idle: assetUrl('jkm5kDZZyi'),
+    walk: assetUrl('jkm5kDZZyi'),
+    walk2: assetUrl('s1b9NsVUNP'),
+    walk3: assetUrl('rY6t9P8rRQ'),
+    walk4: assetUrl('u5eemtHJJk'),
+    attack: assetUrl('Vn6NQ5HTfP'),
+    attack2: assetUrl('C3VstdT6dQ'),
+    hit: assetUrl('n7NjzUEXzg'),
     color: '#80c0c0', glow: '#c0f0f0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0ffff',
   },
   green_dragon: {
-    idle: 'https://aka.doubaocdn.com/s/Pl4PBEqsvs',
-    walk: 'https://aka.doubaocdn.com/s/Pl4PBEqsvs',
-    walk2: 'https://aka.doubaocdn.com/s/CH3Wf8rqcv',
-    walk3: 'https://aka.doubaocdn.com/s/324delxMNK',
-    walk4: 'https://aka.doubaocdn.com/s/jsmfG7UE6X',
-    attack: 'https://aka.doubaocdn.com/s/StVW9D5cG3',
-    attack2: 'https://aka.doubaocdn.com/s/KGGg348qE0',
-    hit: 'https://aka.doubaocdn.com/s/lyhUAf9LY1',
+    idle: assetUrl('Pl4PBEqsvs'),
+    walk: assetUrl('Pl4PBEqsvs'),
+    walk2: assetUrl('CH3Wf8rqcv'),
+    walk3: assetUrl('324delxMNK'),
+    walk4: assetUrl('jsmfG7UE6X'),
+    attack: assetUrl('StVW9D5cG3'),
+    attack2: assetUrl('KGGg348qE0'),
+    hit: assetUrl('lyhUAf9LY1'),
     color: '#204020', glow: '#80d060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0e080',
   },
   druid: {
-    idle: 'https://aka.doubaocdn.com/s/g5u2Sq5agH',
-    walk: 'https://aka.doubaocdn.com/s/g5u2Sq5agH',
-    walk2: 'https://aka.doubaocdn.com/s/8uoto9Z1wj',
-    walk3: 'https://aka.doubaocdn.com/s/y1G12v4mDa',
-    walk4: 'https://aka.doubaocdn.com/s/3eq3rAYEYV',
-    attack: 'https://aka.doubaocdn.com/s/pFJT2Xc5o8',
-    attack2: 'https://aka.doubaocdn.com/s/Qd4BJClvxa',
-    hit: 'https://aka.doubaocdn.com/s/UdeJSiOwgC',
+    idle: assetUrl('g5u2Sq5agH'),
+    walk: assetUrl('g5u2Sq5agH'),
+    walk2: assetUrl('8uoto9Z1wj'),
+    walk3: assetUrl('y1G12v4mDa'),
+    walk4: assetUrl('3eq3rAYEYV'),
+    attack: assetUrl('pFJT2Xc5o8'),
+    attack2: assetUrl('Qd4BJClvxa'),
+    hit: assetUrl('UdeJSiOwgC'),
     color: '#405020', glow: '#a0c060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0e080',
   },
   treant: {
-    idle: 'https://aka.doubaocdn.com/s/BIuGGAsYZh',
-    walk: 'https://aka.doubaocdn.com/s/BIuGGAsYZh',
-    walk2: 'https://aka.doubaocdn.com/s/vlURIemaSk',
-    walk3: 'https://aka.doubaocdn.com/s/GI7RvSykGX',
-    walk4: 'https://aka.doubaocdn.com/s/RqzkY6gSAe',
-    attack: 'https://aka.doubaocdn.com/s/q2rm4wKK3M',
-    attack2: 'https://aka.doubaocdn.com/s/F6ctRUeEtA',
-    hit: 'https://aka.doubaocdn.com/s/fNqR5LHWx6',
+    idle: assetUrl('BIuGGAsYZh'),
+    walk: assetUrl('BIuGGAsYZh'),
+    walk2: assetUrl('vlURIemaSk'),
+    walk3: assetUrl('GI7RvSykGX'),
+    walk4: assetUrl('RqzkY6gSAe'),
+    attack: assetUrl('q2rm4wKK3M'),
+    attack2: assetUrl('F6ctRUeEtA'),
+    hit: assetUrl('fNqR5LHWx6'),
     color: '#403020', glow: '#80a050', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0c070',
@@ -547,377 +799,2278 @@ const SPRITE = {
 
   // ---------- 白色普通（新變身） ----------
   white_dragon: {
-    idle: 'https://aka.doubaocdn.com/s/APDWUGWZVw',
-    walk: 'https://aka.doubaocdn.com/s/APDWUGWZVw',
-    walk2: 'https://aka.doubaocdn.com/s/bYD7aJdZCZ',
-    walk3: 'https://aka.doubaocdn.com/s/EHH32Fvnw1',
-    walk4: 'https://aka.doubaocdn.com/s/01wfNPiTXP',
-    attack: 'https://aka.doubaocdn.com/s/PL5FOn3oK3',
-    attack2: 'https://aka.doubaocdn.com/s/UfxwzeARpf',
-    hit: 'https://aka.doubaocdn.com/s/UIynvopITS',
+    idle: assetUrl('APDWUGWZVw'),
+    walk: assetUrl('APDWUGWZVw'),
+    walk2: assetUrl('bYD7aJdZCZ'),
+    walk3: assetUrl('EHH32Fvnw1'),
+    walk4: assetUrl('01wfNPiTXP'),
+    attack: assetUrl('PL5FOn3oK3'),
+    attack2: assetUrl('UfxwzeARpf'),
+    hit: assetUrl('UIynvopITS'),
     color: '#e0e8f0', glow: '#ffffff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   angel_white: {
-    idle: 'https://aka.doubaocdn.com/s/NaPbNp9c1V',
-    walk: 'https://aka.doubaocdn.com/s/NaPbNp9c1V',
-    walk2: 'https://aka.doubaocdn.com/s/GUlp5Qy6iw',
-    walk3: 'https://aka.doubaocdn.com/s/5UMFE65Hny',
-    walk4: 'https://aka.doubaocdn.com/s/hbuS4nnQI2',
-    attack: 'https://aka.doubaocdn.com/s/0UZceLNR6V',
-    attack2: 'https://aka.doubaocdn.com/s/kUFVQVjTCS',
-    hit: 'https://aka.doubaocdn.com/s/3ygE66VdLj',
+    idle: assetUrl('NaPbNp9c1V'),
+    walk: assetUrl('NaPbNp9c1V'),
+    walk2: assetUrl('GUlp5Qy6iw'),
+    walk3: assetUrl('5UMFE65Hny'),
+    walk4: assetUrl('hbuS4nnQI2'),
+    attack: assetUrl('0UZceLNR6V'),
+    attack2: assetUrl('kUFVQVjTCS'),
+    hit: assetUrl('3ygE66VdLj'),
     color: '#f0f0e8', glow: '#fff8c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   unicorn: {
-    idle: 'https://aka.doubaocdn.com/s/a8JCQmVVNT',
-    walk: 'https://aka.doubaocdn.com/s/a8JCQmVVNT',
-    walk2: 'https://aka.doubaocdn.com/s/f8JFmtkifj',
-    walk3: 'https://aka.doubaocdn.com/s/8dvXmhS5c7',
-    walk4: 'https://aka.doubaocdn.com/s/HzkkhZbJQy',
-    attack: 'https://aka.doubaocdn.com/s/FOIte0Nrnl',
-    attack2: 'https://aka.doubaocdn.com/s/2lE46ur5Jl',
-    hit: 'https://aka.doubaocdn.com/s/1OVUePiezR',
+    idle: assetUrl('a8JCQmVVNT'),
+    walk: assetUrl('a8JCQmVVNT'),
+    walk2: assetUrl('f8JFmtkifj'),
+    walk3: assetUrl('8dvXmhS5c7'),
+    walk4: assetUrl('HzkkhZbJQy'),
+    attack: assetUrl('FOIte0Nrnl'),
+    attack2: assetUrl('2lE46ur5Jl'),
+    hit: assetUrl('1OVUePiezR'),
     color: '#f8f0f8', glow: '#ffe0ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   holy_spirit: {
-    idle: 'https://aka.doubaocdn.com/s/TLuUdtTRPo',
-    walk: 'https://aka.doubaocdn.com/s/TLuUdtTRPo',
-    walk2: 'https://aka.doubaocdn.com/s/JcezH6rVhY',
-    walk3: 'https://aka.doubaocdn.com/s/gnxhj1r7Tr',
-    walk4: 'https://aka.doubaocdn.com/s/8IDPqcesFo',
-    attack: 'https://aka.doubaocdn.com/s/aNWVrFpkQ7',
-    attack2: 'https://aka.doubaocdn.com/s/DGdNzHjEpE',
-    hit: 'https://aka.doubaocdn.com/s/wZ2LHv5DEE',
+    idle: assetUrl('TLuUdtTRPo'),
+    walk: assetUrl('TLuUdtTRPo'),
+    walk2: assetUrl('JcezH6rVhY'),
+    walk3: assetUrl('gnxhj1r7Tr'),
+    walk4: assetUrl('8IDPqcesFo'),
+    attack: assetUrl('aNWVrFpkQ7'),
+    attack2: assetUrl('DGdNzHjEpE'),
+    hit: assetUrl('wZ2LHv5DEE'),
     color: '#e8f0f8', glow: '#c0e0ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#f0f8ff',
   },
   white_wolf: {
-    idle: 'https://aka.doubaocdn.com/s/dPBulifvdn',
-    walk: 'https://aka.doubaocdn.com/s/dPBulifvdn',
-    walk2: 'https://aka.doubaocdn.com/s/vtUUJB7bTi',
-    walk3: 'https://aka.doubaocdn.com/s/Atwxnpfckc',
-    walk4: 'https://aka.doubaocdn.com/s/ysMOfAVZc0',
-    attack: 'https://aka.doubaocdn.com/s/tjFKwAE5pk',
-    attack2: 'https://aka.doubaocdn.com/s/ekiTVHnUBx',
-    hit: 'https://aka.doubaocdn.com/s/ohKPiheUuX',
+    idle: assetUrl('dPBulifvdn'),
+    walk: assetUrl('dPBulifvdn'),
+    walk2: assetUrl('vtUUJB7bTi'),
+    walk3: assetUrl('Atwxnpfckc'),
+    walk4: assetUrl('ysMOfAVZc0'),
+    attack: assetUrl('tjFKwAE5pk'),
+    attack2: assetUrl('ekiTVHnUBx'),
+    hit: assetUrl('ohKPiheUuX'),
     color: '#d8d8e0', glow: '#e8e8f0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#f0f0f8',
   },
 
+  // ========== 新增變身形態（首幀朝右，向左時水平翻轉） ==========
+  // ---------- 藍色稀有（新） ----------
+  ice_witch_mage: {
+    idle: assetUrl('7i19uQAWe9'),
+    walk: assetUrl('7i19uQAWe9'),
+    walk2: assetUrl('7i19uQAWe9'),
+    walk3: assetUrl('7i19uQAWe9'),
+    walk4: assetUrl('7i19uQAWe9'),
+    attack: assetUrl('7i19uQAWe9'),
+    attack2: assetUrl('7i19uQAWe9'),
+    hit: assetUrl('7i19uQAWe9'),
+    color: '#4080c0', glow: '#80c0ff', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0d8ff',
+  },
+  blue_berserker: {
+    idle: assetUrl('7VUpTrVgJ9'),
+    walk: assetUrl('7VUpTrVgJ9'),
+    walk2: assetUrl('7VUpTrVgJ9'),
+    walk3: assetUrl('7VUpTrVgJ9'),
+    walk4: assetUrl('7VUpTrVgJ9'),
+    attack: assetUrl('7VUpTrVgJ9'),
+    attack2: assetUrl('7VUpTrVgJ9'),
+    hit: assetUrl('7VUpTrVgJ9'),
+    color: '#305070', glow: '#6090d0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#80a0e0',
+  },
+  shadow_archer: {
+    idle: assetUrl('mQismT3uJo'),
+    walk: assetUrl('mQismT3uJo'),
+    walk2: assetUrl('mQismT3uJo'),
+    walk3: assetUrl('mQismT3uJo'),
+    walk4: assetUrl('mQismT3uJo'),
+    attack: assetUrl('mQismT3uJo'),
+    attack2: assetUrl('mQismT3uJo'),
+    hit: assetUrl('mQismT3uJo'),
+    color: '#303050', glow: '#6050a0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a090d0',
+  },
+  holy_knight: {
+    idle: assetUrl('x2macmCl5G'),
+    walk: assetUrl('x2macmCl5G'),
+    walk2: assetUrl('x2macmCl5G'),
+    walk3: assetUrl('x2macmCl5G'),
+    walk4: assetUrl('x2macmCl5G'),
+    attack: assetUrl('x2macmCl5G'),
+    attack2: assetUrl('x2macmCl5G'),
+    hit: assetUrl('x2macmCl5G'),
+    color: '#d0c080', glow: '#fff0a0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ffffe0',
+  },
+  shadow_assassin_new: {
+    idle: assetUrl('xEBMD6PdNQ'),
+    walk: assetUrl('xEBMD6PdNQ'),
+    walk2: assetUrl('xEBMD6PdNQ'),
+    walk3: assetUrl('xEBMD6PdNQ'),
+    walk4: assetUrl('xEBMD6PdNQ'),
+    attack: assetUrl('xEBMD6PdNQ'),
+    attack2: assetUrl('xEBMD6PdNQ'),
+    hit: assetUrl('xEBMD6PdNQ'),
+    color: '#202030', glow: '#8060c0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#c0a0ff',
+  },
+  shadow_sorcerer: {
+    idle: assetUrl('k5PZYRWeFP'),
+    walk: assetUrl('k5PZYRWeFP'),
+    walk2: assetUrl('k5PZYRWeFP'),
+    walk3: assetUrl('k5PZYRWeFP'),
+    walk4: assetUrl('k5PZYRWeFP'),
+    attack: assetUrl('k5PZYRWeFP'),
+    attack2: assetUrl('k5PZYRWeFP'),
+    hit: assetUrl('k5PZYRWeFP'),
+    color: '#402060', glow: '#a060e0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#d090ff',
+  },
+
+  // ---------- 綠色高級（新） ----------
+  ranger_green: {
+    idle: assetUrl('rchaMLCdba'),
+    walk: assetUrl('rchaMLCdba'),
+    walk2: assetUrl('rchaMLCdba'),
+    walk3: assetUrl('rchaMLCdba'),
+    walk4: assetUrl('rchaMLCdba'),
+    attack: assetUrl('rchaMLCdba'),
+    attack2: assetUrl('rchaMLCdba'),
+    hit: assetUrl('rchaMLCdba'),
+    color: '#306040', glow: '#60c080', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0f0b0',
+  },
+  forest_elf_archer: {
+    idle: assetUrl('fTDu2t8m4b'),
+    walk: assetUrl('fTDu2t8m4b'),
+    walk2: assetUrl('fTDu2t8m4b'),
+    walk3: assetUrl('fTDu2t8m4b'),
+    walk4: assetUrl('fTDu2t8m4b'),
+    attack: assetUrl('fTDu2t8m4b'),
+    attack2: assetUrl('fTDu2t8m4b'),
+    hit: assetUrl('fTDu2t8m4b'),
+    color: '#205030', glow: '#60b070', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#90e0a0',
+  },
+  apprentice_mage: {
+    idle: assetUrl('k9fWQyguRW'),
+    walk: assetUrl('k9fWQyguRW'),
+    walk2: assetUrl('k9fWQyguRW'),
+    walk3: assetUrl('k9fWQyguRW'),
+    walk4: assetUrl('k9fWQyguRW'),
+    attack: assetUrl('k9fWQyguRW'),
+    attack2: assetUrl('k9fWQyguRW'),
+    hit: assetUrl('k9fWQyguRW'),
+    color: '#4060a0', glow: '#70a0e0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0c0ff',
+  },
+
+  // ---------- 白色普通（新） ----------
+  rookie_warrior: {
+    idle: assetUrl('8au7xoi5Il'),
+    walk: assetUrl('8au7xoi5Il'),
+    walk2: assetUrl('8au7xoi5Il'),
+    walk3: assetUrl('8au7xoi5Il'),
+    walk4: assetUrl('8au7xoi5Il'),
+    attack: assetUrl('8au7xoi5Il'),
+    attack2: assetUrl('8au7xoi5Il'),
+    hit: assetUrl('8au7xoi5Il'),
+    color: '#a0a0b0', glow: '#d0d0e0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#e0e0ec',
+  },
+  village_guard: {
+    idle: assetUrl('cgp2aEtGh5'),
+    walk: assetUrl('cgp2aEtGh5'),
+    walk2: assetUrl('cgp2aEtGh5'),
+    walk3: assetUrl('cgp2aEtGh5'),
+    walk4: assetUrl('cgp2aEtGh5'),
+    attack: assetUrl('cgp2aEtGh5'),
+    attack2: assetUrl('cgp2aEtGh5'),
+    hit: assetUrl('cgp2aEtGh5'),
+    color: '#8090a0', glow: '#b0c0d0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#d0dce8',
+  },
+
+  // ========== 英雄（新） ==========
+  hero_valkyrie: {
+    idle: assetUrl('GgXExreutf'),
+    walk: assetUrl('GgXExreutf'),
+    walk2: assetUrl('GgXExreutf'),
+    walk3: assetUrl('GgXExreutf'),
+    walk4: assetUrl('GgXExreutf'),
+    attack: assetUrl('GgXExreutf'),
+    attack2: assetUrl('GgXExreutf'),
+    hit: assetUrl('GgXExreutf'),
+    color: '#ffe080', glow: '#fff0c0', useImg: true, multiFrame: true,
+  },
+
+  // ========== 守護（新） ==========
+  pet_rock_golem: {
+    idle: assetUrl('MwW5SUSr6T'),
+    walk: assetUrl('MwW5SUSr6T'),
+    walk2: assetUrl('MwW5SUSr6T'),
+    walk3: assetUrl('MwW5SUSr6T'),
+    walk4: assetUrl('MwW5SUSr6T'),
+    attack: assetUrl('MwW5SUSr6T'),
+    attack2: assetUrl('MwW5SUSr6T'),
+    hit: assetUrl('MwW5SUSr6T'),
+    color: '#806040', glow: '#b09060', useImg: true, multiFrame: true,
+  },
+  pet_flame_salamander: {
+    idle: assetUrl('CZBFCpSKzB'),
+    walk: assetUrl('CZBFCpSKzB'),
+    walk2: assetUrl('CZBFCpSKzB'),
+    walk3: assetUrl('CZBFCpSKzB'),
+    walk4: assetUrl('CZBFCpSKzB'),
+    attack: assetUrl('CZBFCpSKzB'),
+    attack2: assetUrl('CZBFCpSKzB'),
+    hit: assetUrl('CZBFCpSKzB'),
+    color: '#ff6030', glow: '#ffa060', useImg: true, multiFrame: true,
+  },
+
+  // ========== NPC（新） ==========
+  npc_merchant_new: {
+    idle: assetUrl('oWubNqfSuy'),
+    walk: assetUrl('oWubNqfSuy'),
+    walk2: assetUrl('oWubNqfSuy'),
+    walk3: assetUrl('oWubNqfSuy'),
+    walk4: assetUrl('oWubNqfSuy'),
+    attack: assetUrl('oWubNqfSuy'),
+    attack2: assetUrl('oWubNqfSuy'),
+    hit: assetUrl('oWubNqfSuy'),
+    color: '#b08040', glow: '#e0b070', npc: true, useImg: true, multiFrame: true,
+  },
+  npc_blacksmith_new: {
+    idle: assetUrl('tIcOqdoaRB'),
+    walk: assetUrl('tIcOqdoaRB'),
+    walk2: assetUrl('tIcOqdoaRB'),
+    walk3: assetUrl('tIcOqdoaRB'),
+    walk4: assetUrl('tIcOqdoaRB'),
+    attack: assetUrl('tIcOqdoaRB'),
+    attack2: assetUrl('tIcOqdoaRB'),
+    hit: assetUrl('tIcOqdoaRB'),
+    color: '#a06030', glow: '#d09050', npc: true, useImg: true, multiFrame: true,
+  },
+  npc_chief: {
+    idle: assetUrl('4wr1KFH7DG'),
+    walk: assetUrl('4wr1KFH7DG'),
+    walk2: assetUrl('4wr1KFH7DG'),
+    walk3: assetUrl('4wr1KFH7DG'),
+    walk4: assetUrl('4wr1KFH7DG'),
+    attack: assetUrl('4wr1KFH7DG'),
+    attack2: assetUrl('4wr1KFH7DG'),
+    hit: assetUrl('4wr1KFH7DG'),
+    color: '#c0a060', glow: '#e0c080', npc: true, useImg: true, multiFrame: true,
+  },
+  npc_guard: {
+    idle: assetUrl('KAfhPeuFaN'),
+    walk: assetUrl('KAfhPeuFaN'),
+    walk2: assetUrl('KAfhPeuFaN'),
+    walk3: assetUrl('KAfhPeuFaN'),
+    walk4: assetUrl('KAfhPeuFaN'),
+    attack: assetUrl('KAfhPeuFaN'),
+    attack2: assetUrl('KAfhPeuFaN'),
+    hit: assetUrl('KAfhPeuFaN'),
+    color: '#6080a0', glow: '#90b0d0', npc: true, useImg: true, multiFrame: true,
+  },
+
   // ========== 怪物 ==========
   goblin: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrebzbxgbq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrebzbxgbq_ve_miaoda',
-    color: '#508040', glow: '#80c060', useImg: true
+    idle: assetUrl('wYFHmKE2C0'),
+    walk: assetUrl('wYFHmKE2C0'),
+    walk2: assetUrl('UG1LXPgLYT'),
+    walk3: assetUrl('FVLNAE1Aju'),
+    walk4: assetUrl('nGscTgMw4F'),
+    attack: assetUrl('qN3FcGwEbv'),
+    attack2: assetUrl('ic8EWNDNYs'),
+    hit: assetUrl('WpaQwxUXzh'),
+    color: '#508040', glow: '#80c060', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#c0ff80',
   },
   skeleton: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreczux4ao_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreczux4ao_ve_miaoda',
-    color: '#e0e0d0', glow: '#ffffff', useImg: true
+    idle: assetUrl('Wzi9iVLdb2'),
+    walk: assetUrl('Wzi9iVLdb2'),
+    walk2: assetUrl('U9ed5silDc'),
+    walk3: assetUrl('wpc6V9qVDO'),
+    walk4: assetUrl('1x1j3NjhPH'),
+    attack: assetUrl('VfGgZRdHIL'),
+    attack2: assetUrl('YQCgkX79ZB'),
+    hit: assetUrl('6ifL3DgjCY'),
+    color: '#e0e0d0', glow: '#ffffff', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#e0f0ff',
   },
   orc: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrecod3ydi_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrecod3ydi_ve_miaoda',
-    color: '#608040', glow: '#a0c060', useImg: true
+    idle: assetUrl('7jZBWui3Db'),
+    walk: assetUrl('7jZBWui3Db'),
+    walk2: assetUrl('Zpc82edK6V'),
+    walk3: assetUrl('CewMfMo7tU'),
+    walk4: assetUrl('9Us5kQk4ie'),
+    attack: assetUrl('rvAT3NSnQB'),
+    attack2: assetUrl('5oTzfOrfzV'),
+    hit: assetUrl('Xc1HGJ1KGV'),
+    color: '#608040', glow: '#a0c060', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#d0ffa0',
   },
   slime: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd24hpgdo_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd24hpgdo_ve_miaoda',
-    color: '#40a060', glow: '#80e0a0', useImg: true
+    idle: assetUrl('582Ij09o3K'),
+    walk: assetUrl('582Ij09o3K'),
+    walk2: assetUrl('hjTKkz0REl'),
+    walk3: assetUrl('uUcl6ZXFlt'),
+    walk4: assetUrl('naY3bow36j'),
+    attack: assetUrl('Wi8i3HuMPN'),
+    attack2: assetUrl('xWZWQAzLLU'),
+    hit: assetUrl('ULQRvB1CdS'),
+    color: '#40a060', glow: '#80e0a0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0ffc0',
   },
   spider: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreb7vlsgq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreb7vlsgq_ve_miaoda',
-    color: '#402020', glow: '#804040', useImg: true
+    idle: assetUrl('6AohjTIRnR'),
+    walk: assetUrl('6AohjTIRnR'),
+    walk2: assetUrl('AKCLMYp49L'),
+    walk3: assetUrl('2hMO5hilVu'),
+    walk4: assetUrl('L5TZ5ntmcZ'),
+    attack: assetUrl('P4IKJKFaPb'),
+    attack2: assetUrl('jrdjr24uAs'),
+    hit: assetUrl('IkB3kC0MLn'),
+    color: '#402020', glow: '#804040', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ff6060',
   },
   scorpion: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacgyqdo_ve_miaoda',
-    color: '#a06020', glow: '#ff9040', useImg: true
+    idle: assetUrl('sYDuOUW1hs'),
+    walk: assetUrl('sYDuOUW1hs'),
+    walk2: assetUrl('2diYDBGw40'),
+    walk3: assetUrl('1n2FHCF00k'),
+    walk4: assetUrl('jOmfjaAowT'),
+    attack: assetUrl('STUpj5gzz2'),
+    attack2: assetUrl('Mx7YOqVObn'),
+    hit: assetUrl('oi41e1Ciog'),
+    color: '#442266', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   bat: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd25ssaao_ve_miaoda',
-    color: '#604060', glow: '#a080c0', useImg: true
-  },
-  monsterwolf: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd7rqfobi_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd7rqfobi_ve_miaoda',
-    color: '#505060', glow: '#a0a0c0', useImg: true
+    idle: assetUrl('R5ucsLb0nY'),
+    walk: assetUrl('R5ucsLb0nY'),
+    walk2: assetUrl('ZMSh5JkLuI'),
+    walk3: assetUrl('7FtGCbQrYd'),
+    walk4: assetUrl('9pQ6wjsVuN'),
+    attack: assetUrl('WrjJT3OobX'),
+    attack2: assetUrl('DQeqQ0d043'),
+    hit: assetUrl('k3ide5hCRw'),
+    color: '#442222', glow: '#ff2222', useImg: true, multiFrame: true, coverMode: true,
   },
   ghost: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkread3d2eg_ve_miaoda',
-    color: '#a0b0d0', glow: '#d0e0f0', useImg: true
+    idle: assetUrl('e7D8utv94E'),
+    walk: assetUrl('e7D8utv94E'),
+    walk2: assetUrl('n93e7pZjIQ'),
+    walk3: assetUrl('DlrVUtEL4U'),
+    walk4: assetUrl('nSc7HUXdKk'),
+    attack: assetUrl('ulXEI5IJVn'),
+    attack2: assetUrl('vgIBoWl1gY'),
+    hit: assetUrl('VnCngAVE7l'),
+    color: '#44dddd', glow: '#88ffff', useImg: true, multiFrame: true, coverMode: true,
   },
   troll: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreb7m4ibg_ve_miaoda',
-    color: '#608040', glow: '#90c060', useImg: true
+    idle: assetUrl('6ykq8WkXGM'),
+    walk: assetUrl('6ykq8WkXGM'),
+    walk2: assetUrl('88UbrwO9KU'),
+    walk3: assetUrl('EgnBBCs2il'),
+    walk4: assetUrl('64CM6j4mMt'),
+    attack: assetUrl('SoVisJ5aYQ'),
+    attack2: assetUrl('6fn78tWYQr'),
+    hit: assetUrl('CvFbmbrRCF'),
+    color: '#558833', glow: '#88aa44', useImg: true, multiFrame: true, coverMode: true,
   },
   demon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd6zdu4ei_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd6zdu4ei_ve_miaoda',
-    color: '#c03030', glow: '#ff6040', useImg: true
+    idle: assetUrl('ennzdff10h'),
+    walk: assetUrl('ennzdff10h'),
+    walk2: assetUrl('HHYnZL77dr'),
+    walk3: assetUrl('iA3sODRZZ1'),
+    walk4: assetUrl('iovh4nWNY3'),
+    attack: assetUrl('VvBW6MiFDv'),
+    attack2: assetUrl('GCjQ9UYJCa'),
+    hit: assetUrl('bOvayC2iOD'),
+    color: '#c03030', glow: '#ff6040', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ff5050',
+  },
+  // 中高階怪物 8 帧
+  ogre: {
+    idle: assetUrl('6mcEV2Pgpy'),
+    walk: assetUrl('6mcEV2Pgpy'),
+    walk2: assetUrl('OlcaeodfWk'),
+    walk3: assetUrl('EfvFkRDFHo'),
+    walk4: assetUrl('8s0noOL4Yj'),
+    attack: assetUrl('WV9nboUyMl'),
+    attack2: assetUrl('YY8fAAd1go'),
+    hit: assetUrl('5vqHZHGQV5'),
+    color: '#806040', glow: '#d0a060', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ffb060',
+  },
+  lizardman: {
+    idle: assetUrl('TCEkPooI9E'),
+    walk: assetUrl('TCEkPooI9E'),
+    walk2: assetUrl('S4gNP4k3pT'),
+    walk3: assetUrl('AY9mkXA71v'),
+    walk4: assetUrl('HLDhc9wPmh'),
+    attack: assetUrl('w9OpsvrH9Z'),
+    attack2: assetUrl('3iG0uaSQjw'),
+    hit: assetUrl('rmIJxJ5Fpg'),
+    color: '#40a060', glow: '#80e0a0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0ffc0',
+  },
+  stone_golem: {
+    idle: assetUrl('1djiUtrb2c'),
+    walk: assetUrl('1djiUtrb2c'),
+    walk2: assetUrl('znvzkueF2c'),
+    walk3: assetUrl('Ix5C2VbmyJ'),
+    walk4: assetUrl('pVW3CEoidZ'),
+    attack: assetUrl('38FuwV7gPw'),
+    attack2: assetUrl('BUQtrrYRAS'),
+    hit: assetUrl('paWYrtkpSB'),
+    color: '#908070', glow: '#c0b0a0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#e0d0b0',
+  },
+  lich: {
+    idle: assetUrl('DKPorAcX7s'),
+    walk: assetUrl('DKPorAcX7s'),
+    walk2: assetUrl('RiirQZ3fSV'),
+    walk3: assetUrl('MuVRCBrUzD'),
+    walk4: assetUrl('iQg6zyogEa'),
+    attack: assetUrl('JspSNdIB2O'),
+    attack2: assetUrl('A2ZjoB2Pki'),
+    hit: assetUrl('OgVGjrT6k0'),
+    color: '#8040a0', glow: '#c080e0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#e0a0ff',
+  },
+  cerberus: {
+    idle: assetUrl('0CytJl9tpO'),
+    walk: assetUrl('0CytJl9tpO'),
+    walk2: assetUrl('jbo4hVvFPI'),
+    walk3: assetUrl('gSqkzYpyr5'),
+    walk4: assetUrl('sWaRxnHrMT'),
+    attack: assetUrl('PGwtG4t9rj'),
+    attack2: assetUrl('EJZ0gbn982'),
+    hit: assetUrl('Dhbzw4B2uB'),
+    color: '#cc2200', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
+  },
+  // ========== 新增 8 帧怪物 ==========
+  monster_hellhound: {
+    idle: assetUrl('QVsxMC7AXE'),
+    walk: assetUrl('QVsxMC7AXE'),
+    walk2: assetUrl('Y7D6wor5GO'),
+    walk3: assetUrl('h1SdH2HSwb'),
+    walk4: assetUrl('HtY7WUwH6y'),
+    attack: assetUrl('NckDHIlVdY'),
+    attack2: assetUrl('RCqUWJ5gFx'),
+    hit: assetUrl('Vb5KUo6sqn'),
+    color: '#301010', glow: '#ff4020', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ff8040',
+  },
+  monster_braindevil: {
+    idle: assetUrl('sxV2RI2KMa'),
+    walk: assetUrl('sxV2RI2KMa'),
+    walk2: assetUrl('L2OBUHNdsg'),
+    walk3: assetUrl('GzLoOexBtC'),
+    walk4: assetUrl('VSwDVeboki'),
+    attack: assetUrl('HjiPNansZJ'),
+    attack2: assetUrl('FRwIj4bM49'),
+    hit: assetUrl('b3NpFiK4gt'),
+    color: '#8040a0', glow: '#d080ff', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#e0a0ff',
+  },
+  monster_direwolf: {
+    idle: assetUrl('ZUTg8LaVx4'),
+    walk: assetUrl('ZUTg8LaVx4'),
+    walk2: assetUrl('nbtEFlg5Ee'),
+    walk3: assetUrl('UjIVNyA3ms'),
+    walk4: assetUrl('f7yZo8ohJK'),
+    attack: assetUrl('1PRvT0IyUa'),
+    attack2: assetUrl('VudULCUxHn'),
+    hit: assetUrl('UKCZ9Ol81J'),
+    color: '#504030', glow: '#c0a060', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ffc060',
+  },
+  monster_scorpion: {
+    idle: assetUrl('clSORpgY8H'),
+    walk: assetUrl('clSORpgY8H'),
+    walk2: assetUrl('OQ155a7UgC'),
+    walk3: assetUrl('0qJFdwQwIA'),
+    walk4: assetUrl('GNZH2vsocJ'),
+    attack: assetUrl('UgIpBy6CPb'),
+    attack2: assetUrl('L8URoUC8Vs'),
+    hit: assetUrl('9evfx7AVO8'),
+    color: '#a06020', glow: '#ff9040', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ffb060',
+  },
+  monster_wraith: {
+    idle: assetUrl('ZhVGRF6Vtp'),
+    walk: assetUrl('ZhVGRF6Vtp'),
+    walk2: assetUrl('oLc2Dzb4Gp'),
+    walk3: assetUrl('pHCtLwxDf4'),
+    walk4: assetUrl('2UqZ9EqS9X'),
+    attack: assetUrl('ArU5iZorxO'),
+    attack2: assetUrl('tuLEUDjxSt'),
+    hit: assetUrl('CFc9nu0uVZ'),
+    color: '#302040', glow: '#8060c0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a080ff',
+  },
+  monster_gargoyle: {
+    idle: assetUrl('WFSp2Ctj4D'),
+    walk: assetUrl('WFSp2Ctj4D'),
+    walk2: assetUrl('i5XYfgjPDQ'),
+    walk3: assetUrl('nqRRU8MWNQ'),
+    walk4: assetUrl('UwvHjx0urh'),
+    attack: assetUrl('ndPzwGiddo'),
+    attack2: assetUrl('xmJHo2FGR6'),
+    hit: assetUrl('VbAUPUjQRw'),
+    color: '#606070', glow: '#a0a0c0', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#c0c0e0',
+  },
+  // ========== 新增變身 8 帧 ==========
+  tf_demonlord: {
+    idle: assetUrl('88a59LdSSj'),
+    walk: assetUrl('88a59LdSSj'),
+    walk2: assetUrl('VQVnYOGqI0'),
+    walk3: assetUrl('dfYQSwdbFC'),
+    walk4: assetUrl('4rskJ0uzUP'),
+    attack: assetUrl('3CxLgjYu06'),
+    attack2: assetUrl('4dWxcP34zc'),
+    hit: assetUrl('yVyGfGb920'),
+    color: '#501020', glow: '#ff4060', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ff8060',
+  },
+  // ========== 真系列金變（8 幀動畫） ==========
+  t_true_death_knight: {
+    idle:    assetUrl('R00axCfBpj'),
+    walk:    assetUrl('gReueVbraV'),
+    walk2:   assetUrl('NvUjJpgNau'),
+    walk3:   assetUrl('RBcRgmVnXr'),
+    walk4:   assetUrl('gReueVbraV'),
+    attack:  assetUrl('wpxuawrVCV'),
+    attack2: assetUrl('Uy34UUhRLV'),
+    attack3: assetUrl('KrBsZ5am4a'),
+    hit:     assetUrl('KrBsZ5am4a'),
+    color: '#202020', glow: '#ffd700', useImg: true,
+    multiFrame: true, coverMode: true, eightFrame: true,
+    slashColor: '#ffd700', trueGold: true,
+  },
+  t_true_death_mage: {
+    idle:    assetUrl('VethpE7HTK'),
+    walk:    assetUrl('Y1LvxRAKVX'),
+    walk2:   assetUrl('FknXIoGH7m'),
+    walk3:   assetUrl('BNueAO9UiJ'),
+    walk4:   assetUrl('VethpE7HTK'),
+    attack:  assetUrl('mzfq8TKq4x'),
+    attack2: assetUrl('SOUyJPF1a4'),
+    attack3: assetUrl('dhRCyjwjXd'),
+    hit:     assetUrl('VethpE7HTK'),
+    color: '#201030', glow: '#ffd700', useImg: true,
+    multiFrame: true, coverMode: true, eightFrame: true,
+    slashColor: '#80c0ff', trueGold: true,
+  },
+  t_true_death_archer: {
+    idle:    assetUrl('rVWKSw3VY3'),
+    walk:    assetUrl('hARxvrASWY'),
+    walk2:   assetUrl('14exjSZWW4'),
+    walk3:   assetUrl('dkI8y3JSa8'),
+    walk4:   assetUrl('rVWKSw3VY3'),
+    attack:  assetUrl('tIFfmNcsAK'),
+    attack2: assetUrl('VpFGcBGsio'),
+    attack3: assetUrl('uVxyoSmBMS'),
+    hit:     assetUrl('rVWKSw3VY3'),
+    color: '#102010', glow: '#ffd700', useImg: true,
+    multiFrame: true, coverMode: true, eightFrame: true,
+    slashColor: '#c0ff80', trueGold: true,
+  },
+  t_true_death_assassin: {
+    idle:    assetUrl('wk8blv3H1y'),
+    walk:    assetUrl('pKWI45mDye'),
+    walk2:   assetUrl('O6IPrYZZPE'),
+    walk3:   assetUrl('PQCWH5S0nt'),
+    walk4:   assetUrl('wk8blv3H1y'),
+    attack:  assetUrl('2Jh1KzopT9'),
+    attack2: assetUrl('DwH0XNy4cM'),
+    attack3: assetUrl('UTRwvn4Jvu'),
+    hit:     assetUrl('wk8blv3H1y'),
+    color: '#101010', glow: '#ffd700', useImg: true,
+    multiFrame: true, coverMode: true, eightFrame: true,
+    slashColor: '#ff80c0', trueGold: true,
+  },
+  t_true_death_sorcerer: {
+    idle:    assetUrl('zj8RfqmcjX'),
+    walk:    assetUrl('hnzd6J8WBV'),
+    walk2:   assetUrl('RlqyeyACqE'),
+    walk3:   assetUrl('2SSEb3jbgH'),
+    walk4:   assetUrl('zj8RfqmcjX'),
+    attack:  assetUrl('alr9iCtgLt'),
+    attack2: assetUrl('r0Wr3RU7yy'),
+    attack3: assetUrl('NDVG5UKea8'),
+    hit:     assetUrl('zj8RfqmcjX'),
+    color: '#301020', glow: '#ffd700', useImg: true,
+    multiFrame: true, coverMode: true, eightFrame: true,
+    slashColor: '#ff8080', trueGold: true,
+  },
+  t_true_fallen_paladin: {
+    idle:    assetUrl('wzctdAamJe'),
+    walk:    assetUrl('qbFuvtVA9u'),
+    walk2:   assetUrl('jp4p2wZowU'),
+    walk3:   assetUrl('uTgkHlHwHz'),
+    walk4:   assetUrl('wzctdAamJe'),
+    attack:  assetUrl('wfO5BlbYRQ'),
+    attack2: assetUrl('rUzaQp8hjo'),
+    attack3: assetUrl('osb6zySMtJ'),
+    hit:     assetUrl('wzctdAamJe'),
+    color: '#301020', glow: '#ffd700', useImg: true,
+    multiFrame: true, coverMode: true, eightFrame: true,
+    slashColor: '#ffc040', trueGold: true,
+  },
+  tf_frostgiant: {
+    idle: assetUrl('VcqQUDirUp'),
+    walk: assetUrl('VcqQUDirUp'),
+    walk2: assetUrl('AlSTOhTlsh'),
+    walk3: assetUrl('oAK5BfqbUG'),
+    walk4: assetUrl('w3wSWVILVJ'),
+    attack: assetUrl('GyUzsLGZl9'),
+    attack2: assetUrl('9HVEwc1CHV'),
+    hit: assetUrl('WEmjqc7EFZ'),
+    color: '#4060a0', glow: '#80c0ff', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0e0ff',
+  },
+  // ========== 新增英雄 8 帧 ==========
+  hero_phoenix: {
+    idle: assetUrl('vASAOufnxz'),
+    walk: assetUrl('vASAOufnxz'),
+    walk2: assetUrl('RWwbIlt65D'),
+    walk3: assetUrl('be2uP8VYpR'),
+    walk4: assetUrl('GcUyuA4fDo'),
+    attack: assetUrl('7cS3BR2aXs'),
+    attack2: assetUrl('8Oi9kqjlW7'),
+    hit: assetUrl('4trwK4nbCK'),
+    color: '#a02020', glow: '#ff6030', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ffb040',
+  },
+  hero_treant: {
+    idle: assetUrl('kRG3SukyKD'),
+    walk: assetUrl('kRG3SukyKD'),
+    walk2: assetUrl('h456EaLNMu'),
+    walk3: assetUrl('DN7Jyx82Wy'),
+    walk4: assetUrl('ohQfz22Mtr'),
+    attack: assetUrl('QfMFFvqiVJ'),
+    attack2: assetUrl('Ss1BU5oAYq'),
+    hit: assetUrl('VtD3SeV87P'),
+    color: '#406030', glow: '#80c060', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0e080',
+  },
+  // ========== 新增守護寵物 8 帧 ==========
+  pet_wisp: {
+    idle: assetUrl('uIJL48AKFZ'),
+    walk: assetUrl('uIJL48AKFZ'),
+    walk2: assetUrl('YW2kaD9BPQ'),
+    walk3: assetUrl('ef7VCkv4js'),
+    walk4: assetUrl('bGksllK8MX'),
+    attack: assetUrl('6QwiEOkRqz'),
+    attack2: assetUrl('vCWDKFq6g3'),
+    hit: assetUrl('iYmy5Ot2bc'),
+    color: '#4080c0', glow: '#80e0ff', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#a0d0ff',
   },
   dragon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacphggg_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacphggg_ve_miaoda',
-    color: '#d08020', glow: '#ffb060', useImg: true
+    idle: assetUrl('9Do8Ov0n08'),
+    walk: assetUrl('9Do8Ov0n08'),
+    walk2: assetUrl('e6cVUaEb1W'),
+    walk3: assetUrl('AiYHpTKu8K'),
+    walk4: assetUrl('ResU9dONwj'),
+    attack: assetUrl('CHAU6a1OqQ'),
+    attack2: assetUrl('SqE44zEURU'),
+    hit: assetUrl('aOi6g9V9CR'),
+    color: '#cc3322', glow: '#ff6644', useImg: true, multiFrame: true, coverMode: true,
   },
   shaman: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd7t3t6ko_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd7t3t6ko_ve_miaoda',
-    color: '#608040', glow: '#90c060', useImg: true
-  },
-  bandit: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd4brrcsq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd4brrcsq_ve_miaoda',
-    color: '#804020', glow: '#c08040', useImg: true
-  },
-  zombie: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd3b5jgii_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd3b5jgii_ve_miaoda',
-    color: '#608060', glow: '#90b080', useImg: true
-  },
-  darkmage: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacxtmgg_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacxtmgg_ve_miaoda',
-    color: '#6040a0', glow: '#a080e0', useImg: true
+    idle: assetUrl('UrxAO5gJZh'),
+    walk: assetUrl('UrxAO5gJZh'),
+    walk2: assetUrl('9tQUBUFncb'),
+    walk3: assetUrl('Z2xMHdIvFW'),
+    walk4: assetUrl('h6R9VB8C2D'),
+    attack: assetUrl('ok9EV5aDdb'),
+    attack2: assetUrl('292nQJbkml'),
+    hit: assetUrl('km8jUYM0xi'),
+    color: '#558833', glow: '#44ff44', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== Boss ==========
-  boss_goblin:  { idle: '👺', attack: '💥', color: '#a04020', glow: '#ff7040', boss: true },
-  boss_troll:   { idle: '👹', attack: '💥', color: '#608040', glow: '#90c060', boss: true },
-  boss_lich:    { idle: '💀', attack: '✨', color: '#8040a0', glow: '#c080e0', boss: true },
-  boss_scorpion:{ idle: '🦂', attack: '💥', color: '#a06020', glow: '#d09040', boss: true },
-  boss_bat:     { idle: '🦇', attack: '💥', color: '#802040', glow: '#ff4060', boss: true },
-  boss_orc:     { idle: '👹', attack: '💥', color: '#a04020', glow: '#ff7040', boss: true },
-  boss_ghost:   { idle: '👻', attack: '💀', color: '#6060a0', glow: '#a0a0ff', boss: true },
-  boss_demon:   { idle: '😈', attack: '🔥', color: '#c02020', glow: '#ff5050', boss: true },
-  boss_dragon:  { idle: '🐉', attack: '💥', color: '#e09010', glow: '#ffc040', boss: true },
-  shaman: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrbyz6ssai_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrbyz6ssai_ve_miaoda',
-    color: '#608040', glow: '#90c060', useImg: true
-  },
   bandit: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2g4hwbq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2g4hwbq_ve_miaoda',
-    color: '#804020', glow: '#c08040', useImg: true
+    idle: assetUrl('hy8Xjp5GAH'),
+    walk: assetUrl('hy8Xjp5GAH'),
+    walk2: assetUrl('CQZcKHDPUL'),
+    walk3: assetUrl('ZscZv5PG5H'),
+    walk4: assetUrl('MijY5iMyg7'),
+    attack: assetUrl('ahUJpmTMju'),
+    attack2: assetUrl('FEDzWUgVga'),
+    hit: assetUrl('aCANFoS5Gl'),
+    color: '#444444', glow: '#aaaaaa', useImg: true, multiFrame: true, coverMode: true,
   },
   zombie: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2trecbq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2trecbq_ve_miaoda',
-    color: '#608060', glow: '#90b080', useImg: true
+    idle: assetUrl('Oa7zNf9UFK'),
+    walk: assetUrl('Oa7zNf9UFK'),
+    walk2: assetUrl('iRA0DU1c1U'),
+    walk3: assetUrl('mlRsq3v4CR'),
+    walk4: assetUrl('4e21Sv8gty'),
+    attack: assetUrl('5Db9F0ZKN5'),
+    attack2: assetUrl('U6IJ8Cv32K'),
+    hit: assetUrl('dRz7qCVPik'),
+    color: '#668844', glow: '#88aa44', useImg: true, multiFrame: true, coverMode: true,
   },
   darkmage: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrbyu7xcag_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrbyu7xcag_ve_miaoda',
-    color: '#6040a0', glow: '#a080e0', useImg: true
+    idle: assetUrl('SWrInn0grd'),
+    walk: assetUrl('SWrInn0grd'),
+    walk2: assetUrl('V9DEE42h0u'),
+    walk3: assetUrl('86rJAUsBMa'),
+    walk4: assetUrl('6UTDEAFDC4'),
+    attack: assetUrl('hPGhoqXxrK'),
+    attack2: assetUrl('6q6TBuiWlt'),
+    hit: assetUrl('qN9sQGMUCq'),
+    color: '#8844cc', glow: '#cc66ff', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== Boss ==========
-  boss_goblin: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreeyoo6hq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreeyoo6hq_ve_miaoda',
-    color: '#a04020', glow: '#ff7040', boss: true, useImg: true
+  spider_queen: {
+    idle: assetUrl('wUbEJL0DQj'),
+    walk: assetUrl('wUbEJL0DQj'),
+    walk2: assetUrl('MqykB9GBTw'),
+    walk3: assetUrl('4EULJzSSlr'),
+    walk4: assetUrl('0Kft2Gw701'),
+    attack: assetUrl('RzttyT1vnA'),
+    attack2: assetUrl('2t7NaIE7tA'),
+    hit: assetUrl('kKsYi20tlC'),
+    color: '#6622aa', glow: '#aa44ff', useImg: true, multiFrame: true, coverMode: true,
   },
-  boss_troll: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreb7m4ibg_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreb7m4ibg_ve_miaoda',
-    color: '#608040', glow: '#90c060', boss: true, useImg: true
+  lava_golem: {
+    idle: assetUrl('HUp2dsmzpG'),
+    walk: assetUrl('HUp2dsmzpG'),
+    walk2: assetUrl('MgoybTkwZ6'),
+    walk3: assetUrl('oUaxg5EX4u'),
+    walk4: assetUrl('32iobvZMDR'),
+    attack: assetUrl('qUQX6lr47u'),
+    attack2: assetUrl('jomDSXKJlp'),
+    hit: assetUrl('41VYP0XKXm'),
+    color: '#cc4400', glow: '#ff8800', useImg: true, multiFrame: true, coverMode: true,
   },
-  boss_lich: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkredbr4oeo_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkredbr4oeo_ve_miaoda',
-    color: '#8040a0', glow: '#c080e0', boss: true, useImg: true
+  bone_dragon: {
+    idle: assetUrl('db3YKTmL82'),
+    walk: assetUrl('db3YKTmL82'),
+    walk2: assetUrl('tT2bGXfVAt'),
+    walk3: assetUrl('P7mvta9pXb'),
+    walk4: assetUrl('e37AqKOKFL'),
+    attack: assetUrl('UIhYxdZIV4'),
+    attack2: assetUrl('N3Oo4VTI1q'),
+    hit: assetUrl('2oWLq4vXlG'),
+    color: '#ccccaa', glow: '#66ddff', useImg: true, multiFrame: true, coverMode: true,
   },
-  boss_scorpion: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacgyqdo_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacgyqdo_ve_miaoda',
-    color: '#a06020', glow: '#d09040', boss: true, useImg: true
+  griffin: {
+    idle: assetUrl('VAWDvwJJu2'),
+    walk: assetUrl('VAWDvwJJu2'),
+    walk2: assetUrl('qOZI7NIdhG'),
+    walk3: assetUrl('W3swxk3OAM'),
+    walk4: assetUrl('spjSIXLSiv'),
+    attack: assetUrl('wtVX2EX1W9'),
+    attack2: assetUrl('wS6Zm0HXjw'),
+    hit: assetUrl('AudVTivqvo'),
+    color: '#dd9922', glow: '#ffcc44', useImg: true, multiFrame: true, coverMode: true,
   },
-  boss_bat: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd25ssaao_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd25ssaao_ve_miaoda',
-    color: '#802040', glow: '#ff4060', boss: true, useImg: true
+  chimera: {
+    idle: assetUrl('tUaY3UCxsD'),
+    walk: assetUrl('tUaY3UCxsD'),
+    walk2: assetUrl('isJ78s37eH'),
+    walk3: assetUrl('AUb3VXl0Qy'),
+    walk4: assetUrl('mfvvD9NaVO'),
+    attack: assetUrl('VTiQzea4Rm'),
+    attack2: assetUrl('CIxe6TrTWl'),
+    hit: assetUrl('aqedAEKlp6'),
+    color: '#333333', glow: '#ff6622', useImg: true, multiFrame: true, coverMode: true,
+  },
+  hydra: {
+    idle: assetUrl('930N2UUgHS'),
+    walk: assetUrl('930N2UUgHS'),
+    walk2: assetUrl('iucIEoCrcU'),
+    walk3: assetUrl('omtqjxhzdX'),
+    walk4: assetUrl('gpjTvUFuXy'),
+    attack: assetUrl('QBG6VLKJN8'),
+    attack2: assetUrl('4eRQoBplQY'),
+    hit: assetUrl('nt1sPXaTHe'),
+    color: '#338833', glow: '#66ff44', useImg: true, multiFrame: true, coverMode: true,
+  },
+  naga: {
+    idle: assetUrl('XuUqNLGiQv'),
+    walk: assetUrl('XuUqNLGiQv'),
+    walk2: assetUrl('mRBvVrhlWs'),
+    walk3: assetUrl('XvP3MIcdio'),
+    walk4: assetUrl('B7CVTe4x0z'),
+    attack: assetUrl('t7LvPGwoxg'),
+    attack2: assetUrl('Q3tRQvOOgA'),
+    hit: assetUrl('oVatgTEF4i'),
+    color: '#338866', glow: '#44ffaa', useImg: true, multiFrame: true, coverMode: true,
+  },
+  armored_bear: {
+    idle: assetUrl('hmpB2nomb5'),
+    walk: assetUrl('hmpB2nomb5'),
+    walk2: assetUrl('DfBHVDQWHG'),
+    walk3: assetUrl('yAMXkNx3dg'),
+    walk4: assetUrl('FVI72L2SIo'),
+    attack: assetUrl('boDcUh2M8E'),
+    attack2: assetUrl('U3cuZTf5WT'),
+    hit: assetUrl('Nj49Ur4BtB'),
+    color: '#885522', glow: '#ffaa44', useImg: true, multiFrame: true, coverMode: true,
+  },
+  kraken: {
+    idle: assetUrl('WD439eGaFU'),
+    walk: assetUrl('WD439eGaFU'),
+    walk2: assetUrl('IainVVfq3F'),
+    walk3: assetUrl('1YUXX26uiA'),
+    walk4: assetUrl('jNM4KI8ia2'),
+    attack: assetUrl('RCdDqMVfE5'),
+    attack2: assetUrl('NHFUFVv4Vs'),
+    hit: assetUrl('eAGGLx6phH'),
+    color: '#552288', glow: '#9944ff', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_orc: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd3d7j6pq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd3d7j6pq_ve_miaoda',
-    color: '#a04020', glow: '#ff7040', boss: true, useImg: true
-  },
-  boss_ghost: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkread3d2eg_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkread3d2eg_ve_miaoda',
-    color: '#6060a0', glow: '#a0a0ff', boss: true, useImg: true
+    idle: assetUrl('fvPYGckiQc'),
+    walk: assetUrl('fvPYGckiQc'),
+    walk2: assetUrl('Yz4l2QxCxp'),
+    walk3: assetUrl('TZ0P76Cllb'),
+    walk4: assetUrl('CPUrKw4Hol'),
+    attack: assetUrl('qjNBrcFMWq'),
+    attack2: assetUrl('qBmed9uuoE'),
+    hit: assetUrl('5r13VWiPU7'),
+    color: '#558833', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_demon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreezckefq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreezckefq_ve_miaoda',
-    color: '#c02020', glow: '#ff5050', boss: true, useImg: true
+    idle: assetUrl('UfgjsaYUoz'),
+    walk: assetUrl('UfgjsaYUoz'),
+    walk2: assetUrl('HcRMhunYY3'),
+    walk3: assetUrl('mfoJtk6O9p'),
+    walk4: assetUrl('Up2bmaIU99'),
+    attack: assetUrl('ICVHEO0qCP'),
+    attack2: assetUrl('6oppkux3K5'),
+    hit: assetUrl('R1gVGe51Fb'),
+    color: '#cc2200', glow: '#ff6600', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_dragon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacphggg_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreacphggg_ve_miaoda',
-    color: '#e09010', glow: '#ffc040', boss: true, useImg: true
+    idle: assetUrl('o1qWUrCATh'),
+    walk: assetUrl('o1qWUrCATh'),
+    walk2: assetUrl('g3Irrwx4oq'),
+    walk3: assetUrl('jJaVDoXIZ2'),
+    walk4: assetUrl('CnUAPsRzlA'),
+    attack: assetUrl('Fr4eqGqBd6'),
+    attack2: assetUrl('mXwLa8wNlS'),
+    hit: assetUrl('1wgGAVd8JU'),
+    color: '#e09010', glow: '#ffc040', boss: true, useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ffd060',
+  },
+  boss_death_knight: {
+    idle: assetUrl('7FnWRqmp3O'),
+    walk: assetUrl('7FnWRqmp3O'),
+    walk2: assetUrl('U8U8zD5mQY'),
+    walk3: assetUrl('x0ngk7iSES'),
+    walk4: assetUrl('aPOtgxIgss'),
+    attack: assetUrl('KRVgdmZdqh'),
+    attack2: assetUrl('B1oZEnBt4W'),
+    hit: assetUrl('eqsOwvfx7E'),
+    color: '#404060', glow: '#8080c0', boss: true, useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#c0c0ff',
+  },
+  boss_baphomet: {
+    idle: assetUrl('B5UzjmgzgT'),
+    walk: assetUrl('B5UzjmgzgT'),
+    walk2: assetUrl('rCZVzIR4DM'),
+    walk3: assetUrl('DsZs2wdjX8'),
+    walk4: assetUrl('FvmW2tQuUr'),
+    attack: assetUrl('fXcREvAk5H'),
+    attack2: assetUrl('49gZhlUxoM'),
+    hit: assetUrl('9aUL4o7j9K'),
+    color: '#602040', glow: '#ff5080', boss: true, useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ff80a0',
+  },
+  boss_demon_lord: {
+    idle: assetUrl('MQbYJyKtqK'),
+    walk: assetUrl('MQbYJyKtqK'),
+    walk2: assetUrl('daKfmMOKiL'),
+    walk3: assetUrl('H0oH4yS5iQ'),
+    walk4: assetUrl('HfzbqxNOUp'),
+    attack: assetUrl('wltQkklEoZ'),
+    attack2: assetUrl('OYdq2KLrpQ'),
+    hit: assetUrl('7YUd2dOZDc'),
+    color: '#a01010', glow: '#ff3030', boss: true, useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#ff5050',
   },
   // ========== NPC ==========
+  // ========== NPC 8 幀完整動畫 ==========
   npc_blacksmith: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrectd3ogg_ve_miaoda',
-    color: '#c08040', glow: '#ffc080', npc: true, useImg: true
+    idle: assetUrl('dTOA2QKqa8'),
+    walk: assetUrl('dTOA2QKqa8'),
+    walk2: assetUrl('JiW0xwVu7J'),
+    walk3: assetUrl('JUMDNgMWNh'),
+    walk4: assetUrl('eNrCqbW21z'),
+    attack: assetUrl('miiDBxtyiq'),
+    attack2: assetUrl('839Tu3fbmo'),
+    hit: assetUrl('joG7wQ5Okj'),
+    color: '#c08040', glow: '#ffc080', npc: true, useImg: true, multiFrame: true,
   },
   npc_shop: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrefqrgmdq_ve_miaoda',
-    color: '#a08060', glow: '#d0b080', npc: true, useImg: true
+    idle: assetUrl('PllNPKAjDG'),
+    walk: assetUrl('PllNPKAjDG'),
+    walk2: assetUrl('lX6cLQIs6s'),
+    walk3: assetUrl('GhtUV9MoUM'),
+    walk4: assetUrl('1pMUj0WrTL'),
+    attack: assetUrl('oAdyWKiLsb'),
+    attack2: assetUrl('i3hZlyVOEh'),
+    hit: assetUrl('boDlZxOnVq'),
+    color: '#a08060', glow: '#d0b080', npc: true, useImg: true, multiFrame: true,
   },
   npc_luxury: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd67aq2ci_ve_miaoda',
-    color: '#b080c0', glow: '#e0b0ff', npc: true, useImg: true
+    idle: assetUrl('SzFME3Pi9q'),
+    walk: assetUrl('SzFME3Pi9q'),
+    walk2: assetUrl('GmJMM0gLrk'),
+    walk3: assetUrl('2ZqpOZV4JY'),
+    walk4: assetUrl('Vy3TpO90sn'),
+    attack: assetUrl('KUmdX94cVK'),
+    attack2: assetUrl('lcRLg7RtoR'),
+    hit: assetUrl('nvZ2iSN7Wz'),
+    color: '#b080c0', glow: '#e0b0ff', npc: true, useImg: true, multiFrame: true,
   },
   npc_warehouse: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkree664wgo_ve_miaoda',
-    color: '#a08060', glow: '#d0b080', npc: true, useImg: true
+    idle: assetUrl('8UYlKPr8L4'),
+    walk: assetUrl('8UYlKPr8L4'),
+    walk2: assetUrl('VgfWfm7Wp3'),
+    walk3: assetUrl('NPqYADvHxg'),
+    walk4: assetUrl('Buiu25AfYt'),
+    attack: assetUrl('YBZ4yf3Kz5'),
+    attack2: assetUrl('BBZwu283Gy'),
+    hit: assetUrl('1HbZreUQHQ'),
+    color: '#a08060', glow: '#d0b080', npc: true, useImg: true, multiFrame: true,
   },
   npc_quest: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreecj3cfi_ve_miaoda',
-    color: '#4080c0', glow: '#80b0ff', npc: true, useImg: true
+    idle: assetUrl('Cv17QVXyT5'),
+    walk: assetUrl('Cv17QVXyT5'),
+    walk2: assetUrl('4srtvDjQPd'),
+    walk3: assetUrl('UlhVkekfia'),
+    walk4: assetUrl('B1Xj8KAEhe'),
+    attack: assetUrl('IrrsDh0lJh'),
+    attack2: assetUrl('oe0oox3tFe'),
+    hit: assetUrl('ADErARCdEu'),
+    color: '#4080c0', glow: '#80b0ff', npc: true, useImg: true, multiFrame: true,
   },
   npc_inn: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreczuaehq_ve_miaoda',
-    color: '#d06040', glow: '#ffa080', npc: true, useImg: true
+    idle: assetUrl('9nqQW8OMjO'),
+    walk: assetUrl('9nqQW8OMjO'),
+    walk2: assetUrl('LAPpVgy0XL'),
+    walk3: assetUrl('iXPfLZ7kDc'),
+    walk4: assetUrl('ccwUb4KD6L'),
+    attack: assetUrl('1LlR6vpGYg'),
+    attack2: assetUrl('5m99bxAUW8'),
+    hit: assetUrl('wQdrQVESaP'),
+    color: '#d06040', glow: '#ffa080', npc: true, useImg: true, multiFrame: true,
   },
   npc_priest: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd6eez2eo_ve_miaoda',
-    color: '#f0e0b0', glow: '#fff8d0', npc: true, useImg: true
+    idle: assetUrl('9nqQW8OMjO'),
+    walk: assetUrl('9nqQW8OMjO'),
+    walk2: assetUrl('LAPpVgy0XL'),
+    walk3: assetUrl('iXPfLZ7kDc'),
+    walk4: assetUrl('ccwUb4KD6L'),
+    attack: assetUrl('1LlR6vpGYg'),
+    attack2: assetUrl('5m99bxAUW8'),
+    hit: assetUrl('wQdrQVESaP'),
+    color: '#f0e0b0', glow: '#fff8d0', npc: true, useImg: true, multiFrame: true,
   },
   npc_dungeon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrebvwrajo_ve_miaoda',
-    color: '#604080', glow: '#a080c0', npc: true, useImg: true
+    idle: assetUrl('WQcx9I9OBq'),
+    walk: assetUrl('WQcx9I9OBq'),
+    walk2: assetUrl('ZNvUhqSGHj'),
+    walk3: assetUrl('kgmSkvojy6'),
+    walk4: assetUrl('TjaUWFvn6f'),
+    attack: assetUrl('T73arNQQlA'),
+    attack2: assetUrl('N3ukZgdVoy'),
+    hit: assetUrl('u8YESfQcD3'),
+    color: '#604080', glow: '#a080c0', npc: true, useImg: true, multiFrame: true,
   },
   npc_board: {
     idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrehajimao_ve_miaoda',
     color: '#806040', glow: '#c0a070', npc: true, useImg: true
   },
   npc_guard: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreecj3cfi_ve_miaoda',
-    color: '#a08050', glow: '#d0b070', npc: true, useImg: true
+    idle: assetUrl('TiXM8q4lZK'),
+    walk: assetUrl('TiXM8q4lZK'),
+    walk2: assetUrl('jjmrlmCWwC'),
+    walk3: assetUrl('8UCc4uRd5e'),
+    walk4: assetUrl('7x4aF7VXRK'),
+    attack: assetUrl('s8UUkfmEvx'),
+    attack2: assetUrl('qfwrYpaJ2K'),
+    hit: assetUrl('YZXtVvdmuR'),
+    color: '#a08050', glow: '#d0b070', npc: true, useImg: true, multiFrame: true,
   },
   npc_healer: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd6eez2eo_ve_miaoda',
-    color: '#f0e0b0', glow: '#fff8d0', npc: true, useImg: true
+    idle: assetUrl('9nqQW8OMjO'),
+    walk: assetUrl('9nqQW8OMjO'),
+    walk2: assetUrl('LAPpVgy0XL'),
+    walk3: assetUrl('iXPfLZ7kDc'),
+    walk4: assetUrl('ccwUb4KD6L'),
+    attack: assetUrl('1LlR6vpGYg'),
+    attack2: assetUrl('5m99bxAUW8'),
+    hit: assetUrl('wQdrQVESaP'),
+    color: '#f0e0b0', glow: '#fff8d0', npc: true, useImg: true, multiFrame: true,
   },
   npc_wizard: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrebvwrajo_ve_miaoda',
-    color: '#8060e0', glow: '#c0a0ff', npc: true, useImg: true
+    idle: assetUrl('WQcx9I9OBq'),
+    walk: assetUrl('WQcx9I9OBq'),
+    walk2: assetUrl('ZNvUhqSGHj'),
+    walk3: assetUrl('kgmSkvojy6'),
+    walk4: assetUrl('TjaUWFvn6f'),
+    attack: assetUrl('T73arNQQlA'),
+    attack2: assetUrl('N3ukZgdVoy'),
+    hit: assetUrl('u8YESfQcD3'),
+    color: '#8060e0', glow: '#c0a0ff', npc: true, useImg: true, multiFrame: true,
+  },
+  npc_arena: {
+    idle: assetUrl('WQcx9I9OBq'),
+    walk: assetUrl('WQcx9I9OBq'),
+    walk2: assetUrl('ZNvUhqSGHj'),
+    walk3: assetUrl('kgmSkvojy6'),
+    walk4: assetUrl('TjaUWFvn6f'),
+    attack: assetUrl('T73arNQQlA'),
+    attack2: assetUrl('N3ukZgdVoy'),
+    hit: assetUrl('u8YESfQcD3'),
+    color: '#a04040', glow: '#ff8080', npc: true, useImg: true, multiFrame: true,
+  },
+  npc_witch: {
+    idle: assetUrl('9nqQW8OMjO'),
+    walk: assetUrl('9nqQW8OMjO'),
+    walk2: assetUrl('LAPpVgy0XL'),
+    walk3: assetUrl('iXPfLZ7kDc'),
+    walk4: assetUrl('ccwUb4KD6L'),
+    attack: assetUrl('1LlR6vpGYg'),
+    attack2: assetUrl('5m99bxAUW8'),
+    hit: assetUrl('wQdrQVESaP'),
+    color: '#8040a0', glow: '#c080ff', npc: true, useImg: true, multiFrame: true,
+  },
+  npc_postman: {
+    idle: assetUrl('PllNPKAjDG'),
+    walk: assetUrl('PllNPKAjDG'),
+    walk2: assetUrl('lX6cLQIs6s'),
+    walk3: assetUrl('GhtUV9MoUM'),
+    walk4: assetUrl('1pMUj0WrTL'),
+    attack: assetUrl('oAdyWKiLsb'),
+    attack2: assetUrl('i3hZlyVOEh'),
+    hit: assetUrl('boDlZxOnVq'),
+    color: '#408060', glow: '#80c0a0', npc: true, useImg: true, multiFrame: true,
+  },
+  // ========== 新英雄 8 幀完整動畫 ==========
+  hero_fire_elemental: {
+    idle: assetUrl('ScTVMscBly'),
+    walk: assetUrl('ScTVMscBly'),
+    walk2: assetUrl('CWImnq6w74'),
+    walk3: assetUrl('eGFznrB3mT'),
+    walk4: assetUrl('N9HEYzExfI'),
+    attack: assetUrl('DGju3Q4Ork'),
+    attack2: assetUrl('wF6kKJTc94'),
+    hit: assetUrl('drRUJ1PiSv'),
+    color: '#ff6030', glow: '#ffb060', useImg: true, multiFrame: true,
+  },
+  hero_frost_wolf: {
+    idle: assetUrl('hvqAPvsE23'),
+    walk: assetUrl('hvqAPvsE23'),
+    walk2: assetUrl('crmYOmDoIP'),
+    walk3: assetUrl('5F14d71Pyl'),
+    walk4: assetUrl('wDBEVqyFld'),
+    attack: assetUrl('UhCMU18cUM'),
+    attack2: assetUrl('yPlesBoan0'),
+    hit: assetUrl('G5YNj7nOuU'),
+    color: '#60b0ff', glow: '#a0d8ff', useImg: true, multiFrame: true,
+  },
+  hero_dark_beast: {
+    idle: assetUrl('l9oUjCLsvD'),
+    walk: assetUrl('l9oUjCLsvD'),
+    walk2: assetUrl('nO9v776UoV'),
+    walk3: assetUrl('2znmT3dKQc'),
+    walk4: assetUrl('r5SXmQVUv2'),
+    attack: assetUrl('4GGzWY67AP'),
+    attack2: assetUrl('XFdWB5oY1w'),
+    hit: assetUrl('IiUR2GRnKz'),
+    color: '#6040a0', glow: '#a080e0', useImg: true, multiFrame: true,
+  },
+  hero_golden_griffin: {
+    idle: assetUrl('M8iLItb8SL'),
+    walk: assetUrl('M8iLItb8SL'),
+    walk2: assetUrl('emAq8UCONc'),
+    walk3: assetUrl('fCC7qVivRp'),
+    walk4: assetUrl('TAQamR2aH5'),
+    attack: assetUrl('3p1uOOFmcV'),
+    attack2: assetUrl('MouZcszF2k'),
+    hit: assetUrl('Ndq0gap6Nr'),
+    color: '#ffd040', glow: '#fff0a0', useImg: true, multiFrame: true,
+  },
+  hero_undead_knight: {
+    idle: assetUrl('Zae7N0mwUb'),
+    walk: assetUrl('Zae7N0mwUb'),
+    walk2: assetUrl('pI0sXZsd8V'),
+    walk3: assetUrl('P5Zx8qWbOU'),
+    walk4: assetUrl('khiUoUYZ0t'),
+    attack: assetUrl('FdRbs6DDqD'),
+    attack2: assetUrl('wxUDxrtuLx'),
+    hit: assetUrl('oJot2AXiYN'),
+    color: '#a080d0', glow: '#d0b0ff', useImg: true, multiFrame: true,
+  },
+  hero_thunder_bear: {
+    idle: assetUrl('Pq2UOQqKkD'),
+    walk: assetUrl('Pq2UOQqKkD'),
+    walk2: assetUrl('nYr4vtlMDr'),
+    walk3: assetUrl('RfAz4VpN1S'),
+    walk4: assetUrl('T9M88GBCQk'),
+    attack: assetUrl('jHVVvaUxZ2'),
+    attack2: assetUrl('Td3MQT1tnF'),
+    hit: assetUrl('U8qQhdSmbz'),
+    color: '#ffcc30', glow: '#ffee90', useImg: true, multiFrame: true,
+  },
+  hero_demoness: {
+    idle: assetUrl('WawynjOGZK'),
+    walk: assetUrl('WawynjOGZK'),
+    walk2: assetUrl('dxmuWjHkBl'),
+    walk3: assetUrl('zfpTV9oMHP'),
+    walk4: assetUrl('x9J654XZVH'),
+    attack: assetUrl('paP684cHRG'),
+    attack2: assetUrl('znpkGtJ8yR'),
+    hit: assetUrl('oUwn28Nr9n'),
+    color: '#ff60a0', glow: '#ffa0d0', useImg: true, multiFrame: true,
+  },
+  hero_stone_titan: {
+    idle: assetUrl('I2SNzCU0xy'),
+    walk: assetUrl('I2SNzCU0xy'),
+    walk2: assetUrl('zV8GhUB4Mx'),
+    walk3: assetUrl('YjCgRDLbqB'),
+    walk4: assetUrl('MVfdatmvBN'),
+    attack: assetUrl('axD7UXXItT'),
+    attack2: assetUrl('XrPTYEU4do'),
+    hit: assetUrl('Upf0cg83SP'),
+    color: '#a08060', glow: '#d0b080', useImg: true, multiFrame: true,
   },
   // ========== 英雄 ==========
-  hero_knight: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2tol2gi_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2tol2gi_ve_miaoda',
-    color: '#c0a060', glow: '#ffe090', useImg: true
-  },
-  hero_archer: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2xfi6fq_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2xfi6fq_ve_miaoda',
-    color: '#60b060', glow: '#a0e090', useImg: true
-  },
-  hero_assassin: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2mtywho_ve_miaoda',
-    attack: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrb2mtywho_ve_miaoda',
-    color: '#a04060', glow: '#ff7090', useImg: true
-  },
   // ========== 寵物 ==========
   pet_fox: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrefkve2fg_ve_miaoda',
-    color: '#e06040', glow: '#ff9060', useImg: true
+    idle: assetUrl('Vb7Fv2c5K8'),
+    walk: assetUrl('Vb7Fv2c5K8'),
+    walk2: assetUrl('rA5mIE4o1G'),
+    walk3: assetUrl('Eu8UDQfN8H'),
+    walk4: assetUrl('C6mVDwYXfW'),
+    attack: assetUrl('3FJxr2SP0c'),
+    attack2: assetUrl('vVlDPdSprb'),
+    hit: assetUrl('urZd40vEqt'),
+    color: '#ff6644', glow: '#ff8866', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_wolf: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkredgan6ag_ve_miaoda',
-    color: '#a0a0c0', glow: '#c0e0ff', useImg: true
+    idle: assetUrl('SNAfsnukC6'),
+    walk: assetUrl('SNAfsnukC6'),
+    walk2: assetUrl('exEu2Rz6r7'),
+    walk3: assetUrl('9icr5jmvDh'),
+    walk4: assetUrl('8V4zp9cxpI'),
+    attack: assetUrl('sI264sSdwF'),
+    attack2: assetUrl('k4zO7h71lq'),
+    hit: assetUrl('eW3JJQw6az'),
+    color: '#888888', glow: '#aaaaaa', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_rabbit: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreduxggio_ve_miaoda',
-    color: '#f0c0e0', glow: '#ffe0f0', useImg: true
-  },
-  pet_cat: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkregoykcfq_ve_miaoda',
-    color: '#a08060', glow: '#d0b080', useImg: true
+    idle: assetUrl('VVH2o6o5ak'),
+    walk: assetUrl('VVH2o6o5ak'),
+    walk2: assetUrl('tu6czNGU9g'),
+    walk3: assetUrl('7oDIgwzidG'),
+    walk4: assetUrl('jXJraVmXs2'),
+    attack: assetUrl('0XlLKL8atb'),
+    attack2: assetUrl('lOLWwwavns'),
+    hit: assetUrl('kHoyV0K0U0'),
+    color: '#ffffff', glow: '#ffcccc', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_crow: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreaq3qomg_ve_miaoda',
-    color: '#8060a0', glow: '#c0a0e0', useImg: true
+    idle: assetUrl('1wDBNqjfun'),
+    walk: assetUrl('1wDBNqjfun'),
+    walk2: assetUrl('bysmTYdaE6'),
+    walk3: assetUrl('DWUNBodZSa'),
+    walk4: assetUrl('5DSZqUkxA6'),
+    attack: assetUrl('YeoHvTLiIl'),
+    attack2: assetUrl('i3B2LUfnCj'),
+    hit: assetUrl('MSsnp4nJ4y'),
+    color: '#222222', glow: '#663333', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_fairy: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkregzahuho_ve_miaoda',
-    color: '#80e0a0', glow: '#c0ffd0', useImg: true
+    idle: assetUrl('ki3Alsfcua'),
+    walk: assetUrl('ki3Alsfcua'),
+    walk2: assetUrl('lolCkYIGT6'),
+    walk3: assetUrl('5ZTNnchgY7'),
+    walk4: assetUrl('X9ynYUUdla'),
+    attack: assetUrl('EnmYOQ7wAu'),
+    attack2: assetUrl('jNr9X1hJn1'),
+    hit: assetUrl('prdxrscYBm'),
+    color: '#44aaff', glow: '#88ccff', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_phoenix: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrefq7fwai_ve_miaoda',
-    color: '#ff6020', glow: '#ffa060', useImg: true
+    idle: assetUrl('C3nStQIv2d'),
+    walk: assetUrl('C3nStQIv2d'),
+    walk2: assetUrl('sbf86tmRI6'),
+    walk3: assetUrl('Co7ankaimz'),
+    walk4: assetUrl('40emHeCVH1'),
+    attack: assetUrl('9FvPKgn64v'),
+    attack2: assetUrl('xkVjHUVbHy'),
+    hit: assetUrl('MOlHyGoYl1'),
+    color: '#ff6622', glow: '#ffaa44', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_wolf_ice: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrefmiwqlo_ve_miaoda',
-    color: '#80c0e0', glow: '#c0e8ff', useImg: true
+    idle: assetUrl('Pe5dRBZRL8'),
+    walk: assetUrl('Pe5dRBZRL8'),
+    walk2: assetUrl('4CM2osVl12'),
+    walk3: assetUrl('Y2ZtcTnufI'),
+    walk4: assetUrl('8M5wShWyWe'),
+    attack: assetUrl('DcLvLZr5LQ'),
+    attack2: assetUrl('h39UlWaOy2'),
+    hit: assetUrl('d2wfg3gMTS'),
+    color: '#66ccff', glow: '#88ddff', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_unicorn: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreauduybg_ve_miaoda',
-    color: '#f0e0ff', glow: '#fff0ff', useImg: true
+    idle: assetUrl('GnpwHW0iBq'),
+    walk: assetUrl('GnpwHW0iBq'),
+    walk2: assetUrl('0NVeN9lNJA'),
+    walk3: assetUrl('3RqulnIMKy'),
+    walk4: assetUrl('FwxAfPv3Zm'),
+    attack: assetUrl('ad4NkJ2hkk'),
+    attack2: assetUrl('9sZNQmFymS'),
+    hit: assetUrl('kdc5dat4qk'),
+    color: '#ffffff', glow: '#ffdd88', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_panther: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrebbrhgbg_ve_miaoda',
-    color: '#603080', glow: '#a060d0', useImg: true
+    idle: assetUrl('axPXG6qjSl'),
+    walk: assetUrl('axPXG6qjSl'),
+    walk2: assetUrl('nKfUWiF77D'),
+    walk3: assetUrl('VzUPfM2jXL'),
+    walk4: assetUrl('kCmPAfV2Wu'),
+    attack: assetUrl('aC3sJuODWM'),
+    attack2: assetUrl('xw3G6UpfC7'),
+    hit: assetUrl('FdpkT3hOOG'),
+    color: '#222222', glow: '#44ff44', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_thunder: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreelduido_ve_miaoda',
-    color: '#f0e040', glow: '#fff890', useImg: true
+    idle: assetUrl('yg2cOCZTyG'),
+    walk: assetUrl('yg2cOCZTyG'),
+    walk2: assetUrl('0inp6LignI'),
+    walk3: assetUrl('PQQmRUIgyr'),
+    walk4: assetUrl('PD8GO6Fmrz'),
+    attack: assetUrl('B6cC2Pn1QV'),
+    attack2: assetUrl('vPik2CFrGB'),
+    hit: assetUrl('WXp1HQhGmb'),
+    color: '#3388ff', glow: '#66bbff', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_turtle: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd7gxhmqi_ve_miaoda',
-    color: '#60a060', glow: '#90d090', useImg: true
+    idle: assetUrl('zW8cznuehh'),
+    walk: assetUrl('zW8cznuehh'),
+    walk2: assetUrl('uhUzHW8L7c'),
+    walk3: assetUrl('a2zRgTvIfg'),
+    walk4: assetUrl('ScDxOqHAE0'),
+    attack: assetUrl('IlglhTIjlX'),
+    attack2: assetUrl('I7WXqvMDHH'),
+    hit: assetUrl('aU65soJxYA'),
+    color: '#448833', glow: '#66aa55', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_tiger: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreerfeigo_ve_miaoda',
-    color: '#e0a030', glow: '#ffd060', useImg: true
+    idle: assetUrl('RSeB5G5U1Q'),
+    walk: assetUrl('RSeB5G5U1Q'),
+    walk2: assetUrl('VQnJd0kS2x'),
+    walk3: assetUrl('4uLi7MXPBx'),
+    walk4: assetUrl('fth9fc4jJQ'),
+    attack: assetUrl('LcI5mzyJe7'),
+    attack2: assetUrl('OlR8gHbpNf'),
+    hit: assetUrl('DIyJBB7Hfd'),
+    color: '#ffffff', glow: '#66ccff', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_panda: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrefkve2gg_ve_miaoda',
-    color: '#606070', glow: '#b0b0c0', useImg: true
+    idle: assetUrl('GhzfjOOsXw'),
+    walk: assetUrl('GhzfjOOsXw'),
+    walk2: assetUrl('WVpILgFuCF'),
+    walk3: assetUrl('5cAcbkREGT'),
+    walk4: assetUrl('8yxvOfavEs'),
+    attack: assetUrl('ZmhMturjei'),
+    attack2: assetUrl('3MNYYyJXzo'),
+    hit: assetUrl('OtKKaAFBWE'),
+    color: '#dddddd', glow: '#888888', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_dragon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreerfeiho_ve_miaoda',
-    color: '#e08030', glow: '#ffb060', useImg: true
+    idle: assetUrl('toZoMFE4Y0'),
+    walk: assetUrl('toZoMFE4Y0'),
+    walk2: assetUrl('YZBE6jTDFn'),
+    walk3: assetUrl('Oz65fwVOro'),
+    walk4: assetUrl('YzUpO45VkX'),
+    attack: assetUrl('en02PuvELB'),
+    attack2: assetUrl('VmilYVj3R7'),
+    hit: assetUrl('WZ3hp8Q96b'),
+    color: '#cc3322', glow: '#ff6644', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_phoenix_legend: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkregtzsyaq_ve_miaoda',
-    color: '#ff6020', glow: '#ffa060', useImg: true
-  },
-  pet_dragon_legend: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd6ajukei_ve_miaoda',
-    color: '#d0a020', glow: '#ffe060', useImg: true
+    idle: assetUrl('BdUPrEjIqo'),
+    walk: assetUrl('BdUPrEjIqo'),
+    walk2: assetUrl('VyAGAhzuZW'),
+    walk3: assetUrl('jHxstB93hg'),
+    walk4: assetUrl('kuODhffekb'),
+    attack: assetUrl('bOd5dxwHjN'),
+    attack2: assetUrl('xgCKwz2TGj'),
+    hit: assetUrl('6AvpFAIKmW'),
+    color: '#cc66ff', glow: '#ffaa00', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_ghost: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkregzahugo_ve_miaoda',
-    color: '#a0b0d0', glow: '#d0e0f0', useImg: true
+    idle: assetUrl('ueUWPhtVi7'),
+    walk: assetUrl('ueUWPhtVi7'),
+    walk2: assetUrl('SDheJk0GLL'),
+    walk3: assetUrl('DD67d1B0TV'),
+    walk4: assetUrl('0WsrYY040Z'),
+    attack: assetUrl('HNdUlfLsVm'),
+    attack2: assetUrl('i9hgcsybAi'),
+    hit: assetUrl('YEc0gxHOmV'),
+    color: '#66ccff', glow: '#aaeeff', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_babydragon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreb556oei_ve_miaoda',
-    color: '#ff8030', glow: '#ffc060', useImg: true
+    idle: assetUrl('VH2C2VRGFt'),
+    walk: assetUrl('VH2C2VRGFt'),
+    walk2: assetUrl('blQbWMunM7'),
+    walk3: assetUrl('zAHEBQikh7'),
+    walk4: assetUrl('X6MGt2mZ1X'),
+    attack: assetUrl('rjhqcTwEvQ'),
+    attack2: assetUrl('QM7hU29zbH'),
+    hit: assetUrl('VlbTV8sBt6'),
+    color: '#333333', glow: '#aa44ff', useImg: true, multiFrame: true, coverMode: true,
   },
   pet_golddragon: {
-    idle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd7ll3wai_ve_miaoda',
-    color: '#ffd040', glow: '#fff080', useImg: true
+    idle: assetUrl('vERqwfvp4V'),
+    walk: assetUrl('vERqwfvp4V'),
+    walk2: assetUrl('kNCoNImcND'),
+    walk3: assetUrl('Ov4vQ1MHH1'),
+    walk4: assetUrl('I4RyckOgam'),
+    attack: assetUrl('YoYDWV77Dl'),
+    attack2: assetUrl('02lvTesLUi'),
+    hit: assetUrl('w90N5yKYEL'),
+    color: '#ffaa00', glow: '#ffdd44', useImg: true, multiFrame: true, coverMode: true,
+  },
+  // ========== 新寵物 8 幀完整動畫 ==========
+  pet_imp: {
+    idle: assetUrl('VNXoKs3gVe'),
+    walk: assetUrl('VNXoKs3gVe'),
+    walk2: assetUrl('8eUdSO7p1X'),
+    walk3: assetUrl('QgfE2yaV9i'),
+    walk4: assetUrl('UeNX99JezO'),
+    attack: assetUrl('aNnoxlZvqy'),
+    attack2: assetUrl('1kRVSk3VBo'),
+    hit: assetUrl('vm7NU2YYU2'),
+    color: '#ff8040', glow: '#ffb060', useImg: true, multiFrame: true,
+  },
+  pet_fairy_new: {
+    idle: assetUrl('nhyoVvTDFa'),
+    walk: assetUrl('nhyoVvTDFa'),
+    walk2: assetUrl('OUOgvHV162'),
+    walk3: assetUrl('OS4DgGfxDX'),
+    walk4: assetUrl('UqBOwVpHVD'),
+    attack: assetUrl('gCnLxoD4bF'),
+    attack2: assetUrl('ZA02HOMe9o'),
+    hit: assetUrl('eGsb5rxWyJ'),
+    color: '#a0e0ff', glow: '#d0f0ff', useImg: true, multiFrame: true,
+  },
+  pet_witch_cat: {
+    idle: assetUrl('QozCIYqTi6'),
+    walk: assetUrl('QozCIYqTi6'),
+    walk2: assetUrl('riDC4w2gn5'),
+    walk3: assetUrl('B3Q2VfQ2ma'),
+    walk4: assetUrl('34LTJLiNDO'),
+    attack: assetUrl('HSeduXVKKS'),
+    attack2: assetUrl('sDUTc8rRsH'),
+    hit: assetUrl('ywIBCICmss'),
+    color: '#a060e0', glow: '#c090ff', useImg: true, multiFrame: true,
+  },
+  pet_fire_lizard: {
+    idle: assetUrl('3x3U48gZcR'),
+    walk: assetUrl('3x3U48gZcR'),
+    walk2: assetUrl('ZMuQtC5AnB'),
+    walk3: assetUrl('LDFdRSGLLU'),
+    walk4: assetUrl('9uCZT7XwV6'),
+    attack: assetUrl('Y0gKbBMsH0'),
+    attack2: assetUrl('KGHuzfmA1U'),
+    hit: assetUrl('hniEKvAlCO'),
+    color: '#ff5030', glow: '#ff9060', useImg: true, multiFrame: true,
+  },
+  pet_ice_sprite: {
+    idle: assetUrl('bOtwklpRMp'),
+    walk: assetUrl('bOtwklpRMp'),
+    walk2: assetUrl('1pdxAdoLkk'),
+    walk3: assetUrl('t14WAYneux'),
+    walk4: assetUrl('fIErMbleyT'),
+    attack: assetUrl('6t4fhS2Rnk'),
+    attack2: assetUrl('0n0OP8HGwG'),
+    hit: assetUrl('OPGnviaSwV'),
+    color: '#60c0ff', glow: '#a0e0ff', useImg: true, multiFrame: true,
+  },
+  pet_ghost_new: {
+    idle: assetUrl('rs4Pd5hKUV'),
+    walk: assetUrl('rs4Pd5hKUV'),
+    walk2: assetUrl('tVfIA7pfL5'),
+    walk3: assetUrl('vOdqBdV8SH'),
+    walk4: assetUrl('HqrXEGComg'),
+    attack: assetUrl('RDeqjGT7Vb'),
+    attack2: assetUrl('Hs525wcDUn'),
+    hit: assetUrl('CHsc86xPbU'),
+    color: '#c0c0e0', glow: '#e0e0ff', useImg: true, multiFrame: true,
+  },
+  pet_golden_whelp: {
+    idle: assetUrl('0JFrRSWgEf'),
+    walk: assetUrl('0JFrRSWgEf'),
+    walk2: assetUrl('g7KBkTkxXR'),
+    walk3: assetUrl('7eH9UKyXCD'),
+    walk4: assetUrl('l8FG4zID55'),
+    attack: assetUrl('8vBBDoZ9zt'),
+    attack2: assetUrl('mbRbnIs048'),
+    hit: assetUrl('7A7eCh99EZ'),
+    color: '#ffd040', glow: '#ffee80', useImg: true, multiFrame: true,
+  },
+  pet_shadow_serpent: {
+    idle: assetUrl('5chTx1jae1'),
+    walk: assetUrl('5chTx1jae1'),
+    walk2: assetUrl('5pLySnK3Lg'),
+    walk3: assetUrl('luJgikxm9M'),
+    walk4: assetUrl('A21pYqojQe'),
+    attack: assetUrl('fZ8bgNFydU'),
+    attack2: assetUrl('7PqulR5l5h'),
+    hit: assetUrl('bms44tYXFo'),
+    color: '#604080', glow: '#9060c0', useImg: true, multiFrame: true,
   },
 
 };
+// ==================== 資源清單（用於離線包下載） ====================
+const ASSET_MANIFEST = [
+  '01wfNPiTXP',
+  '0behWSGxwq',
+  '0JFrRSWgEf',
+  '0n0OP8HGwG',
+  '0qJFdwQwIA',
+  '0UZceLNR6V',
+  '0yfRk9msfe',
+  '1BinCuwimp',
+  '1daCVmkSeg',
+  '1djiUtrb2c',
+  '1HbZreUQHQ',
+  '1kRVSk3VBo',
+  '1LlR6vpGYg',
+  '1mwrtdUjUW',
+  '1OVUePiezR',
+  '1pdxAdoLkk',
+  '1pMUj0WrTL',
+  '1PRvT0IyUa',
+  '1wgGAVd8JU',
+  '1x1j3NjhPH',
+  '1yaLUBo60m',
+  '2hMO5hilVu',
+  '2lE46ur5Jl',
+  '2UqZ9EqS9X',
+  '2znmT3dKQc',
+  '2ZqpOZV4JY',
+  '324delxMNK',
+  '34LTJLiNDO',
+  '38AbJxx35a',
+  '38FuwV7gPw',
+  '3bD1z9o8eg',
+  '3CxLgjYu06',
+  '3E5L92SGX8',
+  '3eq3rAYEYV',
+  '3iG0uaSQjw',
+  '3jWWxnd4sb',
+  '3p1uOOFmcV',
+  '3qi2k1tCkD',
+  '3x3U48gZcR',
+  '3ygE66VdLj',
+  '49gZhlUxoM',
+  '4dWxcP34zc',
+  '4FHggRV3UL',
+  '4GGzWY67AP',
+  '4im8YcndVt',
+  '4jlfLOErYV',
+  '4rskJ0uzUP',
+  '4srtvDjQPd',
+  '4trwK4nbCK',
+  '582Ij09o3K',
+  '5chTx1jae1',
+  '5F14d71Pyl',
+  '5m99bxAUW8',
+  '5oTzfOrfzV',
+  '5pLySnK3Lg',
+  '5qCBEK1sLt',
+  '5S1tUIsls4',
+  '5UMFE65Hny',
+  '5V9228QzVY',
+  '5vqHZHGQV5',
+  '6AohjTIRnR',
+  '6ifL3DgjCY',
+  '6mcEV2Pgpy',
+  '6PUkZUgPkd',
+  '6QwiEOkRqz',
+  '6t4fhS2Rnk',
+  '72qwU65Xsa',
+  '77Di514UHF',
+  '7A7eCh99EZ',
+  '7cS3BR2aXs',
+  '7eH9UKyXCD',
+  '7EMmttpXtt',
+  '7FnWRqmp3O',
+  '7jZBWui3Db',
+  '7PqulR5l5h',
+  '7rkggQtVva',
+  '7x4aF7VXRK',
+  '7YUd2dOZDc',
+  '839Tu3fbmo',
+  '88a59LdSSj',
+  '88U5UCP6GP',
+  '8dvXmhS5c7',
+  '8eUdSO7p1X',
+  '8hb1wWKeFd',
+  '8hLX21hIX7',
+  '8IDPqcesFo',
+  '8JtMbrXzkC',
+  '8KOIwItpMd',
+  '8lYZtkJWBq',
+  '8neMJjtvhr',
+  '8Oi9kqjlW7',
+  '8s0noOL4Yj',
+  '8UCc4uRd5e',
+  '8UiDnbHq3e',
+  '8uoto9Z1wj',
+  '8UYlKPr8L4',
+  '8vBBDoZ9zt',
+  '95MOzrPXE4',
+  '9aJxLBlYSk',
+  '9aUL4o7j9K',
+  '9dOsER3iAQ',
+  '9evfx7AVO8',
+  '9HVEwc1CHV',
+  '9j6fRyQNOL',
+  '9L5kJRdXkU',
+  '9nqQW8OMjO',
+  '9uCZT7XwV6',
+  '9Us5kQk4ie',
+  'A21pYqojQe',
+  'A2ZjoB2Pki',
+  'a8JCQmVVNT',
+  'a9s53qaahR',
+  'A9YN2hiCuY',
+  'ADErARCdEu',
+  'AKCLMYp49L',
+  'AKVEuZjd4f',
+  'AlSTOhTlsh',
+  'aNnoxlZvqy',
+  'aNWVrFpkQ7',
+  'aNZwWxt8wX',
+  'APDWUGWZVw',
+  'aPOtgxIgss',
+  'ArU5iZorxO',
+  'Atwxnpfckc',
+  'axD7UXXItT',
+  'AXY4DIQe2G',
+  'AY9mkXA71v',
+  'B1oZEnBt4W',
+  'B1Xj8KAEhe',
+  'b3NpFiK4gt',
+  'B3Q2VfQ2ma',
+  'B5UzjmgzgT',
+  'Bb4unEW6Or',
+  'BBZwu283Gy',
+  'be2uP8VYpR',
+  'BG9V2u0zRc',
+  'bGksllK8MX',
+  'BiBfVufViZ',
+  'BIuGGAsYZh',
+  'Bm7QnJD8GM',
+  'bms44tYXFo',
+  'boDlZxOnVq',
+  'BODZUpyXSI',
+  'bOtwklpRMp',
+  'boUCARKlUK',
+  'bOvayC2iOD',
+  'bSTo2dlMbK',
+  'Buiu25AfYt',
+  'BUQtrrYRAS',
+  'BxhqoNBsy9',
+  'bYD7aJdZCZ',
+  'c2pcXyCAoC',
+  'C3VstdT6dQ',
+  'ccwUb4KD6L',
+  'CewMfMo7tU',
+  'CFc9nu0uVZ',
+  'CH3Wf8rqcv',
+  'CHsc86xPbU',
+  'ci6rXRx8DG',
+  'clSORpgY8H',
+  'cN3E5Nquah',
+  'CnUAPsRzlA',
+  'crmYOmDoIP',
+  'cRVH78jrX4',
+  'CRvwT4vtVx',
+  'cUjFPtZ0qW',
+  'Cv17QVXyT5',
+  'CWImnq6w74',
+  'D6U5t601Rd',
+  'DA1JiUu25C',
+  'DagRO0Zu0O',
+  'daKfmMOKiL',
+  'DCr5DPCmxk',
+  'DEI5Znr00s',
+  'dfYQSwdbFC',
+  'DGdNzHjEpE',
+  'DGju3Q4Ork',
+  'DInQE4sGfT',
+  'Dkfsh1CEdZ',
+  'DKPorAcX7s',
+  'DN7Jyx82Wy',
+  'dPBulifvdn',
+  'DQ2zKd6PlE',
+  'dr9VJVQW76',
+  'drRUJ1PiSv',
+  'DsZs2wdjX8',
+  'dTOA2QKqa8',
+  'dxmuWjHkBl',
+  'EesMLrHMPq',
+  'ef7gCUKojx',
+  'ef7VCkv4js',
+  'EfvFkRDFHo',
+  'eGFznrB3mT',
+  'eGsb5rxWyJ',
+  'EHH32Fvnw1',
+  'EIpWEIeVMj',
+  'ekiTVHnUBx',
+  'emAq8UCONc',
+  'En7HDFOJVa',
+  'ennzdff10h',
+  'eNrCqbW21z',
+  'eqsOwvfx7E',
+  'EVisbZLQtX',
+  'eZAsyoTZ9W',
+  'F6ctRUeEtA',
+  'f7yZo8ohJK',
+  'F8IHeapTW8',
+  'f8JFmtkifj',
+  'F9QCsN3SUJ',
+  'fCC7qVivRp',
+  'FdRbs6DDqD',
+  'FEaYTU3HUH',
+  'Ffq0Ozp9WT',
+  'FfzUQzcUjH',
+  'fIErMbleyT',
+  'FizXHwVIDs',
+  'fNqR5LHWx6',
+  'fo7IkKOdCV',
+  'FOIte0Nrnl',
+  'fOknq8rtA6',
+  'Fr4eqGqBd6',
+  'FRwIj4bM49',
+  'FVLNAE1Aju',
+  'FvmW2tQuUr',
+  'fXcREvAk5H',
+  'FXdRQ4zYcV',
+  'fyAgs0rT2U',
+  'fZ8bgNFydU',
+  'g3Irrwx4oq',
+  'G3QcnMpuCP',
+  'g5u2Sq5agH',
+  'G5YNj7nOuU',
+  'g7KBkTkxXR',
+  'GCjQ9UYJCa',
+  'gCnLxoD4bF',
+  'GcUyuA4fDo',
+  'GfUTUL5jbI',
+  'GhtUV9MoUM',
+  'GI7RvSykGX',
+  'gLa19G08zS',
+  'GmJMM0gLrk',
+  'GMxsqLaCGt',
+  'gnxhj1r7Tr',
+  'GNZH2vsocJ',
+  'GP2tFT10gV',
+  'GsVeRxnwhk',
+  'GUlp5Qy6iw',
+  'GyUzsLGZl9',
+  'GzLoOexBtC',
+  'gZssWp0Yaq',
+  'H0oH4yS5iQ',
+  'h1SdH2HSwb',
+  'h456EaLNMu',
+  'hbuS4nnQI2',
+  'hFbVk7Wv8K',
+  'HfzbqxNOUp',
+  'HHYnZL77dr',
+  'HjiPNansZJ',
+  'hjTKkz0REl',
+  'hkUGU9PcrJ',
+  'HLDhc9wPmh',
+  'hLV7TMIaDa',
+  'hniEKvAlCO',
+  'HqrXEGComg',
+  'Hs525wcDUn',
+  'HSeduXVKKS',
+  'HtY7WUwH6y',
+  'hvqAPvsE23',
+  'HzkkhZbJQy',
+  'hZVlq8jqks',
+  'I2SNzCU0xy',
+  'i3hZlyVOEh',
+  'i4rVzQcOe5',
+  'i5XYfgjPDQ',
+  'i9ohDah6fK',
+  'iA3sODRZZ1',
+  'ic8EWNDNYs',
+  'IgQ8xDV3U4',
+  'IIMkBDTmaj',
+  'IiUR2GRnKz',
+  'IkB3kC0MLn',
+  'il72r9FzSj',
+  'iovh4nWNY3',
+  'IpcEagfwmT',
+  'ipvu758c68',
+  'iQg6zyogEa',
+  'IRN6nMGdEI',
+  'IrrsDh0lJh',
+  'iTVLHzirHU',
+  'IVTvgZd0UQ',
+  'IVxWqYtCFv',
+  'Ix5C2VbmyJ',
+  'iXPfLZ7kDc',
+  'iY86u9q36V',
+  'iYmy5Ot2bc',
+  'J9PLJTHNOp',
+  'JcezH6rVhY',
+  'jCmgvBVpIR',
+  'je8dqUMZZI',
+  'Jf0iOCYab0',
+  'JHRLHgLeB7',
+  'jHVVvaUxZ2',
+  'JIGsfqs5tQ',
+  'JiW0xwVu7J',
+  'jJaVDoXIZ2',
+  'jjmrlmCWwC',
+  'jkm5kDZZyi',
+  'JktTBAZnKa',
+  'JnjUPjCz1B',
+  'joG7wQ5Okj',
+  'JopDfIOw63',
+  'jrdjr24uAs',
+  'jsmfG7UE6X',
+  'JspSNdIB2O',
+  'JUMDNgMWNh',
+  'JXKMtQDjka',
+  'k5L5nRvfAz',
+  'K5xHlNU28s',
+  'K9NBB7cGSb',
+  'Ke1R2tYyYi',
+  'KfG4vGHfBg',
+  'kfSS24e8lc',
+  'kgBNXt4Xoo',
+  'KGGg348qE0',
+  'KGHuzfmA1U',
+  'kgmSkvojy6',
+  'khEwYymEiA',
+  'khiUoUYZ0t',
+  'kjXnwP6c6Q',
+  'kRG3SukyKD',
+  'KRVgdmZdqh',
+  'kUFVQVjTCS',
+  'KUmdX94cVK',
+  'KXQqHrFfFL',
+  'L0GFiAC4BR',
+  'L2mcusQPUi',
+  'L2OBUHNdsg',
+  'L5TZ5ntmcZ',
+  'l8FG4zID55',
+  'L8URoUC8Vs',
+  'l9oUjCLsvD',
+  'LAPpVgy0XL',
+  'lcRLg7RtoR',
+  'LDFdRSGLLU',
+  'LEtxcl2amQ',
+  'libIUSPFdr',
+  'lJuFzWMxAU',
+  'LPEiyQx9Rw',
+  'luJgikxm9M',
+  'lVvCMQkXCa',
+  'lX6cLQIs6s',
+  'lyhUAf9LY1',
+  'M8iLItb8SL',
+  'mbRbnIs048',
+  'MD0YV0uUp3',
+  'MGWIDhAmHM',
+  'miiDBxtyiq',
+  'mKkn8z5w9j',
+  'mO6nx6RVMn',
+  'MouZcszF2k',
+  'MQbYJyKtqK',
+  'MuVRCBrUzD',
+  'MVfdatmvBN',
+  'MwmmkPb6gf',
+  'MwULW9MFX6',
+  'mXwLa8wNlS',
+  'N3ukZgdVoy',
+  'n7NjzUEXzg',
+  'N9HEYzExfI',
+  'NaPbNp9c1V',
+  'naY3bow36j',
+  'nbtEFlg5Ee',
+  'NckDHIlVdY',
+  'ndPzwGiddo',
+  'Ndq0gap6Nr',
+  'nGscTgMw4F',
+  'nhyoVvTDFa',
+  'Ni2RrhDZ1j',
+  'nIVWCJVzvT',
+  'nO9v776UoV',
+  'nPAX4om6CQ',
+  'NPqYADvHxg',
+  'nqcRUI3qJU',
+  'nqRRU8MWNQ',
+  'NsjVkvEGJF',
+  'nvZ2iSN7Wz',
+  'nYr4vtlMDr',
+  'nYsO49hDwZ',
+  'o1qWUrCATh',
+  'oAdyWKiLsb',
+  'oAK5BfqbUG',
+  'oDD0P2I05N',
+  'oe0oox3tFe',
+  'OgVGjrT6k0',
+  'ohKPiheUuX',
+  'ohQfz22Mtr',
+  'oJot2AXiYN',
+  'oLc2Dzb4Gp',
+  'OlcaeodfWk',
+  'OncrG5zfYk',
+  'OPGnviaSwV',
+  'OQ155a7UgC',
+  'oqrXlRj3Z5',
+  'OS4DgGfxDX',
+  'OSap9erVl0',
+  'OUOgvHV162',
+  'oUwn28Nr9n',
+  'owA0PPIkhb',
+  'OYdq2KLrpQ',
+  'P4IKJKFaPb',
+  'P5Zx8qWbOU',
+  'P8x4odPP2g',
+  'p930ZQKLDY',
+  'P9nRBRY0yz',
+  'PABlGUtHZI',
+  'paP684cHRG',
+  'paWYrtkpSB',
+  'PblYU3LYWK',
+  'pFJT2Xc5o8',
+  'pHCtLwxDf4',
+  'pI0sXZsd8V',
+  'Pl4PBEqsvs',
+  'PL5FOn3oK3',
+  'PllNPKAjDG',
+  'Pq2UOQqKkD',
+  'pr2EY6HfKb',
+  'pVW3CEoidZ',
+  'q2rm4wKK3M',
+  'q3MAJiktJq',
+  'qaasdrxeR4',
+  'Qd4BJClvxa',
+  'qdmsMhWgqS',
+  'QdZmXT0MUR',
+  'QfMFFvqiVJ',
+  'qfwrYpaJ2K',
+  'QgfE2yaV9i',
+  'qN3FcGwEbv',
+  'QO6k6TReK3',
+  'QozCIYqTi6',
+  'Qph4YNxnpW',
+  'qRmnQyhsHF',
+  'QRytegQ1Oe',
+  'QUmDnQmu2V',
+  'QVsxMC7AXE',
+  'Qz5xkyMung',
+  'QzBWNKPsY4',
+  'qzfRRcBskj',
+  'r5SXmQVUv2',
+  'RBtLFeKz3n',
+  'rCn1Xg8QwR',
+  'RCqUWJ5gFx',
+  'rCZVzIR4DM',
+  'RDeqjGT7Vb',
+  'RfAz4VpN1S',
+  'rFGDkDOZRB',
+  'riDC4w2gn5',
+  'RiirQZ3fSV',
+  'rmIJxJ5Fpg',
+  'RPBVhIBi7V',
+  'RqzkY6gSAe',
+  'rs4Pd5hKUV',
+  'rU1ioEhNRd',
+  'rUD0POkJta',
+  'rUNpaVcNTV',
+  'RuWfBBWE3q',
+  'rvAT3NSnQB',
+  'RWwbIlt65D',
+  'rY6t9P8rRQ',
+  's1b9NsVUNP',
+  'S4gNP4k3pT',
+  's88OAtsBTM',
+  's8UUkfmEvx',
+  'ScTVMscBly',
+  'sDUTc8rRsH',
+  'SiOQl1qSHv',
+  'Ss1BU5oAYq',
+  'StSWxwsuyL',
+  'StVW9D5cG3',
+  'sXiSWjgOUW',
+  'sxV2RI2KMa',
+  'sZCb8OB6bL',
+  'SzFME3Pi9q',
+  't14WAYneux',
+  'T6U5hG7RQH',
+  'T73arNQQlA',
+  'T9M88GBCQk',
+  'TAQamR2aH5',
+  'TCEkPooI9E',
+  'Td3MQT1tnF',
+  'tdkg3als9P',
+  'teo6Rq0FDT',
+  'tfleZSU2QM',
+  'tIU5IOjXsC',
+  'TiXM8q4lZK',
+  'TjaUWFvn6f',
+  'tjFKwAE5pk',
+  'tjZe2VQqCV',
+  'TLuUdtTRPo',
+  'tuLEUDjxSt',
+  'tVfIA7pfL5',
+  'tVVnum1RHF',
+  'twKeG7UsnN',
+  'tYgMztu4TJ',
+  'tyr9eGSGRp',
+  'TzCUCDhjcu',
+  'u5eemtHJJk',
+  'u8C4FDxAzq',
+  'U8qQhdSmbz',
+  'U8U8zD5mQY',
+  'u8YESfQcD3',
+  'U9ed5silDc',
+  'UBsEfc2hXx',
+  'UdeJSiOwgC',
+  'UeNX99JezO',
+  'UfxwzeARpf',
+  'UG1LXPgLYT',
+  'UgIpBy6CPb',
+  'UGv0OG7wbW',
+  'UhCMU18cUM',
+  'UHhTcjVpkB',
+  'uiC3MCWbCM',
+  'uIJL48AKFZ',
+  'UIynvopITS',
+  'UjIVNyA3ms',
+  'UKCZ9Ol81J',
+  'UkrwvfPntT',
+  'UlhVkekfia',
+  'ULQRvB1CdS',
+  'UNCvpUlZe3',
+  'UNXOnnvtkr',
+  'Upf0cg83SP',
+  'UqBOwVpHVD',
+  'uQMK2b8OQV',
+  'uUcl6ZXFlt',
+  'UwvHjx0urh',
+  'UZK9QQSG8O',
+  'uzOCokO05x',
+  'v6ULhArJGa',
+  'vASAOufnxz',
+  'vaVKLURbXq',
+  'Vb5KUo6sqn',
+  'VbAUPUjQRw',
+  'VcqQUDirUp',
+  'vCWDKFq6g3',
+  'VfGgZRdHIL',
+  'VgfWfm7Wp3',
+  'VIhy8YlPG3',
+  'vlURIemaSk',
+  'VlwJcbZBZg',
+  'vm7NU2YYU2',
+  'VMWbMkUyXH',
+  'Vn6NQ5HTfP',
+  'vnhVMY1Mbl',
+  'VNXoKs3gVe',
+  'vOdqBdV8SH',
+  'vQNYtfo6e9',
+  'VQQHfjBleU',
+  'VQVnYOGqI0',
+  'VSwDVeboki',
+  'VtD3SeV87P',
+  'vtUUJB7bTi',
+  'VudULCUxHn',
+  'VvBW6MiFDv',
+  'Vy3TpO90sn',
+  'w3wSWVILVJ',
+  'w9OpsvrH9Z',
+  'WaGtGiouSs',
+  'WawynjOGZK',
+  'wDBEVqyFld',
+  'WEmjqc7EFZ',
+  'wF6kKJTc94',
+  'WFSp2Ctj4D',
+  'Wi8i3HuMPN',
+  'WJDNaGLHAt',
+  'wLT8tzjGBp',
+  'wltQkklEoZ',
+  'WoJbCl806L',
+  'WpaQwxUXzh',
+  'wpc6V9qVDO',
+  'WQcx9I9OBq',
+  'wQdrQVESaP',
+  'WV9nboUyMl',
+  'wxUDxrtuLx',
+  'wYFHmKE2C0',
+  'wZ2LHv5DEE',
+  'Wzi9iVLdb2',
+  'x0ngk7iSES',
+  'X25020KITK',
+  'X6JwwPTJvv',
+  'x9J654XZVH',
+  'Xc1HGJ1KGV',
+  'XFdWB5oY1w',
+  'xipd7571LS',
+  'xmJHo2FGR6',
+  'xpE72e816U',
+  'XqAIeRurL0',
+  'XrPTYEU4do',
+  'xWZWQAzLLU',
+  'XXXXXXX',
+  'Y0gKbBMsH0',
+  'y1G12v4mDa',
+  'Y7D6wor5GO',
+  'yavRrKoSfb',
+  'YBZ4yf3Kz5',
+  'YifczyXetY',
+  'YjCgRDLbqB',
+  'ymSWLgEVKA',
+  'yPlesBoan0',
+  'YQCgkX79ZB',
+  'ysMOfAVZc0',
+  'yVyGfGb920',
+  'YW2kaD9BPQ',
+  'ywIBCICmss',
+  'YxXoXhdLmS',
+  'YY8fAAd1go',
+  'yzizeV2vZe',
+  'YzTgNSPMxr',
+  'YZXtVvdmuR',
+  'Z3K4JEOsj7',
+  'Z6uaGG4xJS',
+  'ZA02HOMe9o',
+  'Zae7N0mwUb',
+  'zfpTV9oMHP',
+  'ZhVGRF6Vtp',
+  'ZMuQtC5AnB',
+  'znpkGtJ8yR',
+  'ZNvUhqSGHj',
+  'znvzkueF2c',
+  'ZOAUXTCkwq',
+  'ZOURHhq9xO',
+  'ZPb3OZuZEL',
+  'Zpc82edK6V',
+  'zrnCCihNJt',
+  'ZUTg8LaVx4',
+  'zV8GhUB4Mx',
+  'zZYmJKREfl',
+  'game.js:spark_aadkq54xbzcgo',
+  'game.js:spark_aadkq57bnqcoi',
+  'game.js:spark_aadkq6dgpaoci',
+  'game.js:spark_aadkq6e5eqgcq',
+  'game.js:spark_aadkq6irizcgg',
+  'game.js:spark_aadkq6ivjsmio',
+  'game.js:spark_aadkq6mpmrkki',
+  'game.js:spark_aadkq6q6wywgq',
+  'game.js:spark_aadkq6rungqhi',
+  'game.js:spark_aadkrb2g4hwbq',
+  'game.js:spark_aadkrb2mtywho',
+  'game.js:spark_aadkrb2tol2gi',
+  'game.js:spark_aadkrb2trecbq',
+  'game.js:spark_aadkrb2xfi6fq',
+  'game.js:spark_aadkrbyu7xcag',
+  'game.js:spark_aadkrbyz6ssai',
+  'game.js:spark_aadkrd25ssaao',
+  'game.js:spark_aadkrd3b5jgii',
+  'game.js:spark_aadkrd3d7j6pq',
+  'game.js:spark_aadkrd4brrcsq',
+  'game.js:spark_aadkrd6ajukei',
+  'game.js:spark_aadkrd7gxhmqi',
+  'game.js:spark_aadkrd7ll3wai',
+  'game.js:spark_aadkrd7rqfobi',
+  'game.js:spark_aadkrd7t3t6ko',
+  'game.js:spark_aadkre3ggryag',
+  'game.js:spark_aadkre3ofscho',
+  'game.js:spark_aadkre45m5ubg',
+  'game.js:spark_aadkre5cpgsao',
+  'game.js:spark_aadkre6rzvuuu',
+  'game.js:spark_aadkre6sdzwfw',
+  'game.js:spark_aadkre7ci4cii',
+  'game.js:spark_aadkre7f33iei',
+  'game.js:spark_aadkre7ldugrs',
+  'game.js:spark_aadkreacgyqdo',
+  'game.js:spark_aadkreacphggg',
+  'game.js:spark_aadkreacxtmgg',
+  'game.js:spark_aadkread3d2eg',
+  'game.js:spark_aadkreaq3qomg',
+  'game.js:spark_aadkreauduybg',
+  'game.js:spark_aadkreb556oei',
+  'game.js:spark_aadkreb7m4ibg',
+  'game.js:spark_aadkrebbrhgbg',
+  'game.js:spark_aadkredbr4oeo',
+  'game.js:spark_aadkredgan6ag',
+  'game.js:spark_aadkreduxggio',
+  'game.js:spark_aadkreelduido',
+  'game.js:spark_aadkreerfeigo',
+  'game.js:spark_aadkreerfeiho',
+  'game.js:spark_aadkreeyoo6hq',
+  'game.js:spark_aadkreezckefq',
+  'game.js:spark_aadkrefkve2fg',
+  'game.js:spark_aadkrefkve2gg',
+  'game.js:spark_aadkrefmiwqlo',
+  'game.js:spark_aadkrefq7fwai',
+  'game.js:spark_aadkregoykcfq',
+  'game.js:spark_aadkregtzsyaq',
+  'game.js:spark_aadkregzahugo',
+  'game.js:spark_aadkregzahuho',
+  'game.js:spark_aadkrehajimao',
+  'game.js:spark_aadkreozwbsdq',
+  'game.js:spark_aadkres45tybi',
+  'game.js:spark_aadkreufq2oai',
+  'game.js:spark_aadkrevfed6ai',
+  'game.js:spark_aadkrevrqimio',
+  'game.js:spark_aadkrew2vdilu',
+  'game.js:spark_aadkrewoxxoeq',
+  'game.js:spark_aadkreyaga6gi',
+  'game.js:spark_aadkrezgwcqbi',
+  'game.js:spark_aadkrfa6aaafi',
+  'game.js:spark_aadkrfa6t3kig',
+  'game.js:spark_aadkrfai2wohu',
+  'game.js:spark_aadkrfb3dtmyg',
+  'game.js:spark_aadkrfb6yoycg',
+  'game.js:spark_aadkrfbebe2cs',
+  'game.js:spark_aadkrfdnbcygu',
+  'game.js:spark_aadkrfdqqacds',
+  'game.js:spark_aadkrfec7nuci',
+  'game.js:spark_aadkrfex8k9fu',
+  'game.js:spark_aadkrfexej6gi',
+  'game.js:spark_aadkrffmdt4ei',
+  'game.js:spark_aadkrffprd4fo',
+  'game.js:spark_aadkrffy7a4cw',
+  'game.js:spark_aadkrfgcyuadw',
+  'game.js:spark_aadkrfgii4ocw',
+  'game.js:spark_aadkrfhczsqag',
+  'game.js:spark_aadkrfhuxlkbq',
+  'game.js:spark_aadkrfj7i7ago',
+  'game.js:spark_aadkrfj7i7aho',
+  'game.js:spark_aadkrfjadsadi',
+  'game.js:spark_aadkrfjfxl2bi',
+  'game.js:spark_aadkrfjhiwibi',
+  'game.js:spark_aadkrfjvprofq',
+  'game.js:spark_aadkrfjwe3khg',
+  'game.js:spark_aadkrfkbmmmbi',
+  'game.js:spark_aadkrfkbmmmci',
+  'game.js:spark_aadkrfkn7dqso',
+  'game.js:spark_aadkrfrk3g6fs',
+  'game.js:spark_aadkrfs7r3qws',
+  'game.js:spark_aadkrg2chcolq',
+  'game.js:spark_aadkrg42s6ggo',
+  'game.js:spark_aadkrg5b5ssco',
+  'game.js:spark_aadkrgfjm22sw',
+  'game.js:spark_aadkrggcscsgs',
+  'game.js:spark_aadkrggfwmcou',
+  'game.js:spark_aadkrgkf6f2bw',
+  'game.js:spark_aadkrgkym66hs',
+  'game.js:spark_aadkrglc2tmlw',
+  'game.js:spark_aadkrgmr7pucs',
+  'game.js:spark_aadkrgnianeeg',
+  'game.js:spark_aadkrgnkrywaw',
+  'game.js:spark_aadkrgx6ejygg',
+  'game.js:spark_aadkrgxgcxmcg',
+  'game.js:spark_aadkrgyn27sli',
+  'game.js:spark_aadkrgyrnfyci',
+  'game.js:spark_aadkrgyumjgag',
+  'game.js:spark_aadkrgzhmdgdg',
+  'game.js:spark_aadkrhmx5xqeu',
+  'game.js:spark_aadkrhpm4bqju',
+  'game.js:spark_aadkrhtmz4icw',
+  'index.html:spark_aadkreo4cpwaq',
+  'index.html:spark_aadkrettaiwci',
+  'index.html:spark_aadkrg5gyhsms',
+  'index.html:spark_aadkrg5gyhsns',
+  'index.html:spark_aadkrg5vdv4kw',
+  'index.html:spark_aadkrg7agpycu',
+  'index.html:spark_aadkrhadazias',
+  'index.html:spark_aadkrhajdtwmu',
+  'index.html:spark_aadkrhbjjeudw',
+  'index.html:spark_aadkrhbk652cs',
+  'index.html:spark_aadkrhbuwxsas',
+  'index.html:spark_aadkrhcc4tsks',
+  'index.html:spark_aadkrhd76ayqs',
+  'index.html:spark_aadkrhdxc3opw',
+  'index.html:spark_aadkrhdzab2js',
+  'index.html:spark_aadkrhekzl2pu',
+  'index.html:spark_aadkrhellu6fs',
+  'index.html:spark_aadkrhhp4kwps',
+  'index.html:spark_aadkrhhpqp6au',
+  'index.html:spark_aadkrhihcnigw',
+  'index.html:spark_aadkrhihjjamu',
+];
 
 // 生成精靈圖 HTML（暗黑風格，統一大小，透明背景）
 function spriteHTML(key, opts = {}) {
   const s = SPRITE[key];
-  if (!s) return `<div class="sprite-unit" style="font-size:24px">❓</div>`;
+  if (!s) return `<div class="sprite-unit" style="width:44px;height:44px;border-radius:50%;background:linear-gradient(145deg,#3a2a1a,#1a1208);border:2px solid #4a3a20;box-shadow:inset 0 2px 4px rgba(255,200,100,0.1)"></div>`;
   const size = opts.size || (s.boss ? 64 : s.npc ? 40 : 44);
   const state = opts.state || 'idle'; // idle / attack / dead
   const color = s.color || '#c0a060';
@@ -942,7 +3095,7 @@ function spriteHTML(key, opts = {}) {
     const src = state === 'attack' ? (s.attack || s.idle) : s.idle;
     const filter = `drop-shadow(0 0 6px ${glow}) drop-shadow(0 3px 3px rgba(0,0,0,0.7))`;
     return `<div class="${classes}" style="width:${size}px;height:${size}px">
-      <img src="${src}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="sprite"/>
+      <img src="${src}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="sprite" onerror="this.style.display='none'"/>
     </div>`;
   }
 
@@ -1135,7 +3288,16 @@ function useConsumable(itemId) {
     const d = item.effect.duration || 120;
     addLog('buff', `使用【${item.name}】：移動速度 +${item.effect.moveSpeed}%，持續 ${d >= 60 ? (d/60 >= 60 ? (d/3600).toFixed(1)+'小時' : Math.floor(d/60)+'分鐘') : d+'秒'}`);
   }
-  if (!item.effect?.hp && !item.effect?.mp && !item.effect?.atkSpeed && !item.effect?.atk && !item.effect?.moveSpeed) {
+  // 回城卷軸：傳送至村莊（戰鬥中不可使用）
+  if (item.effect?.teleport === 'town') {
+    if (GS.player.state === 'attacking' || GS.player.state === 'casting' || GS.player.hp < getTotalHpMax() * 0.9) {
+      addLog('system', '戰鬥中無法使用回城卷軸！');
+      return;
+    }
+    loadMap('village');
+    addLog('system', `使用【${item.name}】：已返回古魯丁村莊`);
+  }
+  if (!item.effect?.hp && !item.effect?.mp && !item.effect?.atkSpeed && !item.effect?.atk && !item.effect?.moveSpeed && !item.effect?.teleport) {
     addLog('system', `使用了【${item.name}】`);
   }
   // 减少数量
@@ -1293,16 +3455,10 @@ function openQuickBarPicker(slotIdx) {
         <div class="qb-picker-title">消耗品</div>
         <div class="qb-picker-grid">
           ${consumables.length === 0 ? '<div style="color:var(--parchment-dark);font-size:11px;padding:8px">暫無消耗品</div>' : consumables.map(item => {
-            let iconUrl = ITEM_ICON_MAP.default;
-            if (item.id && ITEM_ICONS[item.id]) iconUrl = ITEM_ICONS[item.id];
-            else if (item.id?.includes('hp')) iconUrl = ITEM_ICON_MAP.potion_hp;
-            else if (item.id?.includes('mp')) iconUrl = ITEM_ICON_MAP.potion_mp;
-            else if (item.itemType === 'consumable') iconUrl = ITEM_ICON_MAP.potion_hp;
-            else if (item.itemType === 'scroll') iconUrl = ITEM_ICON_MAP.scroll;
-            else if (item.itemType === 'gem') iconUrl = ITEM_ICON_MAP.gem;
+             const iconUrl = getItemIconUrl(item);
             return `
             <div class="qb-picker-item ${current?.type === 'item' && current.itemId === item.id ? 'selected' : ''}" data-qb-item="${item.id}" title="${item.name}">
-              <div class="qb-picker-icon"><img src="${iconUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:4px"/></div>
+              <div class="qb-picker-icon"><img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;border-radius:6px;display:block"/></div>
               <div class="qb-picker-name">${item.name} ×${item.count}</div>
             </div>
           `;}).join('')}
@@ -1500,7 +3656,7 @@ const MAP_BG_SWAMP    = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/objec
 const MAP_BG_DARKFOREST = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6irizcgg_ve_miaoda';
 const MAP_BG_DEADDESERT = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6e5eqgcq_ve_miaoda';
 const MAP_BG_VOLCANO    = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6mpmrkki_ve_miaoda';
-const MAP_BG_SIEGE    = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq54xbzcgo_ve_miaoda';
+const MAP_BG_SIEGE    = assetUrl('eeeRmMzAbt');
 
 // 技能图标精灵图（两套）
 // Sheet1: 4列×4行 = 战士(4) + 法师(4) + 弓箭手(4) + 盗贼(4)
@@ -1646,28 +3802,29 @@ const SKILL_SVG_MAP = {
 };
 
 // 暗黑天堂W 風格技能圖標圖片（替代SVG/emoji）
+// 全部統一用 CDN ID 形式，assetUrl / _extractCdnId 都能正確 fallback
 const SKILL_IMG_MAP = {
-  slash:       '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevfed6ai_ve_miaoda',
-  fire:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevfed6ai_ve_miaoda',
-  ice:         '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreufq2oai_ve_miaoda',
-  lightning:   '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreufq2oai_ve_miaoda',
-  poison:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevrqimio_ve_miaoda',
-  holy:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkres45tybi_ve_miaoda',
-  dark:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreozwbsdq_ve_miaoda',
-  heal:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkres45tybi_ve_miaoda',
-  shield:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkres45tybi_ve_miaoda',
-  arrow:       '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevrqimio_ve_miaoda',
-  dagger:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrewoxxoeq_ve_miaoda',
-  dash:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrewoxxoeq_ve_miaoda',
-  summon:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreozwbsdq_ve_miaoda',
-  whirlwind:   '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevfed6ai_ve_miaoda',
-  meteor:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreufq2oai_ve_miaoda',
-  buff:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkres45tybi_ve_miaoda',
-  debuff:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreozwbsdq_ve_miaoda',
-  stun:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevfed6ai_ve_miaoda',
-  magic:       '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreufq2oai_ve_miaoda',
-  crit:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevfed6ai_ve_miaoda',
-  default:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrevfed6ai_ve_miaoda',
+  slash:       'aadkrevfed6ai_ve_miaoda', // 劍/斬擊（紅金）
+  fire:        'aadkrevfed6ai_ve_miaoda', // 火焰
+  ice:         'aadkreufq2oai_ve_miaoda', // 冰霜（藍）
+  lightning:   'aadkreufq2oai_ve_miaoda', // 雷電
+  poison:      'aadkrevrqimio_ve_miaoda', // 毒（綠）
+  holy:        'aadkres45tybi_ve_miaoda', // 神聖（金）
+  dark:        'aadkreozwbsdq_ve_miaoda', // 暗影（紫）
+  heal:        'aadkres45tybi_ve_miaoda', // 治療
+  shield:      'aadkres45tybi_ve_miaoda', // 盾
+  arrow:       'aadkrevrqimio_ve_miaoda', // 箭
+  dagger:      'aadkrewoxxoeq_ve_miaoda', // 匕首
+  dash:        'aadkrewoxxoeq_ve_miaoda', // 衝刺
+  summon:      'aadkreozwbsdq_ve_miaoda', // 召喚
+  whirlwind:   'aadkrevfed6ai_ve_miaoda', // 旋風
+  meteor:      'aadkreufq2oai_ve_miaoda', // 隕石
+  buff:        'aadkres45tybi_ve_miaoda', // 增益
+  debuff:      'aadkreozwbsdq_ve_miaoda', // 減益
+  stun:        'aadkrevfed6ai_ve_miaoda', // 暈眩
+  magic:       'aadkreufq2oai_ve_miaoda', // 魔法
+  crit:        'aadkrevfed6ai_ve_miaoda', // 暴擊
+  default:     'aadkrevfed6ai_ve_miaoda',
 };
 
 // 技能图标映射（按id > effect > element > category > type优先级）
@@ -1706,23 +3863,28 @@ const SKILL_BG_MAP = {
   ranged: 'linear-gradient(135deg, #228844, #66cc88)',
   support: 'linear-gradient(135deg, #6688cc, #aaccff)',
 };
+// 技能圖標背景圖：透過 assetUrl 取得路徑，加上 onerror 漸層 fallback（CSS 變數驅動）
+// 因為 background-image 無法由全域 img error 捕獲，這裡改為：預設背景=漸層，<img> 蓋在上層當真實圖示
+// 等 img 載入成功就顯示，失敗則由 handleImgError 隱藏，露出底下漸層占位
 function getSkillIconBgStyle(skill) {
   if (!skill) return 'background:#1a120a;';
   const key = SKILL_ICON_KEY_MAP[skill.id] || SKILL_ICON_KEY_MAP[skill.effect] || SKILL_ICON_KEY_MAP[skill.element] || SKILL_ICON_KEY_MAP[skill.category] || SKILL_ICON_KEY_MAP[skill.type] || 'slash';
-  const img = SKILL_IMG_MAP[key] || SKILL_IMG_MAP.default;
-  return `background-image:url(${img});background-size:cover;background-position:center;background-color:#1a120a;--icon-key:"${key}";`;
+  const bg = SKILL_BG_MAP[key] || SKILL_BG_MAP.slash;
+  return `background:${bg};--icon-key:"${key}";position:relative;overflow:hidden;`;
 }
+// 技能圖標 HTML：底層=漸層，上層=img（失敗自動 fallback CDN，再失敗隱藏露出漸層）
 function getSkillIconHTML(skill, size = 32) {
   const style = getSkillIconBgStyle(skill);
-  return `<div style="width:${size}px;height:${size}px;border-radius:4px;${style}"></div>`;
+  const key = skill ? (SKILL_ICON_KEY_MAP[skill.id] || SKILL_ICON_KEY_MAP[skill.effect] || SKILL_ICON_KEY_MAP[skill.element] || SKILL_ICON_KEY_MAP[skill.category] || SKILL_ICON_KEY_MAP[skill.type] || 'slash') : 'slash';
+  const imgUrl = assetUrl(SKILL_IMG_MAP[key] || SKILL_IMG_MAP.default);
+  return `<div style="width:${size}px;height:${size}px;border-radius:4px;${style}"><img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;display:block;position:absolute;top:0;left:0" alt="" onerror="handleImgError(this)"/></div>`;
 }
 
 // 取技能圖標圖片（替代原SVG圖標）
 function getSkillSVG(skill) {
-  // 回傳一個 <img> 標籤形式的字符串，保持外部調用不變
   const key = skill ? (SKILL_ICON_KEY_MAP[skill.id] || SKILL_ICON_KEY_MAP[skill.effect] || SKILL_ICON_KEY_MAP[skill.element] || SKILL_ICON_KEY_MAP[skill.category] || SKILL_ICON_KEY_MAP[skill.type] || 'slash') : 'slash';
-  const img = SKILL_IMG_MAP[key] || SKILL_IMG_MAP.default;
-  return `<img src="${img}" style="width:100%;height:100%;object-fit:cover;display:block" alt="skill"/>`;
+  const imgUrl = assetUrl(SKILL_IMG_MAP[key] || SKILL_IMG_MAP.default);
+  return `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;display:block" alt="skill" onerror="handleImgError(this)"/>`;
 }
 
 // 世界尺寸（匹配背景图尺寸，确保摄像机滚动範圍内都有内容）
@@ -1734,15 +3896,19 @@ const SAFE_MAPS = {
     id: 'village', name: '古魯丁村莊', type: 'safe', level: 1,
     bg: MAP_BG_VILLAGE,
     npcs: [
-      { id: 'blacksmith', name: '鐵匠',       x: 200, y: 680, icon: '⚒️' },
-      { id: 'shop',       name: '雜貨商人',   x: 480, y: 640, icon: '🏪' },
-      { id: 'warehouse',  name: '倉庫管理員', x: 340, y: 820, icon: '📦' },
-      { id: 'inn',        name: '旅館老闆娘', x: 620, y: 760, icon: '🏨' },
-      { id: 'bulletin',   name: '佈告欄',     x: 780, y: 660, icon: '📋' },
-      { id: 'quest',      name: '任務官',     x: 920, y: 720, icon: '📜', quest: true },
-      { id: 'dungeon_master', name: '副本管理員', x: 1120, y: 760, icon: '🗝️' },
-      { id: 'premium_shop',   name: '高級商人', x: 1000, y: 860, icon: '💎' },
-      { id: 'main_quest', name: '大祭司',     x: 700, y: 880, icon: '👑', quest: true, mainQuest: true },
+      { id: 'blacksmith',     name: '鐵匠',        x: 180,  y: 700 },  // 左側鐵匠鋪
+      { id: 'shop',           name: '雜貨商人',    x: 420,  y: 660 },  // 中央雜貨店
+      { id: 'warehouse',      name: '倉庫管理員',  x: 300,  y: 860 },  // 左下倉庫
+      { id: 'inn',            name: '旅館老闆娘',  x: 600,  y: 800 },  // 中央偏右旅館
+      { id: 'bulletin',       name: '佈告欄',      x: 760,  y: 680 },  // 右側佈告欄
+      { id: 'quest',          name: '任務官',      x: 900,  y: 740, quest: true },  // 東側任務所
+      { id: 'dungeon_master', name: '副本管理員',  x: 1120, y: 780 },  // 最東副本入口
+      { id: 'premium_shop',   name: '高級商人',    x: 980,  y: 880 },  // 東南高級商店
+      { id: 'main_quest',     name: '大祭司',      x: 680,  y: 900, quest: true, mainQuest: true },  // 南邊神殿
+      { id: 'guard',          name: '村莊警衛',    x: 140,  y: 600 },  // 西北門警衛
+      { id: 'guard',          name: '村莊警衛',    x: 1160, y: 600 },  // 東北門警衛
+      { id: 'guard',          name: '村莊警衛',    x: 560,  y: 560 },  // 中央廣場警衛
+      { id: 'trader',         name: '交易員',       x: 500,  y: 760 },  // 中央廣場東側交易員
     ],
     nearField: 'gludin_field', castle: 'gludio',
   },
@@ -1750,15 +3916,17 @@ const SAFE_MAPS = {
     id: 'forest_village', name: '精靈村莊', type: 'safe', level: 5,
     bg: MAP_BG_ELF,
     npcs: [
-      { id: 'shop',       name: '雜貨商人',   x: 230, y: 660, icon: '🏪' },
-      { id: 'blacksmith', name: '精靈鐵匠',   x: 1000, y: 700, icon: '⚒️' },
-      { id: 'warehouse',  name: '倉庫管理員', x: 380, y: 840, icon: '📦' },
-      { id: 'inn',        name: '樹屋旅館',   x: 560, y: 720, icon: '🏨' },
-      { id: 'bulletin',   name: '佈告欄',     x: 700, y: 660, icon: '📋' },
-      { id: 'quest',      name: '精靈長老',   x: 850, y: 780, icon: '🧙', quest: true },
-      { id: 'dungeon_master', name: '森林嚮導', x: 1120, y: 840, icon: '🗝️' },
-      { id: 'premium_shop',   name: '高級商人', x: 940, y: 880, icon: '💎' },
-      { id: 'main_quest', name: '長老議員',   x: 660, y: 900, icon: '🌳', quest: true, mainQuest: true },
+      { id: 'shop',           name: '雜貨商人',   x: 220,  y: 680 },
+      { id: 'blacksmith',     name: '精靈鐵匠',   x: 1020, y: 720 },
+      { id: 'warehouse',      name: '倉庫管理員', x: 360,  y: 860 },
+      { id: 'inn',            name: '樹屋旅館',   x: 560,  y: 740 },
+      { id: 'bulletin',       name: '佈告欄',     x: 720,  y: 680 },
+      { id: 'quest',          name: '精靈長老',   x: 860,  y: 800, quest: true },
+      { id: 'dungeon_master', name: '森林嚮導',   x: 1140, y: 860 },
+      { id: 'premium_shop',   name: '高級商人',   x: 940,  y: 900 },
+      { id: 'main_quest',     name: '長老議員',   x: 640,  y: 920, quest: true, mainQuest: true },
+      { id: 'guard',          name: '精靈哨兵',   x: 180,  y: 620 },
+      { id: 'guard',          name: '精靈哨兵',   x: 1100, y: 640 },
     ],
     nearField: 'dark_forest', castle: 'oren',
   },
@@ -1766,15 +3934,17 @@ const SAFE_MAPS = {
     id: 'graveyard_village', name: '亡者驿站', type: 'safe', level: 15,
     bg: MAP_BG_DARKFOREST,
     npcs: [
-      { id: 'shop',       name: '補給商人',   x: 240, y: 720, icon: '🏪' },
-      { id: 'blacksmith', name: '鐵匠',       x: 980, y: 720, icon: '⚒️' },
-      { id: 'warehouse',  name: '倉庫管理員', x: 420, y: 860, icon: '📦' },
-      { id: 'inn',        name: '破舊旅館',   x: 580, y: 780, icon: '🏨' },
-      { id: 'bulletin',   name: '佈告欄',     x: 740, y: 700, icon: '📋' },
-      { id: 'quest',      name: '守墓人',     x: 860, y: 820, icon: '⚰️', quest: true },
-      { id: 'dungeon_master', name: '墓地守護者', x: 1100, y: 880, icon: '🗝️' },
-      { id: 'premium_shop',   name: '高級商人', x: 1020, y: 740, icon: '💎' },
-      { id: 'main_quest', name: '亡靈法師',   x: 520, y: 700, icon: '💀', quest: true, mainQuest: true },
+      { id: 'shop',           name: '補給商人',   x: 220,  y: 740 },
+      { id: 'blacksmith',     name: '鐵匠',       x: 960,  y: 740 },
+      { id: 'warehouse',      name: '倉庫管理員', x: 400,  y: 880 },
+      { id: 'inn',            name: '破舊旅館',   x: 580,  y: 800 },
+      { id: 'bulletin',       name: '佈告欄',     x: 740,  y: 720 },
+      { id: 'quest',          name: '守墓人',     x: 860,  y: 840, quest: true },
+      { id: 'dungeon_master', name: '墓地守護者', x: 1100, y: 900 },
+      { id: 'premium_shop',   name: '高級商人',   x: 1000, y: 760 },
+      { id: 'main_quest',     name: '亡靈法師',   x: 500,  y: 720, quest: true, mainQuest: true },
+      { id: 'guard',          name: '驅魔衛兵',   x: 260,  y: 660 },
+      { id: 'guard',          name: '驅魔衛兵',   x: 1060, y: 680 },
     ],
     nearField: 'graveyard', castle: 'dion',
   },
@@ -1782,15 +3952,17 @@ const SAFE_MAPS = {
     id: 'desert_village', name: '沙漠绿洲', type: 'safe', level: 30,
     bg: MAP_BG_DEADDESERT,
     npcs: [
-      { id: 'shop',       name: '沙漠商人',   x: 260, y: 740, icon: '🏪' },
-      { id: 'blacksmith', name: '鐵匠',       x: 960, y: 700, icon: '⚒️' },
-      { id: 'warehouse',  name: '駱駝管理員', x: 440, y: 860, icon: '📦' },
-      { id: 'inn',        name: '綠洲旅館',   x: 600, y: 780, icon: '🏨' },
-      { id: 'bulletin',   name: '佈告欄',     x: 750, y: 720, icon: '📋' },
-      { id: 'quest',      name: '商隊隊長',   x: 880, y: 840, icon: '🐪', quest: true },
-      { id: 'dungeon_master', name: '副本管理員', x: 1120, y: 780, icon: '🗝️' },
-      { id: 'premium_shop',   name: '高級珠寶商', x: 1040, y: 880, icon: '💎' },
-      { id: 'main_quest', name: '沙漠先知',   x: 560, y: 900, icon: '🔮', quest: true, mainQuest: true },
+      { id: 'shop',           name: '沙漠商人',   x: 240,  y: 760 },
+      { id: 'blacksmith',     name: '鐵匠',       x: 980,  y: 720 },
+      { id: 'warehouse',      name: '駱駝管理員', x: 420,  y: 880 },
+      { id: 'inn',            name: '綠洲旅館',   x: 600,  y: 800 },
+      { id: 'bulletin',       name: '佈告欄',     x: 760,  y: 740 },
+      { id: 'quest',          name: '商隊隊長',   x: 880,  y: 860, quest: true },
+      { id: 'dungeon_master', name: '副本管理員', x: 1120, y: 800 },
+      { id: 'premium_shop',   name: '高級珠寶商', x: 1040, y: 900 },
+      { id: 'main_quest',     name: '沙漠先知',   x: 540,  y: 920, quest: true, mainQuest: true },
+      { id: 'guard',          name: '绿洲衛隊',   x: 200,  y: 680 },
+      { id: 'guard',          name: '绿洲衛隊',   x: 1080, y: 660 },
     ],
     nearField: 'red_desert', castle: 'giran',
   },
@@ -1798,15 +3970,17 @@ const SAFE_MAPS = {
     id: 'cave_village', name: '洞窟前哨', type: 'safe', level: 50,
     bg: MAP_BG_DARKFOREST,
     npcs: [
-      { id: 'shop',       name: '補給官',     x: 220, y: 720, icon: '🏪' },
-      { id: 'blacksmith', name: '鐵匠',       x: 980, y: 740, icon: '⚒️' },
-      { id: 'warehouse',  name: '倉庫管理員', x: 400, y: 860, icon: '📦' },
-      { id: 'inn',        name: '前哨營地',   x: 540, y: 760, icon: '🏨' },
-      { id: 'bulletin',   name: '佈告欄',     x: 700, y: 700, icon: '📋' },
-      { id: 'quest',      name: '冒險團長',   x: 820, y: 820, icon: '⚔️', quest: true },
-      { id: 'dungeon_master', name: '洞窟導遊', x: 1100, y: 840, icon: '🗝️' },
-      { id: 'premium_shop',   name: '高級裝備商', x: 960, y: 880, icon: '💎' },
-      { id: 'main_quest', name: '遠古守護者', x: 640, y: 900, icon: '🗿', quest: true, mainQuest: true },
+      { id: 'shop',           name: '補給官',     x: 200,  y: 740 },
+      { id: 'blacksmith',     name: '鐵匠',       x: 960,  y: 760 },
+      { id: 'warehouse',      name: '倉庫管理員', x: 380,  y: 880 },
+      { id: 'inn',            name: '前哨營地',   x: 520,  y: 780 },
+      { id: 'bulletin',       name: '佈告欄',     x: 700,  y: 720 },
+      { id: 'quest',          name: '冒險團長',   x: 820,  y: 840, quest: true },
+      { id: 'dungeon_master', name: '洞窟導遊',   x: 1080, y: 860 },
+      { id: 'premium_shop',   name: '高級裝備商', x: 940,  y: 900 },
+      { id: 'main_quest',     name: '遠古守護者', x: 620,  y: 920, quest: true, mainQuest: true },
+      { id: 'guard',          name: '前哨衛兵',   x: 240,  y: 660 },
+      { id: 'guard',          name: '前哨衛兵',   x: 1060, y: 680 },
     ],
     nearField: 'dark_cave', castle: 'aden',
   },
@@ -1833,10 +4007,10 @@ const BATTLE_MAPS = {
       { type: 'goblin', name: '森林哥布林', level: 8, count: 8 },
       { type: 'skeleton', name: '枯木骷髏', level: 12, count: 8 },
       { type: 'bat', name: '森林蝙蝠', level: 10, count: 7 },
-      { type: 'orc', name: '小树精', level: 14, count: 6 },
+      { type: 'lizardman', name: '森林蜥蜴人', level: 14, count: 6 },
       { type: 'goblin', name: '森林哥布林長', level: 11, count: 4 },
     ],
-    boss: { type: 'orc', name: '森林巨魔', level: 20, hpMult: 10, atkMult: 2.5, respawn: 1800, x: 1900, y: 700, tier: 'normal' },
+    boss: { type: 'lizardman', name: '蜥蜴人酋長', level: 20, hpMult: 10, atkMult: 2.5, respawn: 1800, x: 1900, y: 700, tier: 'normal' },
   },
   graveyard: {
     id: 'graveyard', name: '亡者墓地', type: 'battle',
@@ -1844,12 +4018,13 @@ const BATTLE_MAPS = {
     levelMin: 15, levelMax: 30, nearVillage: 'graveyard_village', castle: 'dion',
     monsters: [
       { type: 'skeleton', name: '骷髏弓手', level: 20, count: 8 },
-      { type: 'orc', name: '食尸鬼', level: 25, count: 7 },
+      { type: 'lizardman', name: '沼澤蜥蜴人', level: 22, count: 7 },
       { type: 'skeleton', name: '亡灵骑士', level: 28, count: 6 },
-      { type: 'bat', name: '幽灵蝙蝠', level: 22, count: 7 },
-      { type: 'orc', name: '食屍鬼王', level: 30, count: 4 },
+      { type: 'ogre', name: '食人魔', level: 25, count: 6 },
+      { type: 'ogre', name: '食人魔狂战士', level: 30, count: 4 },
+      { type: 'monster_direwolf', name: '巨狼', level: 28, count: 5 },
     ],
-    boss: { type: 'skeleton', name: '死亡领主', level: 35, hpMult: 12, atkMult: 3, respawn: 2700, x: 1850, y: 650, tier: 'normal' },
+    boss: { type: 'ogre', name: '食人魔領主', level: 35, hpMult: 12, atkMult: 3, respawn: 2700, x: 1850, y: 650, tier: 'normal' },
   },
   red_desert: {
     id: 'red_desert', name: '赤焰沙漠', type: 'battle',
@@ -1858,26 +4033,78 @@ const BATTLE_MAPS = {
     monsters: [
       { type: 'orc', name: '兽人戰士', level: 35, count: 8 },
       { type: 'scorpion', name: '沙漠蝎', level: 32, count: 7 },
-      { type: 'orc', name: '兽人队長', level: 40, count: 6 },
-      { type: 'scorpion', name: '毒蝎王', level: 45, count: 5 },
-      { type: 'skeleton', name: '沙漠亡靈', level: 38, count: 7 },
-      { type: 'orc', name: '沙盜', level: 42, count: 4 },
+      { type: 'stone_golem', name: '砂岩魔像', level: 38, count: 6 },
+      { type: 'ogre', name: '沙漠食人魔', level: 40, count: 5 },
+      { type: 'lizardman', name: '沙漠蜥蜴人', level: 36, count: 6 },
+      { type: 'stone_golem', name: '巨型石魔像', level: 45, count: 4 },
+      { type: 'monster_scorpion', name: '毒蝎', level: 38, count: 5 },
+      { type: 'monster_hellhound', name: '地獄犬', level: 45, count: 4 },
+      { type: 'monster_direwolf', name: '沙漠巨狼', level: 32, count: 5 },
+    
+      { type: 'spider_queen', name: '蛛后', level: 42, count: 3, behavior: 'passive' },
+    
+      { type: 'lava_golem', name: '熔岩魔像', level: 48, count: 3 },
     ],
-    boss: { type: 'scorpion', name: '蝎王', level: 55, hpMult: 15, atkMult: 3.5, respawn: 3600, x: 2000, y: 750, tier: 'advanced' },
+    boss: { type: 'stone_golem', name: '沙漠守護者', level: 55, hpMult: 15, atkMult: 3.5, respawn: 3600, x: 2000, y: 750, tier: 'advanced' },
   },
   dark_cave: {
     id: 'dark_cave', name: '幽暗洞窟', type: 'battle',
     bg: MAP_BG_DARKFOREST,
-    levelMin: 50, levelMax: 80, nearVillage: 'cave_village', castle: 'aden',
+    levelMin: 50, levelMax: 70, nearVillage: 'cave_village', castle: 'aden',
     monsters: [
-      { type: 'bat', name: '洞窟蝙蝠', level: 55, count: 8 },
-      { type: 'orc', name: '地底兽人', level: 60, count: 7 },
-      { type: 'skeleton', name: '黑暗骷髏', level: 65, count: 7 },
-      { type: 'orc', name: '地底魔王', level: 70, count: 5 },
-      { type: 'scorpion', name: '巨岩蝎', level: 58, count: 6 },
-      { type: 'bat', name: '深淵蝙蝠', level: 72, count: 4 },
+      { type: 'demon', name: '低階惡魔', level: 55, count: 8 },
+      { type: 'stone_golem', name: '黑曜魔像', level: 60, count: 7 },
+      { type: 'lich', name: '亡靈法師', level: 58, count: 6 },
+      { type: 'cerberus', name: '地獄犬', level: 62, count: 5 },
+      { type: 'demon', name: '惡魔衛士', level: 65, count: 6 },
+      { type: 'cerberus', name: '雙頭地獄犬', level: 68, count: 4 },
+      { type: 'monster_hellhound', name: '深淵地獄犬', level: 52, count: 5 },
+      { type: 'monster_braindevil', name: '腦魔', level: 58, count: 4 },
+      { type: 'monster_gargoyle', name: '石像鬼', level: 58, count: 4, behavior: 'passive' },
+      { type: 'monster_wraith', name: '暗影幽魂', level: 65, count: 4, behavior: 'aggro' },
+    
+      { type: 'chimera', name: '奇美拉', level: 58, count: 3 },
+    
+      { type: 'hydra', name: '九头蛇', level: 62, count: 2 },
+    
+      { type: 'naga', name: '娜迦', level: 60, count: 3, behavior: 'aggro' },
     ],
-    boss: { type: 'bat', name: '深渊蝙蝠王', level: 80, hpMult: 20, atkMult: 4, respawn: 3600, x: 2100, y: 800, tier: 'advanced' },
+    boss: { type: 'death_knight', name: '死亡騎士', level: 70, hpMult: 22, atkMult: 4.5, respawn: 5400, x: 2100, y: 800, tier: 'advanced' },
+  },
+  dragon_lair: {
+    id: 'dragon_lair', name: '巨龍巢穴', type: 'battle',
+    bg: MAP_BG_DEADDESERT,
+    levelMin: 65, levelMax: 80, nearVillage: 'cave_village', castle: 'aden',
+    monsters: [
+      { type: 'stone_golem', name: '龍穴守衛', level: 68, count: 6 },
+      { type: 'demon', name: '龍族僕從', level: 72, count: 6 },
+      { type: 'cerberus', name: '火炎地獄犬', level: 70, count: 5 },
+      { type: 'lich', name: '龍語巫妖', level: 75, count: 4 },
+      { type: 'ogre', name: '巨龍奴隸', level: 66, count: 5 },
+    
+      { type: 'bone_dragon', name: '骨龙', level: 72, count: 2 },
+    
+      { type: 'griffin', name: '狮鹫', level: 70, count: 3 },
+    
+      { type: 'armored_bear', name: '装甲熊', level: 75, count: 3 },
+    ],
+    boss: { type: 'dragon', name: '遠古巨龍', level: 80, hpMult: 28, atkMult: 5, respawn: 7200, x: 2100, y: 750, tier: 'world' },
+  },
+  demon_abyss: {
+    id: 'demon_abyss', name: '魔界深淵', type: 'battle',
+    bg: MAP_BG_DARKFOREST,
+    levelMin: 75, levelMax: 90, nearVillage: 'cave_village', castle: 'aden',
+    monsters: [
+      { type: 'demon', name: '深淵惡魔', level: 78, count: 7 },
+      { type: 'cerberus', name: '深淵守衛犬', level: 75, count: 6 },
+      { type: 'lich', name: '深淵巫妖', level: 80, count: 5 },
+      { type: 'demon', name: '惡魔領主', level: 82, count: 4 },
+      { type: 'stone_golem', name: '煉獄魔像', level: 76, count: 5 },
+    
+      { type: 'kraken', name: '深渊海妖', level: 85, count: 2, behavior: 'aggro' },
+    ],
+    boss: { type: 'baphomet', name: '巴風特', level: 85, hpMult: 32, atkMult: 5.5, respawn: 10800, x: 2100, y: 780, tier: 'world' },
+    worldBoss: { type: 'demon_lord', name: '魔王', level: 90, hpMult: 50, atkMult: 7, respawn: 21600, x: 2000, y: 700, tier: 'final' },
   },
 };
 
@@ -1885,31 +4112,36 @@ const BATTLE_MAPS = {
 const SIEGE_MAPS = {
   siege_gludio: {
     id: 'siege_gludio', name: '古魯丁城·攻城戰', type: 'castle_siege',
-    bg: MAP_BG_SIEGE,
+    bg: assetUrl('9P95FEwyY2'),
+    w: 2048, h: 2048,
     levelMin: 1, levelMax: 99, castle: 'gludio',
     monsters: [], // 攻城战由 enterSiegeScene 动态生成守卫
   },
   siege_oren: {
     id: 'siege_oren', name: '歐瑞城·攻城戰', type: 'castle_siege',
-    bg: MAP_BG_SIEGE,
+    bg: assetUrl('9P95FEwyY2'),
+    w: 2048, h: 2048,
     levelMin: 5, levelMax: 99, castle: 'oren',
     monsters: [],
   },
   siege_dion: {
     id: 'siege_dion', name: '狄恩城·攻城戰', type: 'castle_siege',
-    bg: MAP_BG_SIEGE,
+    bg: assetUrl('9P95FEwyY2'),
+    w: 2048, h: 2048,
     levelMin: 15, levelMax: 99, castle: 'dion',
     monsters: [],
   },
   siege_giran: {
     id: 'siege_giran', name: '奇岩城·攻城戰', type: 'castle_siege',
-    bg: MAP_BG_SIEGE,
+    bg: assetUrl('9P95FEwyY2'),
+    w: 2048, h: 2048,
     levelMin: 30, levelMax: 99, castle: 'giran',
     monsters: [],
   },
   siege_aden: {
     id: 'siege_aden', name: '亞丁城·攻城戰', type: 'castle_siege',
-    bg: MAP_BG_SIEGE,
+    bg: assetUrl('9P95FEwyY2'),
+    w: 2048, h: 2048,
     levelMin: 50, levelMax: 99, castle: 'aden',
     monsters: [],
   },
@@ -1936,6 +4168,27 @@ const MONSTER_SPRITES = {
   troll:   SPRITE.troll,
   demon:   SPRITE.demon,
   dragon:  SPRITE.dragon,
+  ogre:    SPRITE.ogre,
+  lizardman: SPRITE.lizardman,
+  stone_golem: SPRITE.stone_golem,
+  lich:    SPRITE.lich,
+  cerberus: SPRITE.cerberus,
+  // 新增 8 帧怪物
+  spider_queen: SPRITE.spider_queen,
+  lava_golem: SPRITE.lava_golem,
+  bone_dragon: SPRITE.bone_dragon,
+  griffin: SPRITE.griffin,
+  chimera: SPRITE.chimera,
+  hydra: SPRITE.hydra,
+  naga: SPRITE.naga,
+  armored_bear: SPRITE.armored_bear,
+  kraken: SPRITE.kraken,
+  monster_hellhound:  SPRITE.monster_hellhound,
+  monster_braindevil: SPRITE.monster_braindevil,
+  monster_direwolf:   SPRITE.monster_direwolf,
+  monster_scorpion:   SPRITE.monster_scorpion,
+  monster_wraith:     SPRITE.monster_wraith,
+  monster_gargoyle:   SPRITE.monster_gargoyle,
   // 新增變種（用現有精靈+濾鏡區分）
   darkorc:  SPRITE.orc,
   icewolf:  SPRITE.wolf,
@@ -1962,10 +4215,10 @@ const NATIONS = [
 
 // 國家國旗圖資（暗黑天堂風格）
 const NATION_FLAGS = {
-  kent:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfkbmmmbi_ve_miaoda', // 紅金獅
-  oren:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfhuxlkbq_ve_miaoda', // 藍銀鷹
-  dion:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrffmdt4ei_ve_miaoda', // 綠交叉劍
-  aden:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfkbmmmci_ve_miaoda', // 金皇冠
+  kent:  assetUrl('aadkrfkbmmmbi_ve_miaoda'), // 紅金獅
+  oren:  assetUrl('aadkrfhuxlkbq_ve_miaoda'), // 藍銀鷹
+  dion:  assetUrl('aadkrffmdt4ei_ve_miaoda'), // 綠交叉劍
+  aden:  assetUrl('aadkrfkbmmmci_ve_miaoda'), // 金皇冠
 };
 
 // CSS 繪製國旗 fallback（圖片加載失敗時備用：彩色小圓點）
@@ -2285,18 +4538,22 @@ const CASTLES = [
 ];
 
 // ==================== 國家系统 ====================
-// 官職等級（中世纪风格，按貢獻度+戰力综合排名）
+// 官職等級（15個世襲爵位，按貢獻度+戰力综合排名自動分配）
 const NOBILITY_RANKS = [
-  { key: 'king',       name: '國王',       count: 1,  minRank: 1,  iconKey: 'crown',    atkBonus: 10, defBonus: 10, hpBonus: 200, color: '#ffd040' },
-  { key: 'prince',     name: '親王',       count: 2,  minRank: 2,  iconKey: 'castle',   atkBonus: 6,  defBonus: 6,  hpBonus: 120, color: '#e0a020' },
-  { key: 'duke',       name: '公爵',       count: 2,  minRank: 4,  iconKey: 'office',   atkBonus: 5,  defBonus: 5,  hpBonus: 100, color: '#c08020' },
-  { key: 'marquess',   name: '侯爵',       count: 3,  minRank: 6,  iconKey: 'shield',   atkBonus: 4,  defBonus: 4,  hpBonus: 80,  color: '#b06010' },
-  { key: 'earl',       name: '伯爵',       count: 4,  minRank: 9,  iconKey: 'sword',    atkBonus: 3,  defBonus: 3,  hpBonus: 60,  color: '#a05000' },
-  { key: 'viscount',   name: '子爵',       count: 5,  minRank: 13, iconKey: 'sword',    atkBonus: 2,  defBonus: 2,  hpBonus: 40,  color: '#804000' },
-  { key: 'baron',      name: '男爵',       count: 8,  minRank: 18, iconKey: 'skill',    atkBonus: 1,  defBonus: 1,  hpBonus: 20,  color: '#603000' },
-  { key: 'paladin',    name: '聖騎士',     count: 10, minRank: 26, iconKey: 'shield',   atkBonus: 1,  defBonus: 2,  hpBonus: 15,  color: '#504030' },
-  { key: 'knight',     name: '騎士',       count: 20, minRank: 36, iconKey: 'sword',    atkBonus: 1,  defBonus: 1,  hpBonus: 10,  color: '#403020' },
-  { key: 'royalguard', name: '皇家護衛',   count: 30, minRank: 56, iconKey: 'shield',   atkBonus: 0,  defBonus: 1,  hpBonus: 10,  color: '#302010' },
+  { key: 'king',         name: '國王',       count: 1,  iconKey: 'crown',   atkBonus: 10, defBonus: 10, hpBonus: 200, color: '#ffd040', tier: 'royal' },
+  { key: 'prince',       name: '親王',       count: 3,  iconKey: 'castle',  atkBonus: 6,  defBonus: 6,  hpBonus: 120, color: '#f0b020', tier: 'royal' },
+  { key: 'duke',         name: '公爵',       count: 1,  iconKey: 'office',  atkBonus: 5,  defBonus: 5,  hpBonus: 100, color: '#d08020', tier: 'high' },
+  { key: 'marquess',     name: '侯爵',       count: 1,  iconKey: 'shield',  atkBonus: 4,  defBonus: 4,  hpBonus: 80,  color: '#c06010', tier: 'high' },
+  { key: 'earl',         name: '伯爵',       count: 1,  iconKey: 'sword',   atkBonus: 3,  defBonus: 3,  hpBonus: 60,  color: '#a05000', tier: 'high' },
+  { key: 'viscount',     name: '子爵',       count: 1,  iconKey: 'sword',   atkBonus: 2,  defBonus: 2,  hpBonus: 40,  color: '#904800', tier: 'military' },
+  { key: 'grandmarshal', name: '總軍團長',   count: 1,  iconKey: 'war',     atkBonus: 4,  defBonus: 3,  hpBonus: 90,  color: '#d04040', tier: 'military' },
+  { key: 'guardcaptain', name: '護衛隊長',   count: 1,  iconKey: 'shield',  atkBonus: 3,  defBonus: 4,  hpBonus: 70,  color: '#c04060', tier: 'military' },
+  { key: 'escortcaptain',name: '侍衛隊長',   count: 1,  iconKey: 'shield',  atkBonus: 3,  defBonus: 3,  hpBonus: 60,  color: '#b03060', tier: 'military' },
+  { key: 'royalguardcap',name: '親衛隊長',   count: 1,  iconKey: 'shield',  atkBonus: 3,  defBonus: 3,  hpBonus: 65,  color: '#a03050', tier: 'military' },
+  { key: 'imperialcap',  name: '禁軍隊長',   count: 1,  iconKey: 'shield',  atkBonus: 4,  defBonus: 2,  hpBonus: 60,  color: '#902040', tier: 'military' },
+  { key: 'diplomat',     name: '外交官',     count: 1,  iconKey: 'skill',   atkBonus: 1,  defBonus: 1,  hpBonus: 30,  color: '#6080c0', tier: 'civil' },
+  { key: 'chamberlain',  name: '侍從官',     count: 1,  iconKey: 'scroll',  atkBonus: 1,  defBonus: 1,  hpBonus: 30,  color: '#60a080', tier: 'civil' },
+  { key: 'intendant',    name: '內務官',     count: 1,  iconKey: 'treasury',atkBonus: 1,  defBonus: 1,  hpBonus: 30,  color: '#8060a0', tier: 'civil' },
 ];
 
 // 國家技能树（被动加成，用貢獻值加点）
@@ -2467,6 +4724,41 @@ const SUMMON_POOL = [
   { id: 's46', name: '銀騎士蓋拉德', rarity: 'red', spriteKey: 'silver_knight_galahad', role: 'tank', classRestriction: ['paladin'], race: 'human',
     stats: { atk: 50, def: 38, hpMax: 550, crit: 6, critDmg: 22 },
     skill: { name: '聖潔守護', desc: '聖光護盾吸收25%傷害並治療20%生命', shieldPct: 0.25, healPct: 0.2, cd: 9 } },
+  // ===== 紅色新英雄（非人型）=====
+  { id: 's47', name: '冰霜狼', rarity: 'red', spriteKey: 'hero_frost_wolf', role: 'dps', classRestriction: ['warrior','rogue'], race: 'beast',
+    stats: { atk: 72, def: 12, hpMax: 240, crit: 18, critDmg: 45 },
+    skill: { name: '寒冰撕咬', desc: '冰凍之牙造成240%暴擊傷害並減速', dmgMult: 2.4, cd: 6 } },
+  { id: 's48', name: '暗影獸', rarity: 'red', spriteKey: 'hero_dark_beast', role: 'dps', classRestriction: ['warrior','rogue','warlock'], race: 'beast',
+    stats: { atk: 75, def: 10, hpMax: 210, crit: 20, critDmg: 50 },
+    skill: { name: '暗影咆哮', desc: '暗影衝擊造成260%範圍傷害', dmgMult: 2.6, aoe: true, cd: 7 } },
+  { id: 's49', name: '雷霆熊', rarity: 'red', spriteKey: 'hero_thunder_bear', role: 'tank', classRestriction: ['warrior','paladin'], race: 'beast',
+    stats: { atk: 45, def: 42, hpMax: 650, crit: 5, critDmg: 20 },
+    skill: { name: '雷霆震擊', desc: '雷霆重擊造成200%範圍傷害並眩暈', dmgMult: 2.0, aoe: true, cd: 8 } },
+  // ===== 紫色新英雄 =====
+  { id: 's50', name: '火焰元素', rarity: 'purple', spriteKey: 'hero_fire_elemental', role: 'dps', classRestriction: ['mage','warlock'], race: 'elemental',
+    stats: { atk: 110, def: 12, hpMax: 260, crit: 15, critDmg: 55 },
+    skill: { name: '烈焰風暴', desc: '火焰爆發造成280%範圍傷害', dmgMult: 2.8, aoe: true, cd: 8 } },
+  { id: 's51', name: '黃金獅鷲', rarity: 'purple', spriteKey: 'hero_golden_griffin', role: 'dps', classRestriction: ['warrior','archer'], race: 'beast',
+    stats: { atk: 100, def: 20, hpMax: 320, crit: 20, critDmg: 45 },
+    skill: { name: '俯衝爪擊', desc: '飛天俯衝造成260%暴擊傷害', dmgMult: 2.6, cd: 7 } },
+  { id: 's52', name: '不死騎士', rarity: 'purple', spriteKey: 'hero_undead_knight', role: 'tank', classRestriction: ['warrior','paladin'], race: 'undead',
+    stats: { atk: 55, def: 55, hpMax: 800, crit: 6, critDmg: 25 },
+    skill: { name: '亡靈護盾', desc: '不死之力護盾吸收30%傷害並反擊', shieldPct: 0.3, dmgMult: 1.2, cd: 9 } },
+  { id: 's53', name: '石頭泰坦', rarity: 'purple', spriteKey: 'hero_stone_titan', role: 'tank', classRestriction: ['warrior','paladin'], race: 'golem',
+    stats: { atk: 48, def: 65, hpMax: 900, crit: 3, critDmg: 20 },
+    skill: { name: '大地之怒', desc: '泰坦重擊造成250%範圍傷害', dmgMult: 2.5, aoe: true, cd: 9 } },
+  // ===== 金色新英雄 =====
+  { id: 's54', name: '魔女', rarity: 'gold', spriteKey: 'hero_demoness', role: 'dps', classRestriction: ['mage','warlock'], race: 'demon',
+    stats: { atk: 180, def: 25, hpMax: 400, crit: 22, critDmg: 65 },
+    skill: { name: '魔獄隕星', desc: '召喚隕星造成350%範圍傷害並治療', dmgMult: 3.5, aoe: true, healPct: 0.2, cd: 10 } },
+  // ===== 紫色新英雄（非人型）=====
+  { id: 's55', name: '鳳凰', rarity: 'purple', spriteKey: 'hero_phoenix', role: 'dps', classRestriction: ['warrior','mage','archer','warlock'], race: 'divine',
+    stats: { atk: 95, def: 10, hpMax: 240, crit: 12, critDmg: 50, atkPct: 15, critAdd: 10, fireDmgPct: 20 },
+    skill: { name: '涅槃烈焰', desc: '鳳凰之火造成260%範圍傷害並燃燒敵人', dmgMult: 2.6, aoe: true, dot: { type: 'burn', dmg: 10, duration: 5 }, cd: 8 } },
+  // ===== 紅色新英雄（非人型）=====
+  { id: 's56', name: '樹人', rarity: 'red', spriteKey: 'hero_treant', role: 'tank', classRestriction: ['warrior','paladin','mage'], race: 'elemental',
+    stats: { atk: 40, def: 35, hpMax: 500, crit: 3, critDmg: 18, defPct: 20, hpPct: 15, hpRegenPct: 10 },
+    skill: { name: '自然之怒', desc: '巨樹重擊造成180%範圍傷害並恢復生命', dmgMult: 1.8, aoe: true, healPct: 0.15, cd: 9 } },
   // ===== 紫色 3个 =====
   { id: 's28', name: '龍骑士', rarity: 'purple', sprite: SPRITE.purpledragon, role: 'tank', classId: 'warrior', race: 'dragon',
     stats: { atk: 80, def: 50, hpMax: 700, crit: 10, critDmg: 30 },
@@ -2484,6 +4776,10 @@ const SUMMON_POOL = [
   { id: 's38', name: '創世神', rarity: 'gold', sprite: SPRITE.archmage, role: 'dps', classId: 'mage', race: 'divine',
     stats: { atk: 220, def: 50, hpMax: 900, crit: 20, critDmg: 70 },
     skill: { name: '創世之雷', desc: '雷霆萬鈞造成400%範圍傷害', dmgMult: 4.0, aoe: true, cd: 12 } },
+  // ===== 新增英雄：瓦爾基里（金） =====
+  { id: 's39_valkyrie', name: '瓦爾基里', rarity: 'gold', sprite: SPRITE.hero_valkyrie, role: 'dps', classId: 'paladin', race: 'divine',
+    stats: { atk: 180, def: 45, hpMax: 800, crit: 18, critDmg: 55 },
+    skill: { name: '聖劍審判', desc: '聖劍降下造成320%神聖傷害並回復生命', dmgMult: 3.2, healPct: 0.15, cd: 10 } },
 ];
 
 const PET_POOL = [
@@ -2574,6 +4870,33 @@ const PET_POOL = [
     stats: { atk: 80, def: 15, hpMax: 260, crit: 15, critDmg: 40 } },
   { id: 'p40', name: '黃金鳳凰', rarity: 'gold', spriteKey: 'pet_phoenix_legend', desc: '至高無上的黃金鳳凰',
     stats: { atk: 180, def: 50, hpMax: 500, crit: 25, critDmg: 60 } },
+  // ===== 新增 8 幀守護寵物 =====
+  { id: 'p41', name: '火蜥蜴', rarity: 'green', spriteKey: 'pet_fire_lizard', desc: '噴吐烈焰的小蜥蜴',
+    stats: { atk: 10, def: 2, hpMax: 22, crit: 5, critDmg: 15 } },
+  { id: 'p42', name: '小惡魔', rarity: 'green', spriteKey: 'pet_imp', desc: '調皮搗蛋的小惡魔',
+    stats: { atk: 12, def: 1, hpMax: 18, crit: 7, critDmg: 18 } },
+  { id: 'p43', name: '妖精', rarity: 'blue', spriteKey: 'pet_fairy_new', desc: '森林裡的妖精，擅長魔法',
+    stats: { atk: 20, def: 3, hpMax: 50, crit: 8, critDmg: 22 } },
+  { id: 'p44', name: '魔女貓', rarity: 'blue', spriteKey: 'pet_witch_cat', desc: '魔女身邊的神秘黑貓',
+    stats: { atk: 18, def: 4, hpMax: 55, crit: 10, critDmg: 20 } },
+  { id: 'p45', name: '小幽靈', rarity: 'blue', spriteKey: 'pet_ghost_new', desc: '飄蕩在夜空中的幽靈',
+    stats: { atk: 16, def: 5, hpMax: 65, crit: 6, critDmg: 18 } },
+  { id: 'p46', name: '冰精靈', rarity: 'red', spriteKey: 'pet_ice_sprite', desc: '寒冰之境誕生的精靈',
+    stats: { atk: 38, def: 8, hpMax: 100, crit: 10, critDmg: 28 } },
+  { id: 'p47', name: '暗影蛇', rarity: 'red', spriteKey: 'pet_shadow_serpent', desc: '潛伏暗影中的毒蛇',
+    stats: { atk: 42, def: 6, hpMax: 80, crit: 14, critDmg: 32 } },
+  { id: 'p48', name: '金龍幼崽', rarity: 'purple', spriteKey: 'pet_golden_whelp', desc: '至尊黃金龍的幼崽',
+    stats: { atk: 65, def: 18, hpMax: 220, crit: 12, critDmg: 35 } },
+  // ===== 新增 8 幀守護寵物（第二彈）=====
+  { id: 'p49', name: '幼龍', rarity: 'red', spriteKey: 'pet_babydragon', desc: '天賦異稟的年幼飛龍，攻勢凌厲',
+    stats: { atk: 25, def: 8, hpMax: 120, crit: 6, critDmg: 20, atkPct: 10, critDmgPct: 15, expPct: 5 } },
+  { id: 'p50', name: '鬼火', rarity: 'blue', spriteKey: 'pet_wisp', desc: '幽幽飄蕩的靈魂之火，精通法術',
+    stats: { atk: 12, def: 3, hpMax: 60, crit: 5, critDmg: 15, mpRegenPct: 20, skillDmgPct: 8, goldPct: 10 } },
+  // ===== 新增守護 =====
+  { id: 'p51_rock_golem', name: '岩石魔像', rarity: 'blue', spriteKey: 'pet_rock_golem', desc: '堅硬如岩石的守護者，防禦力出眾',
+    stats: { atk: 20, def: 30, hpMax: 180, crit: 2, critDmg: 10 } },
+  { id: 'p52_flame_salamander', name: '火焰沙羅曼達', rarity: 'red', spriteKey: 'pet_flame_salamander', desc: '火焰中誕生的火精靈，焚盡一切',
+    stats: { atk: 50, def: 10, hpMax: 110, crit: 12, critDmg: 30 } },
 ];
 
 // ==================== 變身池（抽卡用） ====================
@@ -2595,6 +4918,35 @@ const TRANSFORM_POOL = [
     classRestriction: ['mage', 'warlock'],
     desc: '深淵君主，操控黑暗魔法的惡魔領主',
     stats: { atk: 260, def:  80, hpMax: 550, mpMax: 280, crit: 15, critDmg: 40, hit:  8, walkSpeedPct: 22, atkSpeedPct: 24 } },
+  { id: 't_demonlord', name: '惡魔領主', rarity: 'gold', spriteKey: 'tf_demonlord',
+    classRestriction: null,
+    desc: '統領深淵大軍的惡魔領主，壓倒性的力量碾壓一切',
+    stats: { atk: 300, def: 100, hpMax: 800, mpMax: 200, crit: 15, critDmg: 40, hit: 10, allStatPct: 15, walkSpeedPct: 10, atkSpeedPct: 10, pvpDmgPct: 5 } },
+  // ===== 真系列金變（最強） =====
+  { id: 't_true_death_knight', name: '真•死亡騎士', rarity: 'gold', spriteKey: 't_true_death_knight',
+    classRestriction: ['warrior', 'paladin', 'rogue'],
+    desc: '死亡的終焉統帥，揮舞符文大劍，所過之地寸草不生',
+    stats: { atk: 350, def: 180, hpMax: 1200, mpMax: 200, crit: 18, critDmg: 50, hit: 12, allStatPct: 30, walkSpeedPct: 20, atkSpeedPct: 20, pvpDmgPct: 8 } },
+  { id: 't_true_death_mage', name: '真•死亡法師', rarity: 'gold', spriteKey: 't_true_death_mage',
+    classRestriction: ['mage', 'warlock'],
+    desc: '操控死靈法術的死亡法師，一指之間萬物化為枯骨',
+    stats: { atk: 380, def: 100, hpMax: 900, mpMax: 500, crit: 20, critDmg: 55, hit: 10, allStatPct: 30, walkSpeedPct: 20, atkSpeedPct: 20, pvpDmgPct: 8 } },
+  { id: 't_true_death_archer', name: '真•死亡弓箭手', rarity: 'gold', spriteKey: 't_true_death_archer',
+    classRestriction: 'archer',
+    desc: '死亡之箭百步穿楊，箭鋒所及魂飛魄散',
+    stats: { atk: 360, def: 90, hpMax: 850, crit: 25, critDmg: 60, hit: 15, allStatPct: 30, walkSpeedPct: 20, atkSpeedPct: 20, pvpDmgPct: 8 } },
+  { id: 't_true_death_assassin', name: '真•死亡刺客', rarity: 'gold', spriteKey: 't_true_death_assassin',
+    classRestriction: ['rogue', 'warrior', 'paladin'],
+    desc: '來自深淵的死亡刺客，閃現之間取人性命',
+    stats: { atk: 420, def: 80, hpMax: 800, crit: 30, critDmg: 65, dodge: 12, allStatPct: 30, walkSpeedPct: 20, atkSpeedPct: 20, pvpDmgPct: 10 } },
+  { id: 't_true_death_sorcerer', name: '真•死亡術士', rarity: 'gold', spriteKey: 't_true_death_sorcerer',
+    classRestriction: ['warlock', 'mage'],
+    desc: '深淵召喚者，統御死靈大軍的死亡術士',
+    stats: { atk: 340, def: 110, hpMax: 950, mpMax: 480, crit: 18, critDmg: 50, hit: 10, allStatPct: 30, walkSpeedPct: 20, atkSpeedPct: 20, pvpDmgPct: 8 } },
+  { id: 't_true_fallen_paladin', name: '真•墮落聖執者', rarity: 'gold', spriteKey: 't_true_fallen_paladin',
+    classRestriction: ['paladin', 'warrior', 'rogue'],
+    desc: '墮入深淵的聖騎士，以黑暗之力審判一切',
+    stats: { atk: 320, def: 200, hpMax: 1400, mpMax: 250, crit: 15, critDmg: 45, hit: 12, allStatPct: 30, walkSpeedPct: 20, atkSpeedPct: 20, pvpDmgPct: 10 } },
 
   // ===== 紫色傳說（7張） =====
   { id: 't_demon_hunter', name: '獵魔手', rarity: 'purple', spriteKey: 'demon_hunter',
@@ -2625,6 +4977,10 @@ const TRANSFORM_POOL = [
     classRestriction: null,
     desc: '神之使者，全職業皆可感召其力量',
     stats: { atk: 100, def: 40, hpMax: 350, mpMax: 120, crit: 8, critDmg: 20, hit: 5, dodge: 3, walkSpeedPct: 14, atkSpeedPct: 16 } },
+  { id: 't_frostgiant', name: '冰霜巨人', rarity: 'purple', spriteKey: 'tf_frostgiant',
+    classRestriction: null,
+    desc: '北境冰霜巨人，以凍結之力統治雪原',
+    stats: { atk: 160, def: 70, hpMax: 500, mpMax: 100, crit: 10, critDmg: 25, hit: 6, allStatPct: 10, walkSpeedPct: 5, atkSpeedPct: 5, skillDmgPct: 8 } },
 
   // ===== 紅色史詩（7張） =====
   { id: 't_balrog', name: '炎魔', rarity: 'red', spriteKey: 'balrog',
@@ -2689,6 +5045,31 @@ const TRANSFORM_POOL = [
     classRestriction: 'paladin',
     desc: '聖殿的守護者，神聖之力賜予其堅毅與勇氣',
     stats: { atk: 65, def: 45, hpMax: 260, mpMax: 80, crit: 3, critDmg: 12, hit: 4, walkSpeedPct: 8, atkSpeedPct: 8 } },
+  // ===== 新增藍色稀有變身 =====
+  { id: 't_ice_witch_mage', name: '冰魔女法師', rarity: 'blue', spriteKey: 'ice_witch_mage',
+    classRestriction: 'mage',
+    desc: '操控寒冰的魔女法師，冰雪魔法爐火純青',
+    stats: { atk: 92, def: 14, hpMax: 145, mpMax: 190, crit: 7, critDmg: 17, walkSpeedPct: 9, atkSpeedPct: 11 } },
+  { id: 't_blue_berserker', name: '狂戰士', rarity: 'blue', spriteKey: 'blue_berserker',
+    classRestriction: 'warrior',
+    desc: '身披藍鎧的狂戰士，戰意滔天越戰越強',
+    stats: { atk: 98, def: 18, hpMax: 210, crit: 8, critDmg: 19, hit: 5, walkSpeedPct: 11, atkSpeedPct: 12 } },
+  { id: 't_shadow_archer', name: '暗影弓手', rarity: 'blue', spriteKey: 'shadow_archer',
+    classRestriction: 'archer',
+    desc: '潛伏暗影的神射手，箭影如魅難以捉摸',
+    stats: { atk: 88, def: 16, hpMax: 155, crit: 11, critDmg: 21, hit: 8, walkSpeedPct: 12, atkSpeedPct: 14 } },
+  { id: 't_holy_knight', name: '聖光騎士', rarity: 'blue', spriteKey: 'holy_knight',
+    classRestriction: 'paladin',
+    desc: '聖光眷顧的騎士，以正義之刃斬斷邪惡',
+    stats: { atk: 72, def: 42, hpMax: 250, mpMax: 70, crit: 5, critDmg: 15, hit: 6, walkSpeedPct: 9, atkSpeedPct: 9 } },
+  { id: 't_shadow_assassin_new', name: '暗影刺客', rarity: 'blue', spriteKey: 'shadow_assassin_new',
+    classRestriction: 'rogue',
+    desc: '隱身暗影的致命刺客，出手必見血',
+    stats: { atk: 95, def: 14, hpMax: 130, crit: 14, critDmg: 24, dodge: 7, walkSpeedPct: 14, atkSpeedPct: 15 } },
+  { id: 't_shadow_sorcerer', name: '暗影術士', rarity: 'blue', spriteKey: 'shadow_sorcerer',
+    classRestriction: ['mage', 'warlock'],
+    desc: '操控暗影魔法的術士，深奧莫測',
+    stats: { atk: 88, def: 16, hpMax: 140, mpMax: 210, crit: 8, critDmg: 20, walkSpeedPct: 9, atkSpeedPct: 11 } },
   { id: 't_shadow_assassin_blue', name: '暗影刺客', rarity: 'blue', spriteKey: 'shadow_assassin_blue',
     classRestriction: 'rogue',
     desc: '潛伏暗影的刺客，出手悄無聲息',
@@ -2727,13 +5108,21 @@ const TRANSFORM_POOL = [
     classRestriction: null,
     desc: '古老樹木甦醒而成的守衛，堅硬無比',
     stats: { atk: 35, def: 30, hpMax: 180, mpMax: 20, crit: 2, critDmg: 8, hit: 2, walkSpeedPct: 4, atkSpeedPct: 5 } },
-
+  // ===== 新增綠色高級變身 =====
+  { id: 't_ranger_green', name: '遊俠', rarity: 'green', spriteKey: 'ranger_green',
+    classRestriction: 'archer',
+    desc: '森林中的遊俠，弓箭嫻熟身手矯健',
+    stats: { atk: 50, def: 15, hpMax: 120, crit: 7, critDmg: 15, hit: 5, walkSpeedPct: 9, atkSpeedPct: 9 } },
+  { id: 't_forest_elf_archer', name: '森林精靈弓手', rarity: 'green', spriteKey: 'forest_elf_archer',
+    classRestriction: 'archer',
+    desc: '森林精靈的神射手，與自然融為一體',
+    stats: { atk: 48, def: 14, hpMax: 115, crit: 8, critDmg: 16, hit: 6, walkSpeedPct: 10, atkSpeedPct: 10 } },
+  { id: 't_apprentice_mage', name: '見習法師', rarity: 'green', spriteKey: 'apprentice_mage',
+    classRestriction: ['mage', 'warlock'],
+    desc: '初出茅廬的見習法師，潛力無限',
+    stats: { atk: 45, def: 10, hpMax: 95, mpMax: 120, crit: 4, critDmg: 12, walkSpeedPct: 7, atkSpeedPct: 7 } },
   // ===== 白色普通（5張） =====
   { id: 't_white_dragon', name: '白龍', rarity: 'white', spriteKey: 'white_dragon',
-    classRestriction: null,
-    desc: '聖潔的白龍，象徵純淨與祥瑞',
-    stats: { atk: 25, def: 12, hpMax: 80, mpMax: 30, crit: 2, critDmg: 6, hit: 2, walkSpeedPct: 4, atkSpeedPct: 4 } },
-  { id: 't_angel_white', name: '天使', rarity: 'white', spriteKey: 'angel_white',
     classRestriction: null,
     desc: '神聖的天使，帶來光明與祝福',
     stats: { atk: 20, def: 10, hpMax: 70, mpMax: 50, crit: 1, critDmg: 5, hit: 2, walkSpeedPct: 3, atkSpeedPct: 3 } },
@@ -2749,6 +5138,28 @@ const TRANSFORM_POOL = [
     classRestriction: null,
     desc: '雪原中的白狼，敏銳而迅捷',
     stats: { atk: 28, def: 9, hpMax: 65, mpMax: 10, crit: 3, critDmg: 7, hit: 2, walkSpeedPct: 6, atkSpeedPct: 6 } },
+  // ===== 新增白色普通變身 =====
+  { id: 't_rookie_warrior', name: '新手戰士', rarity: 'white', spriteKey: 'rookie_warrior',
+    classRestriction: 'warrior',
+    desc: '剛踏入冒險之路的新手戰士，勇氣滿滿',
+    stats: { atk: 22, def: 8, hpMax: 70, crit: 2, critDmg: 5, hit: 2, walkSpeedPct: 4, atkSpeedPct: 4 } },
+  { id: 't_village_guard', name: '村莊守衛', rarity: 'white', spriteKey: 'village_guard',
+    classRestriction: null,
+    desc: '守護村莊的衛兵，盡忠職守',
+    stats: { atk: 18, def: 12, hpMax: 85, crit: 1, critDmg: 4, hit: 2, walkSpeedPct: 3, atkSpeedPct: 3 } },
+  // 其餘3張白色變身（重複使用精靈圖）
+  { id: 't_white_dragon2', name: '白龍', rarity: 'white', spriteKey: 'white_dragon',
+    classRestriction: null,
+    desc: '聖潔的白龍，象徵純淨與祥瑞',
+    stats: { atk: 22, def: 10, hpMax: 70, mpMax: 25, crit: 2, critDmg: 5, hit: 2, walkSpeedPct: 4, atkSpeedPct: 3 } },
+  { id: 't_angel_white2', name: '白衣天使', rarity: 'white', spriteKey: 'angel_white',
+    classRestriction: null,
+    desc: '神聖的白衣天使，帶來光明與祝福',
+    stats: { atk: 16, def: 9, hpMax: 65, mpMax: 45, crit: 1, critDmg: 4, hit: 2, walkSpeedPct: 3, atkSpeedPct: 3 } },
+  { id: 't_unicorn2', name: '神駒獨角獸', rarity: 'white', spriteKey: 'unicorn',
+    classRestriction: null,
+    desc: '神駒獨角獸，高貴而優雅',
+    stats: { atk: 20, def: 10, hpMax: 72, mpMax: 35, crit: 2, critDmg: 5, dodge: 2, walkSpeedPct: 5, atkSpeedPct: 4 } },
 ];
 
 // 判斷職業限制是否匹配（支持 string / string[] / null）
@@ -2760,22 +5171,32 @@ function isClassRestrictionMatched(restriction, playerClass) {
 
 // 變身抽卡（消耗鑽石）
 function doTransformGacha(mode) {
-  // mode: 'single' | 'ten' | 'big'
+  // mode: 'single' | 'ten' | 'big' | 'goldSingle'
   if (window.AudioSystem) AudioSystem.sfxGacha();
   let actualCount, cost, guaranteedMin;
-  if (mode === 'big') { actualCount = 35; cost = GACHA_COST_BIG; guaranteedMin = 2; /* blue */ }
-  else if (mode === 'ten') { actualCount = 11; cost = GACHA_COST_TEN; guaranteedMin = 1; /* green */ }
-  else { actualCount = 1; cost = GACHA_COST_SINGLE; guaranteedMin = 0; }
-  if (GS.resources.gem < cost) {
-    alert('鑽石不足！');
-    return [];
+  const isGold = mode === 'goldSingle';
+  if (isGold) {
+    const dailyInfo = getGoldGachaDailyInfo();
+    if (dailyInfo.remaining <= 0) { alert('今日金幣抽卡次數已用完，明日6:00重置'); return []; }
+    if (GS.resources.gold < GACHA_GOLD_COST_SINGLE_TRANSFORM) { alert('金幣不足！'); return []; }
+    actualCount = 1; cost = GACHA_GOLD_COST_SINGLE_TRANSFORM; guaranteedMin = 0;
+    consumeGoldGachaDaily();
+    GS.resources.gold -= cost;
+  } else {
+    if (mode === 'big') { actualCount = 35; cost = GACHA_COST_BIG; guaranteedMin = 2; /* blue */ }
+    else if (mode === 'ten') { actualCount = 11; cost = GACHA_COST_TEN; guaranteedMin = 1; /* green */ }
+    else { actualCount = 1; cost = GACHA_COST_SINGLE; guaranteedMin = 0; }
+    if (GS.resources.gem < cost) {
+      alert('鑽石不足！');
+      return [];
+    }
+    GS.resources.gem -= cost;
   }
-  GS.resources.gem -= cost;
   const results = [];
   const rarityRank = { white: 0, green: 1, blue: 2, red: 3, purple: 4, gold: 5 };
   if (!GS.ownedTransforms) GS.ownedTransforms = [];
   for (let i = 0; i < actualCount; i++) {
-    let rarity = rollRarity();
+    let rarity = isGold ? rollRarityGold() : rollRarity();
     // 最後一張保底
     if (i === actualCount - 1 && guaranteedMin > 0) {
       const hasGood = results.some(r => rarityRank[r.rarity] >= guaranteedMin);
@@ -2786,11 +5207,11 @@ function doTransformGacha(mode) {
       ? candidates[Math.floor(Math.random() * candidates.length)]
       : TRANSFORM_POOL[0];
     const withType = { ...item, type: 'transform' };
-    withType._isNew = !GS.ownedTransforms.find(t => t.id === item.id);
     results.push(withType);
-    // 加入已擁有列表（去重）
-    if (!GS.ownedTransforms.find(t => t.id === item.id)) {
-      GS.ownedTransforms.push({ id: item.id, name: item.name, rarity: item.rarity, unlocked: true });
+    // 加入收藏（重複累計 count）
+    const addResult = addCardToCollection(withType, 'transform');
+    withType._isNew = addResult.isNew;
+    if (addResult.isNew) {
       addLog('system', `解鎖新變身：${item.name}（${RARITY_CONFIG[item.rarity]?.name || item.rarity}）`);
     }
   }
@@ -2809,21 +5230,21 @@ const RARITY_CONFIG = {
   purple: { order: 4, name: '傳說', color: '#c060ff', glow: 'rgba(192,96,255,0.6)' },
   gold:   { order: 5, name: '神話', color: '#ffcc40', glow: 'rgba(255,204,64,0.7)' },
 };
-// 國家旗幟 / 軍團徽章 / 國家 Tab 圖資
+// 國家旗幟 / 軍團徽章 / 國家 Tab 圖資（全部走 assetUrl，確保 CDN fallback）
 const NATION_TAB_ICONS = {
-  office: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfgcyuadw_ve_miaoda', // 官職頭盔
-  legion: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfdqqacds_ve_miaoda', // 軍團徽章
-  castle: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrffy7a4cw_ve_miaoda', // 城堡
-  donate: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfdnbcygu_ve_miaoda', // 捐獻錢袋
-  skill:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfgii4ocw_ve_miaoda', // 技能樹
-  sword:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgfjm22sw_ve_miaoda', // 劍
-  shield: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrglc2tmlw_ve_miaoda', // 盾
-  crown:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgnkrywaw_ve_miaoda', // 王冠
-  gem:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfex8k9fu_ve_miaoda', // 寶石
-  scroll: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfs7r3qws_ve_miaoda', // 卷軸
-  members:'/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgmr7pucs_ve_miaoda', // 成員
-  war:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgkym66hs_ve_miaoda', // 宣戰
-  treasury:'/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgkf6f2bw_ve_miaoda', // 國庫
+  office:   assetUrl('aadkrfgcyuadw_ve_miaoda'), // 官職頭盔
+  legion:   assetUrl('aadkrfdqqacds_ve_miaoda'), // 軍團徽章
+  castle:   assetUrl('aadkrffy7a4cw_ve_miaoda'), // 城堡
+  donate:   assetUrl('aadkrfdnbcygu_ve_miaoda'), // 捐獻錢袋
+  skill:    assetUrl('aadkrfgii4ocw_ve_miaoda'), // 技能樹
+  sword:    assetUrl('aadkrgfjm22sw_ve_miaoda'), // 劍
+  shield:   assetUrl('aadkrglc2tmlw_ve_miaoda'), // 盾
+  crown:    assetUrl('aadkrgnkrywaw_ve_miaoda'), // 王冠
+  gem:      assetUrl('aadkrfex8k9fu_ve_miaoda'), // 寶石
+  scroll:   assetUrl('aadkrfs7r3qws_ve_miaoda'), // 卷軸
+  members:  assetUrl('aadkrgmr7pucs_ve_miaoda'), // 成員
+  war:      assetUrl('aadkrgkym66hs_ve_miaoda'), // 宣戰
+  treasury: assetUrl('aadkrgkf6f2bw_ve_miaoda'), // 國庫
 };
 
 const RARITY_ORDER = ['white', 'green', 'blue', 'red', 'purple', 'gold'];
@@ -2851,45 +5272,50 @@ const AUTO_ITEMS_CATALOG = [
 
 const ITEM_ICONS = {
   // 藥水
-  hp1: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre6rzvuuu_ve_miaoda',
-  hp2: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfai2wohu_ve_miaoda',
-  hp3: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre7ldugrs_ve_miaoda',
-  mp1: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfbebe2cs_ve_miaoda',
-  mp2: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre6sdzwfw_ve_miaoda',
-  mp3: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrew2vdilu_ve_miaoda',
-  spd1: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfb3dtmyg_ve_miaoda',
-  spd2: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfa6aaafi_ve_miaoda',
-  move1: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfb6yoycg_ve_miaoda',
-  mgem: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrezgwcqbi_ve_miaoda',
-  teleport: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre45m5ubg_ve_miaoda',
-  enhance_ticket: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre3ofscho_ve_miaoda',
-  chest: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre5cpgsao_ve_miaoda',
-  tscroll: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfs7r3qws_ve_miaoda', // 變身卷軸
-  // 新增道具（不重複現有）
-  hp4: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre7ldugrs_ve_miaoda', // 高級生命藥水
-  mp4: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrew2vdilu_ve_miaoda', // 高級魔力藥水
-  atk_potion: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfa6aaafi_ve_miaoda', // 力量藥水
-  def_potion: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfb3dtmyg_ve_miaoda', // 防禦藥水
-  crit_potion: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrezgwcqbi_ve_miaoda', // 暴擊藥水
-  revive_scroll: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre45m5ubg_ve_miaoda', // 復活卷軸
-  escape_scroll: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfb6yoycg_ve_miaoda', // 脫身卷軸
-  enhance_stone: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre3ofscho_ve_miaoda', // 強化石
-  bless_stone: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre5cpgsao_ve_miaoda', // 祝福石
-  crystal_frag: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfbebe2cs_ve_miaoda', // 靈魂水晶碎片
-  gold_coin: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrew2vdilu_ve_miaoda', // 金幣袋
-  gem_bag: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre6rzvuuu_ve_miaoda', // 鑽石袋
-  dungeon_key: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre6sdzwfw_ve_miaoda', // 副本鑰匙
-  treasure_key: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfai2wohu_ve_miaoda', // 寶箱鑰匙
-  quest_scroll: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre7ldugrs_ve_miaoda', // 任務卷軸
-  ancient_book: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfs7r3qws_ve_miaoda', // 遠古書籍
-  monster_eye: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre3ggryag_ve_miaoda', // 怪物之眼
-  dragon_scale: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre7ci4cii_ve_miaoda', // 龍鱗
+  hp1: assetUrl('rUwQO6PiBH'),
+  hp2: assetUrl('rUwQO6PiBH'),
+  hp3: assetUrl('rUwQO6PiBH'),
+  hp4: assetUrl('rUwQO6PiBH'), // 高級生命藥水
+  mp1: assetUrl('s6Rkjmlc5j'),
+  mp2: assetUrl('s6Rkjmlc5j'),
+  mp3: assetUrl('s6Rkjmlc5j'),
+  mp4: assetUrl('s6Rkjmlc5j'), // 高級魔力藥水
+  spd1: assetUrl('XV03XPsYo8'), // 加速藥水（綠）
+  spd2: assetUrl('TT1m224JRn'), // 狂暴藥水（橘）
+  move1: assetUrl('XV03XPsYo8'), // 行走加速藥水
+  atk_potion: assetUrl('TT1m224JRn'), // 狂暴藥水（橘）
+  def_potion: assetUrl('XV03XPsYo8'), // 防禦藥水（綠）
+  crit_potion: assetUrl('TT1m224JRn'), // 暴擊藥水（橘）
+  mgem: assetUrl('Soc9DQWbZI'), // 魔法寶石
+  teleport: assetUrl('bU4qiIVwJ0'), // 回城卷軸（暫用擴充卷圖）
+  enhance_ticket: assetUrl('URxaFSUzM7'), // 強化券
+  chest: assetUrl('gBv7e5Mdvo'), // 寶箱（暫用金幣圖）
+  tscroll: assetUrl('bU4qiIVwJ0'), // 變身卷軸
+  revive_scroll: assetUrl('bU4qiIVwJ0'), // 復活卷軸
+  escape_scroll: assetUrl('bU4qiIVwJ0'), // 脫身卷軸
+  enhance_stone: assetUrl('URxaFSUzM7'), // 裝備強化卷
+  bless_stone: assetUrl('URxaFSUzM7'), // 祝福石（強化機率提升卷，用紫色濾鏡區分）
+  crystal_frag: assetUrl('Soc9DQWbZI'), // 靈魂水晶碎片
+  gold_coin: assetUrl('aadkrw5dpakds_ve_miaoda'), // 金幣堆
+  gem_bag: assetUrl('aadkrxid6zueu_ve_miaoda'), // 藍鑽
+  dungeon_key: assetUrl('bU4qiIVwJ0'), // 副本鑰匙
+  treasure_key: assetUrl('URxaFSUzM7'), // 寶箱鑰匙
+  quest_scroll: assetUrl('bU4qiIVwJ0'), // 任務卷軸
+  bag_expand_scroll: assetUrl('bU4qiIVwJ0'), // 背包擴充卷
+  ancient_book: assetUrl('bU4qiIVwJ0'), // 遠古書籍
+  monster_eye: assetUrl('Soc9DQWbZI'), // 怪物之眼
+  dragon_scale: assetUrl('URxaFSUzM7'), // 龍鱗
   // 裝備類型通用圖資
-  weapon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreyaga6gi_ve_miaoda',
-  armor: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre7ci4cii_ve_miaoda',
-  helmet: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre3ggryag_ve_miaoda',
-  ring: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkre7f33iei_ve_miaoda',
-  gem: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfa6t3kig_ve_miaoda',
+  weapon: assetUrl('nactfRVTvS'), // 劍類高級武器
+  armor: assetUrl('QYQPTmKP8M'), // 盔甲
+  helmet: assetUrl('FmR5P4kp9F'), // 頭盔
+  boots: assetUrl('WgVb3fzkIB'), // 靴子
+  gloves: assetUrl('iUJm20Glls'), // 手套
+  shield: assetUrl('YwLrUA7wlU'), // 盾牌
+  ring: assetUrl('BHiRzIPTAV'), // 戒指
+  bow: assetUrl('cZ70J7STpP'), // 弓
+  staff: assetUrl('JDDbWSVINf'), // 法杖
+  gem: assetUrl('Soc9DQWbZI'), // 寶石（魔法寶石）
 };
 
 // 獲取道具圖資 URL（道具ID優先，裝備按類型回落）
@@ -2920,28 +5346,33 @@ const EQUIP_SLOTS = [
 
 // 裝備部位對應圖標（暗黑天堂風）
 const EQUIP_ICON_MAP = {
-  helmet:   '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfj7i7aho_ve_miaoda', // 頭盔
-  armor:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfj7i7ago_ve_miaoda', // 鎧甲
-  weapon:   '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfjwe3khg_ve_miaoda', // 武器
-  necklace: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfjfxl2bi_ve_miaoda', // 項鍊
-  ring:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfhczsqag_ve_miaoda', // 戒指
-  ring1:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfhczsqag_ve_miaoda', // 戒指
-  ring2:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfhczsqag_ve_miaoda',
-  boots:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfexej6gi_ve_miaoda', // 靴子
-  gloves:   '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfec7nuci_ve_miaoda', // 手套
-  belt:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfjadsadi_ve_miaoda', // 腰帶
-  cape:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrffprd4fo_ve_miaoda', // 披風
-  pants:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfrk3g6fs_ve_miaoda', // 護腿
+  helmet:   assetUrl('FmR5P4kp9F'), // 頭盔
+  armor:    assetUrl('QYQPTmKP8M'), // 鎧甲
+  weapon:   assetUrl('nactfRVTvS'), // 武器（劍類高級）
+  necklace: assetUrl('BHiRzIPTAV'), // 項鍊（暫用戒指圖）
+  ring:     assetUrl('BHiRzIPTAV'), // 戒指
+  ring1:    assetUrl('BHiRzIPTAV'), // 戒指
+  ring2:    assetUrl('BHiRzIPTAV'),
+  boots:    assetUrl('WgVb3fzkIB'), // 靴子
+  gloves:   assetUrl('iUJm20Glls'), // 手套
+  belt:     assetUrl('QYQPTmKP8M'), // 腰帶（暫用盔甲圖）
+  cape:     assetUrl('QYQPTmKP8M'), // 披風（暫用盔甲圖）
+  pants:    assetUrl('QYQPTmKP8M'), // 護腿（暫用盔甲圖）
+  shield:   assetUrl('YwLrUA7wlU'), // 盾牌
+  bow:      assetUrl('cZ70J7STpP'), // 弓
+  staff:    assetUrl('JDDbWSVINf'), // 法杖
 };
 
 // 道具/消耗品圖標
-// 道具/消耗品圖標
 const ITEM_ICON_MAP = {
-  potion_hp: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfkn7dqso_ve_miaoda', // 紅藥
-  potion_mp: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfjhiwibi_ve_miaoda', // 藍藥
-  scroll:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfjvprofq_ve_miaoda', // 卷軸
-  gem:       '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfhczsqag_ve_miaoda', // 寶石（暫用戒指圖）
-  default:   '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrfkn7dqso_ve_miaoda',
+  potion_hp: assetUrl('rUwQO6PiBH'), // 紅藥
+  potion_mp: assetUrl('s6Rkjmlc5j'), // 藍藥
+  scroll:    assetUrl('bU4qiIVwJ0'), // 卷軸
+  gem:       assetUrl('Soc9DQWbZI'), // 寶石
+  enhance:   assetUrl('URxaFSUzM7'), // 強化卷
+  gold:      assetUrl('aadkrw5dpakds_ve_miaoda'), // 金幣堆
+  diamond:   assetUrl('aadkrxid6zueu_ve_miaoda'), // 藍鑽
+  default:   assetUrl('URxaFSUzM7'),
 };
 
 // 取得裝備圖標 URL（按類型）
@@ -3279,12 +5710,74 @@ const SYNTHESIS_RATES = {
   green:  0.30,   // 绿合蓝 30%
   blue:   0.15,   // 蓝合红 15%
   red:    0.05,   // 红合紫 5%
-  purple: 0.005,  // 紫合金 0.5%
+  purple: 0.0005, // 紫合金 0.05%
 };
 const SYNTHESIS_COST = 4; // 每次合成需要4张卡牌
 const MAX_ENHANCE_TICKETS = 5; // 最多使用5张強化券
 const ENHANCE_TICKET_COST = 10; // 強化券价格（鑽石）
 const ENHANCE_TICKET_BOOST = 0.2; // 每张提升20%当前概率
+
+// ==================== 裝備強化系統 ====================
+// 武器強化機率表（+1~+6安定100%，最高+15）
+const WEAPON_ENHANCE_RATES = {
+  1: 1.00, 2: 1.00, 3: 1.00, 4: 1.00, 5: 1.00, 6: 1.00,
+  7: 0.70, 8: 0.35, 9: 0.175, 10: 0.0875, 11: 0.04375,
+  12: 0.021875, 13: 0.0109, 14: 0.0055, 15: 0.0027,
+};
+const WEAPON_MAX_ENHANCE = 15;
+const WEAPON_SAFE_ENHANCE = 6;
+
+// 防具強化機率表（+1~+4安定100%，最高+12）
+const ARMOR_ENHANCE_RATES = {
+  1: 1.00, 2: 1.00, 3: 1.00, 4: 1.00,
+  5: 0.50, 6: 0.25, 7: 0.125, 8: 0.0625,
+  9: 0.03125, 10: 0.0156, 11: 0.0078, 12: 0.0039,
+};
+const ARMOR_MAX_ENHANCE = 12;
+const ARMOR_SAFE_ENHANCE = 4;
+
+// 強化卷軸配置
+const ENHANCE_SCROLL_ID = 'enhance_scroll'; // 通用強化卷
+const ENHANCE_BOOST_SCROLL_ID = 'enhance_boost_scroll'; // 機率提升卷
+const ENHANCE_SCROLL_PRICE = 30000; // 金幣
+const ENHANCE_BOOST_SCROLL_PRICE = 500; // 鑽石
+
+// 判斷是否為武器部位
+function isWeaponSlot(slot) {
+  return slot === 'weapon';
+}
+// 判斷是否為防具部位
+function isArmorSlot(slot) {
+  return ['armor','helmet','pants','gloves','boots','belt','cape'].includes(slot);
+}
+// 取得強化機率表
+function getEnhanceRateTable(item) {
+  if (isWeaponSlot(item.type || item.slot)) return { table: WEAPON_ENHANCE_RATES, max: WEAPON_MAX_ENHANCE, safe: WEAPON_SAFE_ENHANCE };
+  if (isArmorSlot(item.type || item.slot)) return { table: ARMOR_ENHANCE_RATES, max: ARMOR_MAX_ENHANCE, safe: ARMOR_SAFE_ENHANCE };
+  // 飾品戒指等不強化
+  return null;
+}
+// 計算當前強化成功率（含提升卷）
+function calcEnhanceSuccessRate(item, boostScrollUsed = false) {
+  const info = getEnhanceRateTable(item);
+  if (!info) return 0;
+  const curLevel = item.enhanceLevel || 0;
+  const nextLevel = curLevel + 1;
+  if (nextLevel > info.max) return 0;
+  let rate = info.table[nextLevel] || 0;
+  if (boostScrollUsed && rate > 0 && rate < 1) {
+    // 提升10%成功率：原始概率 + 10%，但90%封顶（越高提升幅度越低）
+    // 低機率時提升明顯，高機率時提升受限（最多到90%）
+    const maxCap = 0.90;
+    if (rate >= maxCap) {
+      rate = maxCap;
+    } else {
+      // 線性提升10個百分點，但不超過maxCap
+      rate = Math.min(maxCap, rate + 0.10);
+    }
+  }
+  return rate;
+}
 
 const RARITY_NAME = { white:'白', green:'綠', blue:'藍', purple:'紫', red:'紅', gold:'金' };
 const RARITY_COLOR = { white:'#ccc', green:'#60d060', blue:'#60a0ff', purple:'#c080ff', red:'#ff6060', gold:'#f0c040' };
@@ -3313,7 +5806,7 @@ const GS = {
     transformId: null,
     buffs: {},
   },
-  resources: { gold: 300000, gem: 300000 },
+  resources: { gold: 300000, gem: 3000000 },
   currentMap: 'village',
   monsters: [],
   summons: [],
@@ -3321,6 +5814,7 @@ const GS = {
   ownedPets: [],
   equippedHeroId: null,
   equippedPetId: null,
+  petFollower: null,
   equipment: {}, // { weapon, armor, accessory, boots, helmet }
   inventory: [], // { id, type, rarity, name, count, ... }
   bagMaxSlots: 60, // 背包容量（初始60，可擴充至200）
@@ -3353,7 +5847,7 @@ const GS = {
   gachaPageTab: 'hero',
   shopTab: 'consumable',
   menuPage: null,
-  nation: 'kent',
+  nation: null,
   guild: null, // 保留字段兼容
   guildId: null,
   // 國家系统
@@ -3389,6 +5883,72 @@ const GS = {
   // 排行榜缓存
   rankings: { level: [], power: [], wealth: [], kills: [] },
 };
+
+// ==================== 全域存檔系統 ====================
+const GAME_SAVE_KEY = 'game_save_v2';
+const SAVE_FIELDS = [
+  'player', 'resources', 'currentMap',
+  'ownedHeroes', 'ownedPets', 'ownedTransforms',
+  'equippedHeroId', 'equippedPetId',
+  'equipment', 'inventory', 'bagMaxSlots', 'enhanceTickets',
+  'bagPage', 'autoMode', 'autoSkillEnabled', 'autoPotionEnabled',
+  'autoMpEnabled', 'autoBuyPotion', 'autoItems', 'autoPvpMode',
+  'killCount', 'quest', 'heroPageTab', 'gachaPageTab', 'shopTab',
+  'menuPage', 'nation', 'legionId', 'legionRank',
+  'nationContribution', 'nationSkillLevels', 'todayDonatedGold', 'todayDonatedGem',
+  'nationTab', 'membersSubTab', 'transformRarity', 'heroRarity', 'petRarity',
+  'castleTreasuries', 'gemTaxPool', 'siegeStats', 'weeklyTaxSettled',
+  'warDeclareDate', 'warDeclareCount', 'warDeclared', 'warCooldowns',
+  'rankings', 'transformEndTime', 'transformTicketEndTimes', 'boughtTrueDeathPack',
+];
+function saveGame() {
+  try {
+    const data = {};
+    SAVE_FIELDS.forEach(function(k) { if (k in GS) data[k] = GS[k]; });
+    data.saveVersion = 2;
+    data.savedAt = Date.now();
+    localStorage.setItem(GAME_SAVE_KEY, JSON.stringify(data));
+    // v2.0：同步到後端（若已登入）
+    if (window.AuthSystem && AuthSystem.getToken()) {
+      try {
+        const server = AuthSystem.getCurrentServer();
+        const srvId = server?.id || 'justice';
+        const charIdx = 0;
+        fetch('/api/characters/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + AuthSystem.getToken(),
+          },
+          body: JSON.stringify({
+            serverId: srvId,
+            charIdx: charIdx,
+            saveData: data,
+          }),
+        }).catch(e => console.warn('[存檔] 後端同步失敗:', e));
+      } catch (e) { /* ignore */ }
+    }
+    return true;
+  } catch(e) { console.warn('[存檔] 保存失敗:', e); return false; }
+}
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(GAME_SAVE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return false;
+    SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
+    console.log('[存檔] 載入成功，保存時間:', new Date(data.savedAt || 0).toLocaleString());
+    console.log('[存檔] 英雄', GS.ownedHeroes?.length || 0, '張 / 寵物', GS.ownedPets?.length || 0, '張 / 變身', GS.ownedTransforms?.length || 0, '張');
+    return true;
+  } catch(e) { console.warn('[存檔] 載入失敗:', e); return false; }
+}
+let _autoSaveTimer = null;
+function startAutoSave() {
+  if (_autoSaveTimer) clearInterval(_autoSaveTimer);
+  _autoSaveTimer = setInterval(saveGame, 30000);
+}
+if (typeof window !== 'undefined') window.addEventListener('beforeunload', saveGame);
 
 // 全局变量
 let worldLayer, damageLayer, effectLayer, sceneBg, npcLayer;
@@ -3427,6 +5987,145 @@ let inSiegeScene = false;
   let $ = id => document.getElementById(id);
   let el = {};
 
+// ==================== 多人連線輔助 ====================
+// 更新連線狀態小圓點（設定按鈕右上角）
+function updateMultiplayerStatus(status) {
+  const S = window.MultiplayerClient ? MultiplayerClient.STATUS : {};
+  const dot = document.getElementById('mp-status-dot');
+  const txt = document.getElementById('mp-status-text');
+  const btn = document.getElementById('mp-connect-btn');
+  const s = status || S.OFFLINE;
+  // 狀態點
+  if (dot) {
+    dot.className = 'mp-status-dot mp-status-' + s;
+    const titles = {
+      offline: '單機模式',
+      loading: '載入中...',
+      connecting: '連線中...',
+      online: '已連線多人',
+      reconnecting: '斷線重連中...',
+      error: '連線失敗',
+    };
+    dot.title = titles[s] || '';
+  }
+  // 設定面板狀態文字
+  if (txt) {
+    txt.className = 'mp-status-text mp-status-' + s;
+    const labels = {
+      offline: '未連線',
+      loading: '載入中...',
+      connecting: '連線中，伺服器可能喚醒中',
+      online: '已連線',
+      reconnecting: '斷線重連中',
+      error: '連線失敗',
+    };
+    txt.textContent = labels[s] || '未連線';
+  }
+  // 連線按鈕文字
+  if (btn) {
+    if (s === S.ONLINE || s === S.RECONNECTING || s === S.CONNECTING || s === S.LOADING) {
+      btn.textContent = '斷線';
+      btn.dataset.connected = '1';
+    } else {
+      btn.textContent = '連線';
+      btn.dataset.connected = '0';
+    }
+  }
+}
+
+// 舊函式名稱保留相容
+try { updateMultiplayerStatusDot = function(online) { updateMultiplayerStatus(online ? 'online' : 'offline'); }; } catch(e) {}
+
+// 初始化多人連線 UI（設定面板打開時同步輸入框內容）
+function initMultiplayerUI() {
+  if (!window.MultiplayerClient) return;
+  const input = el.mpServerInput;
+  if (input) input.value = MultiplayerClient.getSavedServerUrl() || '';
+  // 繫結連線按鈕
+  if (el.mpConnectBtn) {
+    // 先移除舊監聽（避免重複）
+    const newBtn = el.mpConnectBtn.cloneNode(true);
+    el.mpConnectBtn.parentNode.replaceChild(newBtn, el.mpConnectBtn);
+    el.mpConnectBtn = newBtn;
+    el.mpConnectBtn.addEventListener('click', () => {
+      const S = MultiplayerClient.STATUS;
+      const cur = MultiplayerClient.status;
+      if (cur === S.ONLINE || cur === S.CONNECTING || cur === S.RECONNECTING || cur === S.LOADING) {
+        MultiplayerClient.disconnect();
+      } else {
+        const url = el.mpServerInput ? el.mpServerInput.value.trim() : '';
+        if (!url) { alert('請輸入伺服器位址'); return; }
+        MultiplayerClient.connect(url).catch(err => {
+          console.warn('[MP UI] connect failed:', err);
+        });
+      }
+    });
+  }
+  // 狀態回調
+  MultiplayerClient.setStatusCallback((s) => {
+    try { updateMultiplayerStatus(s); } catch (e) { /* ignore */ }
+  });
+  // 聊天回調：接到現有聊天視窗
+  MultiplayerClient.setChatCallback((msg) => {
+    try {
+      if (typeof addLog === 'function' && msg && msg.name && msg.text) {
+        const ch = msg.channel || 'world';
+        // 映射到現有聊天頻道（world → system 標籤，用 chat 類型顯示）
+        const targetCh = (ch === 'world' || ch === 'all') ? 'general' : ch;
+        addLog('chat-online', `【${msg.name}】：${msg.text}`, targetCh);
+      }
+    } catch (e) { console.error('mp chat cb error:', e); }
+  });
+  // 怪物傷害回調（其他玩家造成的傷害特效）
+  MultiplayerClient.setMonsterDamageCallback((d) => {
+    try {
+      if (typeof showDamage === 'function' && d.monsterId) {
+        showDamage(d.x, d.y - 50, d.damage, d.isCrit ? 'crit' : 'normal');
+      }
+    } catch (e) { /* ignore */ }
+  });
+  // 怪物擊殺回調
+  MultiplayerClient.setMonsterKilledCallback((d) => {
+    try {
+      if (typeof addLog === 'function' && d.killerName) {
+        addLog('system', `【${d.killerName}】擊敗了怪物`, 'world');
+      }
+    } catch (e) { /* ignore */ }
+  });
+  // 獎勵回調
+  MultiplayerClient.setGainRewardCallback((r) => {
+    try {
+      if (typeof addLog === 'function') {
+        const parts = [];
+        if (r.exp) parts.push(`經驗 +${r.exp}`);
+        if (r.gold) parts.push(`金幣 +${r.gold}`);
+        if (r.gem) parts.push(`鑽石 +${r.gem}`);
+        if (parts.length > 0) addLog('system', `多人獎勵：${parts.join('，')}`, 'world');
+      }
+      if (r.exp && GS.player) GS.player.exp += r.exp;
+      if (r.gold && GS.resources) GS.resources.gold += r.gold;
+      if (r.gem && GS.resources) GS.resources.gem += r.gem;
+      if (typeof updateUI === 'function') updateUI();
+    } catch (e) { console.error('gain_reward error:', e); }
+  });
+  // 初始狀態
+  updateMultiplayerStatus(MultiplayerClient.status);
+}
+
+// 同步玩家資料到多人伺服器（升級 / 變身 / 改名 / 換國家 時呼叫）
+function syncMultiplayerProfile() {
+  if (!window.MultiplayerClient || !MultiplayerClient.connected) return;
+  try {
+    MultiplayerClient.updateProfile({
+      name: GS.player?.name,
+      classId: GS.player?.classId,
+      level: GS.player?.level,
+      transformId: GS.player?.transformId || null,
+      nation: GS.nation || null,
+    });
+  } catch (e) { /* ignore */ }
+}
+
 // ==================== 初始化 ====================
 function init() {
   // 缓存 DOM
@@ -3450,6 +6149,10 @@ function init() {
     safeMapList: $('safe-map-list'), battleMapList: $('battle-map-list'),
     gachaModal: $('gacha-modal'), gachaResult: $('gacha-result'), gachaClose: $('gacha-close'),
     settingsPanel: $('settings-panel'),
+    mpServerInput: $('mp-server-input'),
+    mpConnectBtn: $('mp-connect-btn'),
+    mpStatusText: $('mp-status-text'),
+    mpStatusDot: $('mp-status-dot'),
     heroSlotEmpty: $('hero-slot-empty'), heroSlotFilled: $('hero-slot-filled'), heroSlotImg: $('hero-slot-img'),
     petSlotEmpty: $('pet-slot-empty'), petSlotFilled: $('pet-slot-filled'), petSlotEmoji: $('pet-slot-emoji'),
     sideMenu: $('side-menu'), sideMenuOverlay: $('side-menu-overlay'), sideMenuClose: $('side-menu-close'),
@@ -3495,6 +6198,9 @@ function init() {
   worldW = el.scene.clientWidth;
   worldH = el.scene.clientHeight;
 
+  // 先載入存檔（會覆蓋 GS 中的進度欄位）
+  loadGame();
+
   if (!GS.ownedTransforms) GS.ownedTransforms = [];
   // 存檔兼容：過濾掉不在新卡池裡的舊變身ID（卡池大換血時避免殘留舊卡報錯）
   const validTransformIds = new Set(TRANSFORM_POOL.map(t => t.id));
@@ -3512,42 +6218,13 @@ function init() {
   initCastles();
   initClass();
   initQuickBar();
+  // 載入交易所持久化數據（若無則生成初始AI掛單）
+  if (typeof loadAuctionData === 'function') loadAuctionData();
   enhanceNations();
   increaseMonsterCount();
 
-  // 新手自動加入國家與軍團（確保攻城戰/軍團功能可直接體驗）
-  try {
-    if (!GS.nation) {
-      GS.nation = 'kent';
-      addLog('system', '你自動加入了【肯特王國】');
-    }
-    if (!GS.legionId && !GS.guildId) {
-      // 找到肯特王國的第一個可用軍團，玩家擔任軍團長
-      const nationGuilds = AI_GUILDS.filter(g => g.nation === GS.nation);
-      if (nationGuilds.length > 0) {
-        const g = nationGuilds[0];
-        GS.guild = {
-          id: g.id,
-          name: g.name,
-          level: g.level,
-          role: 'leader',
-          nation: g.nation,
-          castles: g.castle ? [g.castle] : [],
-          funds: g.funds || 0,
-          myContribution: 500,
-          todayDonatedGold: 0,
-          todayDonatedGem: 0,
-        };
-        GS.guildId = g.id;
-        GS.legionId = g.id;
-        g.leader = GS.player.name;
-        g.hasHumanLeader = true;
-        addLog('system', `你成為【${g.name}】軍團長！可在國家→城堡頁宣戰攻城`);
-      }
-    }
-  } catch (e) {
-    console.warn('[Init] 自動加入軍團失敗:', e);
-  }
+  // 新手入門：不再自動分配國家與軍團，玩家必須在角色創建後手動選擇國家
+  // 國家選擇後才會自動分配第一軍團並擔任軍團長（詳見 showNationSelect）
 
   // 提前初始化全局 AI 池（不依賴戰鬥地圖）
   try {
@@ -3591,6 +6268,29 @@ function init() {
   GS.player.targetY = GS.player.y;
 
   createPlayerSprite();
+
+  // ===== 舊版本強化石轉換為通用裝備強化卷 =====
+  (function migrateOldEnhanceItems() {
+    if (!GS.inventory) return;
+    const oldIds = ['enhance_stone_low', 'enhance_stone_mid', 'enhance_stone_high'];
+    let convertCount = 0;
+    GS.inventory = GS.inventory.filter(it => {
+      if (oldIds.includes(it.id)) {
+        convertCount += (it.count || 1);
+        return false;
+      }
+      return true;
+    });
+    if (convertCount > 0) {
+      addToInventory({
+        id: 'enhance_scroll', name: '裝備強化卷', rarity: 'green',
+        icon: ITEM_ICONS.enhance_stone, itemType: 'consumable',
+        type: 'enhance_scroll', effect: { enhanceScroll: true },
+      }, convertCount);
+      addLog('system', `已將 ${convertCount} 個舊強化石轉換為裝備強化卷`);
+    }
+  })();
+
   updateUI();
   updateSlotDisplay();
   updateSkillBar();
@@ -3629,6 +6329,29 @@ function init() {
 
   // 显示角色創建界面
   showCharCreate();
+
+  // 啟動自動保存（每30秒 + 頁面關閉時）
+  startAutoSave();
+
+  // ===== 多人連線 UI 與回調初始化 =====
+  if (window.MultiplayerClient) {
+    try { initMultiplayerUI(); } catch (e) { console.warn('initMultiplayerUI error:', e); }
+  }
+
+  // ===== v2.0 自動連線多人伺服器 =====
+  if (window.MultiplayerClient && window.AuthSystem) {
+    try {
+      const server = AuthSystem.getCurrentServer();
+      if (server) {
+        const serverUrl = window.location.origin;
+        MultiplayerClient.connect(serverUrl).then(() => {
+          console.log('[v2.0] 自動連線成功:', serverUrl);
+        }).catch(err => {
+          console.warn('[v2.0] 自動連線失敗，退回單機:', err.message);
+        });
+      }
+    } catch (e) { console.warn('[v2.0] auto connect error:', e); }
+  }
 
   requestAnimationFrame(gameLoop);
 }
@@ -3705,8 +6428,8 @@ function generateRandomAIName() {
 const AI_CLASS_IDS = ['warrior', 'mage', 'archer', 'rogue', 'paladin', 'warlock'];
 
 // ==================== 全局 AI 玩家池（跨地圖常駐，最多 90） ====================
-const MAX_AI_PLAYERS = 90;
-const ACTIVE_AI_COUNT = 30;  // 活躍AI數量（真實模擬+渲染）
+const MAX_AI_PLAYERS = 45;
+const ACTIVE_AI_COUNT = 15;  // 活躍AI數量（真實模擬+渲染）
 const BACKGROUND_AI_UPDATE_INTERVAL = 30; // 背景AI批量更新間隔（秒）
 const GLOBAL_AI_POOL = []; // 全局 AI 池，跨地圖存在
 let aiUidCounter = 1;
@@ -3910,7 +6633,7 @@ function createAIPlayer(level, nationId, mapId) {
     targetUid: null,
     kills: 0,
     gold: 300000,    // 初始金幣與玩家一致
-    gem: 300000,     // 初始鑽石與玩家一致
+    gem: 3000000,    // 初始鑽石與玩家一致
     exp: 0,          // 初始經驗為0
     expMax,          // 對應等級的升級經驗
     contribution: 0, // 國家貢獻（真實累積）
@@ -4121,10 +6844,10 @@ function rotateActiveAI() {
   const bg = GLOBAL_AI_POOL.filter(a => !a.isActive);
   if (active.length === 0 || bg.length === 0) return;
 
-  // 隨機選 10 個活躍 AI 轉為背景
+  // 隨機選 5 個活躍 AI 轉為背景
   shuffle(active);
-  const toBg = active.slice(0, Math.min(10, active.length));
-  // 隨機選 10 個背景 AI 轉為活躍
+  const toBg = active.slice(0, Math.min(5, active.length));
+  // 隨機選 5 個背景 AI 轉為活躍
   shuffle(bg);
   const toActive = bg.slice(0, toBg.length);
 
@@ -4169,8 +6892,8 @@ function assignActiveAIToCurrentMap() {
   const currentMapActive = activeAI.filter(a => a.mapId === GS.currentMap);
   const otherMapActive = activeAI.filter(a => a.mapId !== GS.currentMap);
 
-  // 目標：20-30 個，取隨機值
-  const target = 20 + Math.floor(Math.random() * 11); // 20~30
+  // 目標：4-6 個，取隨機值（避免同地圖過多AI導致卡頓）
+  const target = 4 + Math.floor(Math.random() * 3); // 4~6
   const need = target - currentMapActive.length;
 
   if (need > 0 && otherMapActive.length > 0) {
@@ -4214,7 +6937,7 @@ function spawnAIPlayers() {
     }
     // 地圖切換時輪替 10 個 AI
     rotateActiveAI();
-    // 確保當前地圖有 20-30 個活躍 AI
+    // 確保當前地圖有 8-12 個活躍 AI
     assignActiveAIToCurrentMap();
     // 只渲染當前地圖的活躍 AI
     const currentMapAI = getAIPlayersOnCurrentMap();
@@ -4265,11 +6988,11 @@ function createAISprite(ai) {
     <div class="unit-level-tag" style="display:none"></div>
   `;
   elDiv.appendChild(nameEl);
-  // 精灵图（真實圖片優先，emoji 備用）
+  // 精灵图（真實圖片優先，emoji 備用）— 尺寸與玩家一致
   const wrap = document.createElement('div');
   wrap.className = 'unit-sprite-wrap';
-  wrap.style.width = '48px';
-  wrap.style.height = '56px';
+  wrap.style.width = '64px';
+  wrap.style.height = '80px';
   if (isImg) {
     const imgIdle = document.createElement('img');
     imgIdle.className = 'unit-sprite-img sprite-frame-idle';
@@ -4277,6 +7000,7 @@ function createAISprite(ai) {
     imgIdle.style.filter = filter;
     imgIdle.alt = '';
     imgIdle.loading = 'lazy';
+    imgIdle.onerror = function() { if (!this.dataset.err) { this.dataset.err='1'; this.classList.add('frame-error'); } };
     wrap.appendChild(imgIdle);
     const tomb = document.createElement('div');
     tomb.className = 'unit-sprite-tomb';
@@ -4291,7 +7015,7 @@ function createAISprite(ai) {
     emoji.dataset.spriteAttack = s.attack || s.idle || '⚔️';
     emoji.dataset.spriteDead = '🪦';
     emoji.style.color = s.color || '#c0a060';
-    emoji.style.fontSize = '36px';
+    emoji.style.fontSize = '52px';
     emoji.style.filter = filter;
     wrap.appendChild(emoji);
   }
@@ -4311,12 +7035,961 @@ function createAISprite(ai) {
   return elDiv;
 }
 
+// ==================== 玩家交易系統 ====================
+const TRADE_MAX_SLOTS = 6;
+const TRADE_DISTANCE_LIMIT = 300; // 像素（5格約 300px）
+let tradeState = null;
+
+// 打開玩家交互選單
+function showPlayerInteractMenu(ai) {
+  closePlayerInteractMenu();
+  const dx = ai.x - GS.player.x;
+  const dy = ai.y - GS.player.y;
+  const dist = Math.hypot(dx, dy);
+  const menu = document.createElement('div');
+  menu.id = 'player-interact-menu';
+  menu.className = 'player-interact-menu';
+  menu.style.cssText = `position:fixed;z-index:500;background:linear-gradient(180deg,#1f1408,#120a02);border:1px solid #a07030;border-radius:8px;padding:6px;min-width:140px;box-shadow:0 4px 20px rgba(0,0,0,0.8);font-size:12px;color:#f0e0c0;`;
+  const canTrade = dist <= TRADE_DISTANCE_LIMIT;
+  menu.innerHTML = `
+    <div style="padding:6px 10px;font-weight:700;color:#ffd080;border-bottom:1px solid rgba(160,112,48,0.3);margin-bottom:4px">${ai.name}${ai.guildName ? ` <span style="font-size:10px;color:#a08060">[${ai.guildName}]</span>` : ''}</div>
+    <button class="pim-btn" data-action="trade" ${canTrade ? '' : 'disabled style="opacity:0.4;cursor:not-allowed"'}>🤝 交易邀請</button>
+    <button class="pim-btn" data-action="whisper">💬 密語</button>
+    <button class="pim-btn" data-action="guild">🛡 軍團</button>
+    <button class="pim-btn" data-action="nation">🏳 國家</button>
+    <div style="font-size:9px;color:#807060;padding:4px 6px">距離：${Math.round(dist)} px</div>
+  `;
+  document.body.appendChild(menu);
+  // 定位到玩家頭頂附近
+  const rect = ai.el?.getBoundingClientRect();
+  if (rect) {
+    menu.style.left = (rect.left + rect.width / 2 - 70) + 'px';
+    menu.style.top = (rect.top - 10) + 'px';
+  } else {
+    menu.style.left = '50%';
+    menu.style.top = '50%';
+    menu.style.transform = 'translate(-50%, -50%)';
+  }
+  // 綁定按鈕
+  menu.querySelectorAll('.pim-btn').forEach(btn => {
+    btn.style.cssText = 'display:block;width:100%;padding:6px 10px;background:transparent;border:none;color:#f0e0c0;text-align:left;cursor:pointer;border-radius:4px;font-size:12px;';
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(240,192,64,0.15)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.action;
+      if (action === 'trade' && canTrade) {
+        startTradeRequest(ai);
+      } else if (action === 'whisper') {
+        addLog('system', `已切換到與 ${ai.name} 的對話`);
+      }
+      closePlayerInteractMenu();
+    });
+  });
+  // 點擊外部關閉
+  setTimeout(() => {
+    document.addEventListener('click', closePlayerInteractMenu, { once: true });
+  }, 10);
+}
+
+function closePlayerInteractMenu() {
+  const m = document.getElementById('player-interact-menu');
+  if (m) m.remove();
+}
+
+// 發起交易邀請
+function startTradeRequest(ai) {
+  // 距離檢查
+  const dx = ai.x - GS.player.x;
+  const dy = ai.y - GS.player.y;
+  if (Math.hypot(dx, dy) > TRADE_DISTANCE_LIMIT) { alert('對方距離太遠，無法交易'); return; }
+  // 安全區檢查
+  const allMaps = getAllMaps();
+  if (allMaps[GS.currentMap]?.type !== 'safe') { alert('只能在村莊安全區進行交易'); return; }
+  addLog('system', `已向【${ai.name}】發出交易邀請，等待對方回應...`);
+  // 模擬 AI 接受交易（2 秒後有機率接受）
+  const accept = Math.random() < 0.85; // 85% 機率接受
+  setTimeout(() => {
+    if (accept) {
+      addLog('system', `【${ai.name}】接受了你的交易邀請`);
+      openTradeWindow(ai);
+    } else {
+      addLog('system', `【${ai.name}】拒絕了你的交易邀請`);
+    }
+  }, 1200 + Math.random() * 1000);
+}
+
+// 開啟交易視窗
+function openTradeWindow(partnerAI) {
+  closeTradeWindow();
+  tradeState = {
+    partner: partnerAI,
+    myItems: new Array(TRADE_MAX_SLOTS).fill(null), // {type, item, count}
+    partnerItems: new Array(TRADE_MAX_SLOTS).fill(null),
+    myGold: 0, myGem: 0,
+    partnerGold: 0, partnerGem: 0,
+    myConfirmed: false,
+    partnerConfirmed: false,
+  };
+  const panel = document.createElement('div');
+  panel.id = 'trade-window';
+  panel.className = 'trade-window-overlay';
+  panel.style.cssText = 'position:fixed;inset:0;z-index:600;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);';
+  panel.innerHTML = `
+    <div class="trade-window" style="background:linear-gradient(180deg,#2a1c0e,#140c04);border:2px solid #a07030;border-radius:12px;padding:16px;width:640px;max-width:95vw;color:#f0e0c0;box-shadow:0 10px 40px rgba(0,0,0,0.9)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:16px;font-weight:700;color:#ffd080">⚖ 交易視窗</div>
+        <button id="trade-close-btn" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:18px;padding:0 8px">✕</button>
+      </div>
+      <div style="display:flex;gap:12px">
+        <!-- 我方 -->
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;margin-bottom:6px;color:#80c0ff">我：${GS.player.name}</div>
+          <div id="trade-my-slots" class="trade-slot-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px"></div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <span style="color:#f0c040;font-size:11px">金幣：</span>
+            <input type="number" id="trade-my-gold" min="0" max="${GS.resources.gold}" value="0" style="flex:1;padding:3px 6px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#ffd080;font-size:11px;width:80px"/>
+            <span style="font-size:10px;color:#807060">擁有：${GS.resources.gold.toLocaleString()}</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span style="color:#c0a0ff;font-size:11px">鑽石：</span>
+            <input type="number" id="trade-my-gem" min="0" max="${GS.resources.gem}" value="0" style="flex:1;padding:3px 6px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#c0a0ff;font-size:11px;width:80px"/>
+            <span style="font-size:10px;color:#807060">擁有：${GS.resources.gem}</span>
+          </div>
+          <div style="margin-top:8px">
+            <button id="trade-my-confirm-btn" style="width:100%;padding:8px;background:linear-gradient(180deg,#508040,#305020);border:1px solid #60a050;border-radius:6px;color:#d0ffc0;font-weight:700;cursor:pointer">確認交易</button>
+          </div>
+        </div>
+        <!-- 中間分隔 -->
+        <div style="display:flex;align-items:center;font-size:24px;color:#a07030">⇄</div>
+        <!-- 對方 -->
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;margin-bottom:6px;color:#ff8080">對方：${partnerAI.name}</div>
+          <div id="trade-partner-slots" class="trade-slot-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px"></div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <span style="color:#f0c040;font-size:11px">金幣：</span>
+            <span id="trade-partner-gold" style="flex:1;padding:3px 6px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#ffd080;font-size:11px">0</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span style="color:#c0a0ff;font-size:11px">鑽石：</span>
+            <span id="trade-partner-gem" style="flex:1;padding:3px 6px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#c0a0ff;font-size:11px">0</span>
+          </div>
+          <div style="margin-top:8px">
+            <div id="trade-partner-status" style="text-align:center;padding:8px;color:#807060;font-size:11px">等待對方確認...</div>
+          </div>
+        </div>
+      </div>
+      <div id="trade-status" style="margin-top:10px;padding:6px 10px;background:rgba(0,0,0,0.3);border-radius:6px;font-size:11px;color:#a08060;text-align:center">
+        拖曳或點擊背包物品放入交易欄。雙方確認後交易完成。
+      </div>
+    </div>
+  `;
+  document.body.appendChild(panel);
+  // 關閉按鈕
+  document.getElementById('trade-close-btn').onclick = closeTradeWindow;
+  panel.addEventListener('click', e => { if (e.target === panel) closeTradeWindow(); });
+  // 金幣/鑽石輸入：修改時取消確認
+  const goldInput = document.getElementById('trade-my-gold');
+  const gemInput = document.getElementById('trade-my-gem');
+  goldInput.addEventListener('input', () => {
+    const v = Math.max(0, Math.min(GS.resources.gold, parseInt(goldInput.value) || 0));
+    tradeState.myGold = v;
+    cancelMyConfirm();
+    // 模擬對方反應
+    simulatePartnerTrade();
+  });
+  gemInput.addEventListener('input', () => {
+    const v = Math.max(0, Math.min(GS.resources.gem, parseInt(gemInput.value) || 0));
+    tradeState.myGem = v;
+    cancelMyConfirm();
+    simulatePartnerTrade();
+  });
+  // 確認按鈕
+  document.getElementById('trade-my-confirm-btn').onclick = toggleMyConfirm;
+  // 首次渲染
+  renderTradeSlots();
+  // 模擬對方放入一些東西
+  setTimeout(simulatePartnerTrade, 800);
+}
+
+function closeTradeWindow() {
+  const w = document.getElementById('trade-window');
+  if (w) w.remove();
+  if (tradeState && tradeState.myConfirmed === false && tradeState.partnerConfirmed === false) {
+    // 未完成：歸還物品（其實還沒扣）
+  }
+  tradeState = null;
+}
+
+function renderTradeSlots() {
+  const mySlots = document.getElementById('trade-my-slots');
+  const partnerSlots = document.getElementById('trade-partner-slots');
+  if (!mySlots || !partnerSlots || !tradeState) return;
+  mySlots.innerHTML = '';
+  partnerSlots.innerHTML = '';
+  for (let i = 0; i < TRADE_MAX_SLOTS; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'trade-slot';
+    cell.style.cssText = 'width:100%;aspect-ratio:1;background:rgba(0,0,0,0.4);border:1px solid #604020;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer';
+    const item = tradeState.myItems[i];
+    if (item) {
+      const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+      const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
+      cell.style.borderColor = rc.color;
+      cell.innerHTML = `
+        <img src="${iconUrl}" style="width:70%;height:70%;object-fit:contain;border-radius:4px"/>
+        ${item.count > 1 ? `<span style="position:absolute;bottom:2px;right:4px;font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : ''}
+      `;
+      cell.title = item.name + (item.count > 1 ? ' ×' + item.count : '');
+      cell.onclick = () => removeFromTrade(i, 'my');
+    } else {
+      cell.innerHTML = '<span style="color:#403020;font-size:11px">+</span>';
+      cell.title = '從背包拖入物品（點擊選擇）';
+      cell.onclick = () => showTradeItemPicker(i);
+    }
+    mySlots.appendChild(cell);
+  }
+  for (let i = 0; i < TRADE_MAX_SLOTS; i++) {
+    const cell = document.createElement('div');
+    cell.style.cssText = 'width:100%;aspect-ratio:1;background:rgba(0,0,0,0.4);border:1px solid #604020;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative';
+    const item = tradeState.partnerItems[i];
+    if (item) {
+      const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+      const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
+      cell.style.borderColor = rc.color;
+      cell.innerHTML = `
+        <img src="${iconUrl}" style="width:70%;height:70%;object-fit:contain;border-radius:4px"/>
+        ${item.count > 1 ? `<span style="position:absolute;bottom:2px;right:4px;font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : ''}
+      `;
+      cell.title = item.name + (item.count > 1 ? ' ×' + item.count : '');
+    }
+    partnerSlots.appendChild(cell);
+  }
+  document.getElementById('trade-partner-gold').textContent = tradeState.partnerGold.toLocaleString();
+  document.getElementById('trade-partner-gem').textContent = tradeState.partnerGem;
+  updateTradeStatus();
+}
+
+// 顯示物品選擇器（放入交易欄）
+function showTradeItemPicker(slotIndex) {
+  // 簡單版：打開一個選擇視窗列出可交易物品
+  const picker = document.createElement('div');
+  picker.id = 'trade-item-picker';
+  picker.style.cssText = 'position:fixed;inset:0;z-index:700;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.7)';
+  // 可交易物品：未綁定的裝備與道具
+  const tradeable = (GS.inventory || []).filter(it => {
+    if (it.bound || it.soulbound) return false;
+    return true;
+  });
+  picker.innerHTML = `
+    <div style="background:linear-gradient(180deg,#2a1c0e,#140c04);border:2px solid #a07030;border-radius:10px;padding:14px;width:420px;max-height:70vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-weight:700;color:#ffd080">選擇要交易的物品</div>
+        <button id="picker-close" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:16px">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+        ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
+          const iconUrl = it.itemType === 'equipment' ? getEquipIcon(it.type) : getItemIconUrl(it);
+          const rc = RARITY_CONFIG[it.rarity] || RARITY_CONFIG.white;
+          return `
+            <div class="trade-picker-item" data-idx="${idx}" style="aspect-ratio:1;border:2px solid ${rc.color};border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,0.4);position:relative" title="${it.name}${it.count > 1 ? ' ×' + it.count : ''}">
+              <img src="${iconUrl}" style="width:60%;height:60%;object-fit:contain;border-radius:4px"/>
+              ${it.count > 1 ? `<span style="position:absolute;bottom:2px;right:4px;font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${it.count}</span>` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(picker);
+  document.getElementById('picker-close').onclick = () => picker.remove();
+  picker.addEventListener('click', e => { if (e.target === picker) picker.remove(); });
+  picker.querySelectorAll('.trade-picker-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.dataset.idx);
+      const item = tradeable[idx];
+      if (!item) return;
+      addToTrade(slotIndex, item);
+      picker.remove();
+    });
+  });
+}
+
+function addToTrade(slotIndex, item) {
+  if (!tradeState) return;
+  if (item.bound || item.soulbound) { alert('綁定物品不可交易'); return; }
+  // 檢查是否已在交易欄
+  const exists = tradeState.myItems.some(s => s && s.uid === item.uid);
+  if (exists) { alert('此物品已在交易欄中'); return; }
+  tradeState.myItems[slotIndex] = { ...item };
+  cancelMyConfirm();
+  renderTradeSlots();
+  simulatePartnerTrade();
+}
+
+function removeFromTrade(slotIndex, side) {
+  if (side !== 'my' || !tradeState) return;
+  tradeState.myItems[slotIndex] = null;
+  cancelMyConfirm();
+  renderTradeSlots();
+  simulatePartnerTrade();
+}
+
+function cancelMyConfirm() {
+  if (!tradeState) return;
+  tradeState.myConfirmed = false;
+  tradeState.partnerConfirmed = false; // 我方修改則取消雙方確認
+  updateTradeStatus();
+}
+
+function toggleMyConfirm() {
+  if (!tradeState) return;
+  const hasContent = tradeState.myItems.some(s => s) || tradeState.myGold > 0 || tradeState.myGem > 0;
+  if (!hasContent) { alert('你還沒有放入任何物品或貨幣'); return; }
+  // 檢查金幣/鑽石是否足夠
+  if (tradeState.myGold > GS.resources.gold) { alert('金幣不足'); return; }
+  if (tradeState.myGem > GS.resources.gem) { alert('鑽石不足'); return; }
+  tradeState.myConfirmed = !tradeState.myConfirmed;
+  updateTradeStatus();
+  if (tradeState.myConfirmed) {
+    // 模擬對方確認
+    setTimeout(() => {
+      if (!tradeState) return;
+      const partnerHasContent = tradeState.partnerItems.some(s => s) || tradeState.partnerGold > 0 || tradeState.partnerGem > 0;
+      if (partnerHasContent && Math.random() < 0.8) {
+        tradeState.partnerConfirmed = true;
+        updateTradeStatus();
+        // 雙方都確認 → 完成交易
+        setTimeout(() => {
+          if (tradeState && tradeState.myConfirmed && tradeState.partnerConfirmed) {
+            completeTrade();
+          }
+        }, 600);
+      } else {
+        tradeState.partnerConfirmed = false;
+        updateTradeStatus();
+      }
+    }, 800 + Math.random() * 600);
+  }
+}
+
+function updateTradeStatus() {
+  const status = document.getElementById('trade-status');
+  const confirmBtn = document.getElementById('trade-my-confirm-btn');
+  const partnerStatus = document.getElementById('trade-partner-status');
+  if (!status || !confirmBtn || !partnerStatus || !tradeState) return;
+  if (tradeState.myConfirmed && tradeState.partnerConfirmed) {
+    status.style.color = '#80ff80';
+    status.textContent = '✓ 雙方已確認，交易完成！';
+  } else if (tradeState.myConfirmed) {
+    status.style.color = '#ffd060';
+    status.textContent = '你已確認，等待對方確認...';
+  } else {
+    status.style.color = '#a08060';
+    status.textContent = '拖曳或點擊背包物品放入交易欄。雙方確認後交易完成。';
+  }
+  confirmBtn.style.background = tradeState.myConfirmed
+    ? 'linear-gradient(180deg,#804040,#502020)'
+    : 'linear-gradient(180deg,#508040,#305020)';
+  confirmBtn.textContent = tradeState.myConfirmed ? '取消確認' : '確認交易';
+  partnerStatus.style.color = tradeState.partnerConfirmed ? '#80ff80' : '#807060';
+  partnerStatus.textContent = tradeState.partnerConfirmed ? '✓ 對方已確認' : '等待對方確認...';
+}
+
+// 模擬對方放入物品（AI 隨機放入一些有價值的東西）
+function simulatePartnerTrade() {
+  if (!tradeState || !tradeState.partner) return;
+  const ai = tradeState.partner;
+  const myHasContent = tradeState.myItems.some(s => s) || tradeState.myGold > 0 || tradeState.myGem > 0;
+  // 如果我方有內容，對方有機率放東西
+  if (myHasContent && Math.random() < 0.6) {
+    const options = [];
+    // 對方可能放金幣
+    if (tradeState.myGold > 0 || tradeState.myGem > 0) {
+      options.push('gold');
+    }
+    // 對方可能放裝備
+    if (tradeState.myItems.some(s => s && s.itemType === 'equipment')) {
+      options.push('equip');
+    }
+    if (options.length === 0) options.push('gold');
+    const choice = options[Math.floor(Math.random() * options.length)];
+    if (choice === 'gold') {
+      tradeState.partnerGold = Math.floor(tradeState.myGold * (0.8 + Math.random() * 0.4));
+      tradeState.partnerGem = Math.floor(tradeState.myGem * (0.7 + Math.random() * 0.5));
+    } else if (choice === 'equip') {
+      // 模擬放一個綠/藍裝
+      const myEquip = tradeState.myItems.find(s => s && s.itemType === 'equipment');
+      if (myEquip) {
+        const fakeEquip = { ...myEquip, name: '對方的' + myEquip.name, rarity: myEquip.rarity };
+        tradeState.partnerItems[0] = fakeEquip;
+      }
+    }
+  } else if (!myHasContent) {
+    // 清空
+    tradeState.partnerItems = new Array(TRADE_MAX_SLOTS).fill(null);
+    tradeState.partnerGold = 0;
+    tradeState.partnerGem = 0;
+  }
+  tradeState.partnerConfirmed = false;
+  renderTradeSlots();
+}
+
+// 完成交易
+function completeTrade() {
+  if (!tradeState) return;
+  // 扣除我方物品/貨幣
+  if (tradeState.myGold > GS.resources.gold || tradeState.myGem > GS.resources.gem) {
+    alert('資源不足，交易失敗');
+    closeTradeWindow();
+    return;
+  }
+  // 扣除金幣/鑽石
+  GS.resources.gold -= tradeState.myGold;
+  GS.resources.gem -= tradeState.myGem;
+  // 扣除我方物品（從背包移除）
+  tradeState.myItems.forEach(slot => {
+    if (slot) {
+      const invItem = GS.inventory.find(it => it.uid === slot.uid || it.id === slot.id);
+      if (invItem) {
+        invItem.count = (invItem.count || 1) - (slot.count || 1);
+        if (invItem.count <= 0) {
+          GS.inventory = GS.inventory.filter(it => it !== invItem);
+        }
+      }
+    }
+  });
+  // 獲得對方金幣/鑽石
+  GS.resources.gold += tradeState.partnerGold;
+  GS.resources.gem += tradeState.partnerGem;
+  // 獲得對方物品（加入背包）
+  tradeState.partnerItems.forEach(slot => {
+    if (slot) {
+      addToInventory({ ...slot, uid: null, bound: false });
+    }
+  });
+  // 紀錄
+  const partnerName = tradeState.partner?.name || '未知玩家';
+  const myOffer = [];
+  tradeState.myItems.forEach(s => { if (s) myOffer.push(s.name + (s.count > 1 ? '×' + s.count : '')); });
+  if (tradeState.myGold) myOffer.push(tradeState.myGold.toLocaleString() + '金幣');
+  if (tradeState.myGem) myOffer.push(tradeState.myGem + '鑽石');
+  const partnerOffer = [];
+  tradeState.partnerItems.forEach(s => { if (s) partnerOffer.push(s.name + (s.count > 1 ? '×' + s.count : '')); });
+  if (tradeState.partnerGold) partnerOffer.push(tradeState.partnerGold.toLocaleString() + '金幣');
+  if (tradeState.partnerGem) partnerOffer.push(tradeState.partnerGem + '鑽石');
+  addLog('system', `🤝 與【${partnerName}】交易完成：你給予 ${myOffer.join('、') || '無'}，獲得 ${partnerOffer.join('、') || '無'}`);
+  addLog('battle', `🤝 與【${partnerName}】交易完成`);
+  updateUI();
+  updateSlotDisplay();
+  closeTradeWindow();
+}
+
+// ==================== 拍賣所系統 ====================
+const AUCTION_MAX_LISTINGS = 5; // 掛單上限
+const AUCTION_TAX_RATE = 0.05; // 5% 手續費
+const AUCTION_SAVE_KEY = 'game_auction_save_v1';
+const AUCTION_REFILL_INTERVAL = 60000; // AI補貨間隔（ms）
+let _auctionLastRefill = 0;
+
+// 載入交易所持久化數據
+function loadAuctionData() {
+  try {
+    const raw = localStorage.getItem(AUCTION_SAVE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (data.auctionListings) GS.auctionListings = data.auctionListings;
+    if (data.myAuctionListings) GS.myAuctionListings = data.myAuctionListings;
+    if (data.lastRefill) _auctionLastRefill = data.lastRefill;
+    console.log('[拍賣所] 已載入持久化數據，掛單數:', GS.auctionListings?.length || 0);
+    return true;
+  } catch(e) {
+    console.warn('[拍賣所] 載入失敗:', e);
+    return false;
+  }
+}
+
+// 保存交易所數據到 localStorage
+function saveAuctionData() {
+  try {
+    const data = {
+      auctionListings: GS.auctionListings || [],
+      myAuctionListings: GS.myAuctionListings || [],
+      lastRefill: _auctionLastRefill,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(AUCTION_SAVE_KEY, JSON.stringify(data));
+  } catch(e) {
+    console.warn('[拍賣所] 保存失敗:', e);
+  }
+}
+
+// 生成一件AI隨機掛單物品
+function generateAIListing() {
+  const level = 10 + Math.floor(Math.random() * 60); // 等級10~70
+  const isEquip = Math.random() < 0.65;
+  let item;
+  if (isEquip) {
+    item = rollEquipment(level);
+    item.itemType = 'equipment';
+    if (!item.type) item.type = ['weapon','armor','accessory','boots','helmet'][Math.floor(Math.random()*5)];
+  } else {
+    // 消耗品/材料
+    const consumables = [
+      { name: '大型生命藥水', rarity: 'white', itemType: 'consumable', type: 'hp', basePrice: 80, stack: [1, 5, 10] },
+      { name: '大型魔力藥水', rarity: 'white', itemType: 'consumable', type: 'mp', basePrice: 100, stack: [1, 5, 10] },
+      { name: '強化石', rarity: 'green', itemType: 'material', type: 'stone', basePrice: 40, stack: [1, 3, 5, 10] },
+      { name: '進階強化石', rarity: 'blue', itemType: 'material', type: 'stone', basePrice: 200, stack: [1, 3, 5] },
+      { name: '傳說靈魂石', rarity: 'purple', itemType: 'material', type: 'soul', basePrice: 500, stack: [1, 2] },
+      { name: '幸運符', rarity: 'green', itemType: 'consumable', type: 'luck', basePrice: 300, stack: [1, 3] },
+    ];
+    const pick = consumables[Math.floor(Math.random() * consumables.length)];
+    const stackArr = pick.stack;
+    const count = stackArr[Math.floor(Math.random() * stackArr.length)];
+    item = { ...pick, count };
+    delete item.stack;
+  }
+  
+  const rarityPriceMult = { white: 1, green: 3, blue: 10, red: 40, purple: 150, gold: 600 };
+  const baseMult = rarityPriceMult[item.rarity] || 1;
+  const count = item.count || 1;
+  const basePrice = Math.max(100, Math.floor((item.itemType === 'equipment' ? level * 25 : item.basePrice || 50) * baseMult * count));
+  const price = Math.floor(basePrice * (0.8 + Math.random() * 0.6)); // ±20%
+  const useGem = item.rarity === 'purple' || item.rarity === 'gold' || (item.rarity === 'red' && Math.random() < 0.3);
+  
+  // 隨機選一個AI玩家作為賣家
+  const sellerAI = GLOBAL_AI_POOL && GLOBAL_AI_POOL.length > 0
+    ? GLOBAL_AI_POOL[Math.floor(Math.random() * GLOBAL_AI_POOL.length)]
+    : { name: '神秘商人' };
+  
+  return {
+    id: 'ah_ai_' + Date.now() + '_' + Math.floor(Math.random() * 100000),
+    uid: 'ai_' + Date.now() + '_' + Math.floor(Math.random() * 100000),
+    name: item.name,
+    rarity: item.rarity,
+    itemType: item.itemType || 'equipment',
+    type: item.type,
+    count: count,
+    price: useGem ? Math.max(1, Math.floor(price / 1000)) : price,
+    currency: useGem ? 'gem' : 'gold',
+    seller: sellerAI.name,
+    isAI: true,
+    createdAt: Date.now(),
+  };
+}
+
+// AI補貨：保持交易所至少有15件AI掛單
+function refillAuctionAIListings() {
+  if (!GS.auctionListings) GS.auctionListings = [];
+  const aiCount = GS.auctionListings.filter(l => l.isAI).length;
+  const target = 15; // 固定維持 15 件 AI 掛單
+  let added = 0;
+  for (let i = aiCount; i < target; i++) {
+    const listing = generateAIListing();
+    GS.auctionListings.push(listing);
+    added++;
+    console.log(`[拍賣所] AI上架：${listing.name}（${listing.price}${listing.currency === 'gem' ? '鑽石' : '金幣'}）`);
+  }
+  _auctionLastRefill = Date.now();
+  if (added > 0) {
+    console.log(`[拍賣所] AI補貨完成，新增 ${added} 件，AI掛單總計 ${GS.auctionListings.filter(l => l.isAI).length} 件，全部掛單 ${GS.auctionListings.length} 件`);
+    saveAuctionData();
+  }
+  return added;
+}
+
+// 檢查是否需要補貨（在 gameLoop 中定期調用）
+function tickAuctionRefill(dtMs) {
+  if (!_auctionLastRefill) { _auctionLastRefill = Date.now(); return; }
+  if (Date.now() - _auctionLastRefill > AUCTION_REFILL_INTERVAL) {
+    refillAuctionAIListings();
+  }
+}
+
+function openAuctionHouse() {
+  closeAuctionHouse();
+  // 關閉其他可能殘留的面板，避免層級遮擋
+  closeAllPanelsForAuction();
+  if (!GS.auctionListings) GS.auctionListings = [];
+  // 首次載入：生成一些模擬掛單
+  if (GS.auctionListings.length === 0) {
+    seedAuctionListings();
+  }
+  if (!GS.myAuctionListings) GS.myAuctionListings = [];
+  const panel = document.createElement('div');
+  panel.id = 'auction-house';
+  panel.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.7)';
+  panel.innerHTML = `
+    <div class="auction-window" style="background:linear-gradient(180deg,#2a1c0e,#140c04);border:2px solid #a07030;border-radius:12px;padding:16px;padding-bottom:24px;width:780px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;color:#f0e0c0;box-shadow:0 10px 40px rgba(0,0,0,0.9)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:18px;font-weight:700;color:#ffd080">⚖ 拍賣所</div>
+        <button id="auction-close-btn" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:20px;padding:0 8px">✕</button>
+      </div>
+      <!-- Tab 切換 -->
+      <div class="auction-tabs" style="display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid #604020">
+        <button class="auction-tab active" data-tab="browse">瀏覽</button>
+        <button class="auction-tab" data-tab="sell">我要出售</button>
+        <button class="auction-tab" data-tab="my">我的掛單</button>
+      </div>
+      <div id="auction-tab-content" style="flex:1 1 auto;overflow:auto;min-height:0"></div>
+    </div>
+  `;
+  document.body.appendChild(panel);
+  document.getElementById('auction-close-btn').onclick = closeAuctionHouse;
+  panel.addEventListener('click', e => { if (e.target === panel) closeAuctionHouse(); });
+  // Tab 切換
+  panel.querySelectorAll('.auction-tab').forEach(tab => {
+    tab.style.cssText = 'padding:8px 16px;background:transparent;border:none;color:#807060;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px';
+    tab.addEventListener('click', () => {
+      panel.querySelectorAll('.auction-tab').forEach(t => {
+        t.classList.remove('active');
+        t.style.color = '#807060';
+        t.style.borderBottomColor = 'transparent';
+      });
+      tab.classList.add('active');
+      tab.style.color = '#ffd080';
+      tab.style.borderBottomColor = '#ffd080';
+      renderAuctionTab(tab.dataset.tab);
+    });
+  });
+  // 初始 tab 樣式
+  const firstTab = panel.querySelector('.auction-tab.active');
+  firstTab.style.color = '#ffd080';
+  firstTab.style.borderBottomColor = '#ffd080';
+  renderAuctionTab('browse');
+}
+
+function closeAuctionHouse() {
+  const ah = document.getElementById('auction-house');
+  if (ah) ah.remove();
+}
+
+// 開啟交易所前關閉其他彈出面板，避免層級遮擋
+function closeAllPanelsForAuction() {
+  const panelIds = ['gacha-screen', 'synthesis-page', 'shop-screen', 'inventory-screen',
+    'skills-screen', 'character-screen', 'ranking-screen', 'guild-screen', 'quest-screen',
+    'reward-popup', 'level-up-popup', 'boss-rush-screen'];
+  panelIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
+  // 關閉各種 modal / menu
+  const modals = document.querySelectorAll('.modal-overlay, .modal.open, .popup-overlay');
+  modals.forEach(m => m.remove());
+}
+
+function renderAuctionTab(tab) {
+  const content = document.getElementById('auction-tab-content');
+  if (!content) return;
+  if (tab === 'browse') renderAuctionBrowse(content);
+  else if (tab === 'sell') renderAuctionSell(content);
+  else if (tab === 'my') renderAuctionMy(content);
+}
+
+// 首次啟動時生成AI掛單（從持久化載入優先，沒有則生成）
+function seedAuctionListings() {
+  GS.auctionListings = [];
+  console.log('[拍賣所] 首次啟動，生成初始AI掛單...');
+  refillAuctionAIListings();
+  console.log(`[拍賣所] 初始掛單生成完畢，共 ${GS.auctionListings.length} 件商品`);
+}
+
+function renderAuctionBrowse(container) {
+  const listings = GS.auctionListings || [];
+  const html = `
+    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+      <input id="auction-search" type="text" placeholder="搜尋物品名稱..." style="flex:1;padding:6px 10px;background:#0f0a05;border:1px solid #604020;border-radius:6px;color:#f0e0c0;font-size:12px"/>
+      <select id="auction-sort" style="padding:6px 8px;background:#0f0a05;border:1px solid #604020;border-radius:6px;color:#f0e0c0;font-size:12px">
+        <option value="price_asc">價格（低→高）</option>
+        <option value="price_desc">價格（高→低）</option>
+        <option value="rarity_desc">稀有度（高→低）</option>
+      </select>
+    </div>
+    <div style="font-size:11px;color:#a08060;margin-bottom:6px">共 ${listings.length} 件商品</div>
+    <div class="auction-list" style="display:flex;flex-direction:column;gap:6px">
+      ${listings.length === 0 ? '<div style="text-align:center;color:#807060;padding:40px">暫無商品</div>' : listings.map(item => renderAuctionItemRow(item, 'browse')).join('')}
+    </div>
+  `;
+  container.innerHTML = html;
+  // 搜尋與排序
+  const searchInput = document.getElementById('auction-search');
+  const sortSelect = document.getElementById('auction-sort');
+  const filter = () => {
+    const kw = (searchInput?.value || '').trim().toLowerCase();
+    const sortBy = sortSelect?.value || 'price_asc';
+    let items = [...listings];
+    if (kw) items = items.filter(it => it.name.toLowerCase().includes(kw));
+    const rarityRank = { gold: 5, purple: 4, red: 3, blue: 2, green: 1, white: 0 };
+    if (sortBy === 'price_asc') items.sort((a,b) => a.price - b.price);
+    else if (sortBy === 'price_desc') items.sort((a,b) => b.price - a.price);
+    else if (sortBy === 'rarity_desc') items.sort((a,b) => (rarityRank[b.rarity]||0) - (rarityRank[a.rarity]||0));
+    const listEl = container.querySelector('.auction-list');
+    if (listEl) listEl.innerHTML = items.length === 0 ? '<div style="text-align:center;color:#807060;padding:40px">沒有符合條件的商品</div>' : items.map(item => renderAuctionItemRow(item, 'browse')).join('');
+    bindAuctionListEvents();
+  };
+  if (searchInput) searchInput.addEventListener('input', filter);
+  if (sortSelect) sortSelect.addEventListener('change', filter);
+  bindAuctionListEvents();
+}
+
+function renderAuctionItemRow(item, mode) {
+  const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+  const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
+  const currencyIcon = item.currency === 'gem' ? '💎' : '💰';
+  const tax = Math.floor(item.price * AUCTION_TAX_RATE);
+  return `
+    <div class="auction-item-row" data-id="${item.id}" data-mode="${mode}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid ${rc.color}33;border-radius:8px">
+      <div class="auction-item-icon" style="width:44px;height:44px;border:2px solid ${rc.color};border-radius:6px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4);flex-shrink:0">
+        <img src="${iconUrl}" style="width:32px;height:32px;object-fit:contain;border-radius:4px"/>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:${rc.color};font-size:13px">${item.name}${item.count > 1 ? ' ×' + item.count : ''}</div>
+        <div style="font-size:10px;color:#a08060;margin-top:2px">賣家：${item.seller || '未知'}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-weight:700;color:${item.currency === 'gem' ? '#c0a0ff' : '#ffd080'};font-size:14px">${currencyIcon} ${item.price.toLocaleString()}</div>
+        ${mode === 'browse' ? `<button class="auction-buy-btn" data-id="${item.id}" style="margin-top:4px;padding:4px 12px;background:linear-gradient(180deg,#60a040,#306020);border:1px solid #80c060;border-radius:4px;color:#e0ffd0;font-size:11px;font-weight:700;cursor:pointer">購買</button>` : ''}
+        ${mode === 'my' ? `<button class="auction-cancel-btn" data-id="${item.id}" style="margin-top:4px;padding:4px 12px;background:linear-gradient(180deg,#a04040,#601010);border:1px solid #c06060;border-radius:4px;color:#ffe0e0;font-size:11px;font-weight:700;cursor:pointer">取消掛單</button>` : ''}
+        ${mode === 'my' ? `<div style="font-size:9px;color:#807060;margin-top:2px">手續費 ${tax} ${item.currency === 'gem' ? '鑽石' : '金幣'}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function bindAuctionListEvents() {
+  document.querySelectorAll('.auction-buy-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      buyAuctionItem(btn.dataset.id);
+    };
+  });
+  document.querySelectorAll('.auction-cancel-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      cancelAuctionListing(btn.dataset.id);
+    };
+  });
+}
+
+function buyAuctionItem(listingId) {
+  const listing = GS.auctionListings.find(l => l.id === listingId);
+  if (!listing) {
+    console.log('[拍賣所] 購買失敗：掛單不存在', listingId);
+    return;
+  }
+  console.log(`[拍賣所] 嘗試購買：${listing.name}，價格 ${listing.price}${listing.currency === 'gem' ? '鑽石' : '金幣'}，賣家 ${listing.seller}（AI:${listing.isAI}）`);
+  if (listing.seller === GS.player.name) { alert('不能購買自己的商品'); return; }
+  const key = listing.currency === 'gem' ? 'gem' : 'gold';
+  if (!GS.resources) GS.resources = { gold: 0, gem: 0 };
+  if (GS.resources[key] === undefined) GS.resources[key] = 0;
+  if (GS.resources[key] < listing.price) {
+    alert(listing.currency === 'gem' ? '鑽石不足！' : '金幣不足！');
+    return;
+  }
+  if (!confirm(`確定以 ${listing.price.toLocaleString()} ${listing.currency === 'gem' ? '鑽石' : '金幣'} 購買【${listing.name}】？`)) return;
+  // 扣錢
+  GS.resources[key] -= listing.price;
+  console.log(`[拍賣所] 扣費成功，剩餘${key === 'gem' ? '鑽石' : '金幣'}：${GS.resources[key]}`);
+  // 加入背包
+  const newItem = {
+    ...listing,
+    uid: 'bought_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    bound: false,
+    count: listing.count || 1,
+  };
+  const beforeInv = (GS.inventory || []).length;
+  const addResult = addToInventory(newItem);
+  if (!addResult) {
+    // 背包滿，退款
+    GS.resources[key] += listing.price;
+    console.log('[拍賣所] 購買失敗：背包滿，已退款');
+    alert('背包空間不足，無法購買！');
+    return;
+  }
+  console.log(`[拍賣所] 物品已入背包（背包 ${beforeInv} → ${GS.inventory.length} 格）`);
+  // 從列表移除（同時從 myAuctionListings 移除）
+  const beforeCount = GS.auctionListings.length;
+  GS.auctionListings = GS.auctionListings.filter(l => l.id !== listingId);
+  if (GS.myAuctionListings) {
+    GS.myAuctionListings = GS.myAuctionListings.filter(l => l.id !== listingId);
+  }
+  console.log(`[拍賣所] 掛單已移除（${beforeCount} → ${GS.auctionListings.length} 件）`);
+  // 記錄
+  const msg = `💰 購買了【${listing.name}】（${listing.price.toLocaleString()}${listing.currency === 'gem' ? '鑽石' : '金幣'}）`;
+  addLog('system', msg);
+  addLog('battle', msg);
+  saveAuctionData();
+  // 刷新
+  updateUI();
+  updateSlotDisplay();
+  renderAuctionTab('browse');
+  console.log('[拍賣所] 購買流程完成');
+}
+
+function renderAuctionSell(container) {
+  const myCount = (GS.myAuctionListings || []).length;
+  const remaining = Math.max(0, AUCTION_MAX_LISTINGS - myCount);
+  const tradeable = (GS.inventory || []).filter(it => !it.bound && !it.soulbound && it.itemType !== 'gold' && it.itemType !== 'gem');
+  const html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:12px;color:#a08060">已掛 ${myCount} / ${AUCTION_MAX_LISTINGS} 件</div>
+      <div style="font-size:11px;color:#807060">交易稅：${Math.round(AUCTION_TAX_RATE * 100)}% 手續費</div>
+    </div>
+    <div style="font-size:12px;color:#ffd080;margin-bottom:6px">選擇要掛售的物品：</div>
+    <div class="auction-sell-grid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px;max-height:200px;overflow:auto;padding:6px;background:rgba(0,0,0,0.25);border-radius:6px;border:1px solid #402810">
+      ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
+        const iconUrl = it.itemType === 'equipment' ? getEquipIcon(it.type) : getItemIconUrl(it);
+        const rc = RARITY_CONFIG[it.rarity] || RARITY_CONFIG.white;
+        return `
+          <div class="auction-sell-item" data-idx="${idx}" style="aspect-ratio:1;border:2px solid ${rc.color};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,0.4);position:relative" title="${it.name}${it.count > 1 ? ' ×' + it.count : ''}">
+            <img src="${iconUrl}" style="width:65%;height:65%;object-fit:contain;border-radius:4px"/>
+            ${it.count > 1 ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${it.count}</span>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+    <div id="auction-sell-detail" style="padding:10px;background:rgba(0,0,0,0.25);border-radius:6px;border:1px solid #402810">
+      <div style="color:#807060;font-size:12px;text-align:center">點擊上方物品開始掛單</div>
+    </div>
+  `;
+  container.innerHTML = html;
+  // 點擊物品打開掛單表單
+  container.querySelectorAll('.auction-sell-item').forEach(el => {
+    el.onclick = () => {
+      const idx = parseInt(el.dataset.idx);
+      showAuctionSellForm(tradeable[idx]);
+    };
+  });
+}
+
+function showAuctionSellForm(item) {
+  const detail = document.getElementById('auction-sell-detail');
+  if (!detail) return;
+  const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
+  const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+  const maxCount = item.count || 1;
+  detail.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+      <div style="width:48px;height:48px;border:2px solid ${rc.color};border-radius:6px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)">
+        <img src="${iconUrl}" style="width:36px;height:36px;object-fit:contain;border-radius:4px"/>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:700;color:${rc.color};font-size:14px">${item.name}</div>
+        <div style="font-size:11px;color:#a08060">擁有數量：${maxCount}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center;font-size:12px">
+      <span>數量：</span>
+      <input id="ah-sell-qty" type="number" min="1" max="${maxCount}" value="1" style="padding:5px 8px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#f0e0c0;width:80px"/>
+      <span>貨幣：</span>
+      <select id="ah-sell-currency" style="padding:5px 8px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#f0e0c0;width:100px">
+        <option value="gold">💰 金幣</option>
+        <option value="gem">💎 鑽石</option>
+      </select>
+      <span>售價：</span>
+      <input id="ah-sell-price" type="number" min="1" value="1000" style="padding:5px 8px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#ffd080;width:120px"/>
+    </div>
+    <div style="font-size:11px;color:#a08060;margin:8px 0 10px">預收手續費 <span id="ah-sell-tax" style="color:#ff8060">50</span> 金幣（實收 <span id="ah-sell-net" style="color:#80ff80">950</span>）</div>
+    <button id="ah-sell-confirm" style="width:100%;padding:8px;background:linear-gradient(180deg,#d4a020,#8a6520);border:1px solid #f0c040;border-radius:6px;color:#fff;font-weight:700;cursor:pointer;font-size:13px">上架出售</button>
+  `;
+  const updateTax = () => {
+    const price = parseInt(document.getElementById('ah-sell-price').value) || 0;
+    const currency = document.getElementById('ah-sell-currency').value;
+    const tax = Math.floor(price * AUCTION_TAX_RATE);
+    const net = price - tax;
+    document.getElementById('ah-sell-tax').textContent = tax.toLocaleString();
+    document.getElementById('ah-sell-net').textContent = net.toLocaleString();
+  };
+  document.getElementById('ah-sell-price').addEventListener('input', updateTax);
+  document.getElementById('ah-sell-currency').addEventListener('change', updateTax);
+  document.getElementById('ah-sell-confirm').onclick = () => {
+    const qty = Math.max(1, Math.min(maxCount, parseInt(document.getElementById('ah-sell-qty').value) || 1));
+    const price = parseInt(document.getElementById('ah-sell-price').value) || 0;
+    const currency = document.getElementById('ah-sell-currency').value;
+    if (price <= 0) { alert('價格必須大於0'); return; }
+    if (!GS.myAuctionListings) GS.myAuctionListings = [];
+    if (GS.myAuctionListings.length >= AUCTION_MAX_LISTINGS) { alert('掛單數量已達上限'); return; }
+    if (!GS.inventory) GS.inventory = [];
+    // 從背包扣除
+    const invItem = GS.inventory.find(it => it.uid === item.uid);
+    if (!invItem) {
+      console.log('[拍賣所] 上架失敗：背包中找不到物品', item.uid, item.name);
+      return;
+    }
+    if ((invItem.count || 1) < qty) { alert('數量不足'); return; }
+    console.log(`[拍賣所] 上架前背包：${item.name} × ${invItem.count}`);
+    invItem.count = (invItem.count || 1) - qty;
+    if (invItem.count <= 0) {
+      GS.inventory = GS.inventory.filter(it => it.uid !== item.uid);
+      console.log(`[拍賣所] 物品已從背包移除：${item.name}`);
+    } else {
+      console.log(`[拍賣所] 背包剩餘：${item.name} × ${invItem.count}`);
+    }
+    // 加入掛單（玩家掛單出現在瀏覽列表最前面）
+    const listingId = 'ah_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+    const newListing = {
+      id: listingId,
+      uid: item.uid,
+      name: item.name,
+      rarity: item.rarity,
+      itemType: item.itemType,
+      type: item.type,
+      count: qty,
+      price: price,
+      currency: currency,
+      seller: GS.player.name,
+      isAI: false,
+      createdAt: Date.now(),
+    };
+    GS.myAuctionListings.push(newListing);
+    GS.auctionListings.unshift(newListing); // 玩家掛單排在最前面
+    console.log(`[拍賣所] 玩家上架成功：${item.name}×${qty}，價格 ${price}${currency === 'gem' ? '鑽石' : '金幣'}，掛單ID ${listingId}`);
+    console.log(`[拍賣所] 當前總掛單數：${GS.auctionListings.length}，我的掛單：${GS.myAuctionListings.length}`);
+    saveAuctionData();
+    // 記錄
+    addLog('system', `📋 已上架【${item.name}${qty > 1 ? '×' + qty : ''}】，售價 ${price.toLocaleString()}${currency === 'gem' ? '鑽石' : '金幣'}`);
+    updateUI();
+    renderAuctionTab('sell');
+  };
+}
+
+function renderAuctionMy(container) {
+  const myListings = GS.myAuctionListings || [];
+  const html = `
+    <div style="font-size:12px;color:#a08060;margin-bottom:8px">我的掛單（${myListings.length}/${AUCTION_MAX_LISTINGS}）</div>
+    <div class="auction-my-list" style="display:flex;flex-direction:column;gap:6px">
+      ${myListings.length === 0 ? '<div style="text-align:center;color:#807060;padding:40px">尚未掛出任何商品</div>' : myListings.map(item => renderAuctionItemRow(item, 'my')).join('')}
+    </div>
+  `;
+  container.innerHTML = html;
+  bindAuctionListEvents();
+}
+
+function cancelAuctionListing(listingId) {
+  const listing = (GS.myAuctionListings || []).find(l => l.id === listingId);
+  if (!listing) return;
+  if (!confirm('確定取消此掛單？物品將退回背包。')) return;
+  // 退回物品
+  addToInventory({ ...listing, bound: false });
+  // 從列表移除
+  GS.myAuctionListings = GS.myAuctionListings.filter(l => l.id !== listingId);
+  GS.auctionListings = GS.auctionListings.filter(l => l.id !== listingId);
+  saveAuctionData();
+  addLog('system', `📋 已取消掛單【${listing.name}】，物品已退回背包`);
+  updateUI();
+  renderAuctionTab('my');
+}
+
 // ==================== AI 玩家点击 & 受伤 ====================
 function onAIPlayerClick(ai) {
   if (ai.hp <= 0 || ai.state === 'dead') return;
   const allMaps = getAllMaps();
-  if (allMaps[GS.currentMap]?.type === 'safe') return;
-  // 设为攻擊目標，走过去攻擊
+  const mapType = allMaps[GS.currentMap]?.type || 'field';
+  // 安全區：顯示交互選單
+  if (mapType === 'safe') {
+    showPlayerInteractMenu(ai);
+    return;
+  }
+  // 非安全區：設為攻擊目標，走过去攻擊
   GS.targetAiUid = ai.uid;
   const cls = CLASSES[GS.player.classId];
   const range = cls.atkType === 'ranged' ? 120 : 40;
@@ -4506,6 +8179,7 @@ function onAIPlayerDead(ai) {
   ai.state = 'dead';
   if (ai.el) ai.el.classList.add('dead');
   GS.player.kills = (GS.player.kills || 0) + 1;
+  GS.player.pvpKills = (GS.player.pvpKills || 0) + 1;
   // PVP擊殺AI玩家：僅給予極少量經驗，不掉落金幣、道具和裝備
   const exp = Math.min(10, Math.max(5, ai.level));
   GS.player.exp += exp;
@@ -4541,17 +8215,21 @@ function updateAIPlayers(dt) {
   GS.aiPlayers.forEach(ai => {
     if (ai.state === 'dead') {
       ai.respawnTimer = (ai.respawnTimer || 0) + dt;
-      if (ai.respawnTimer > 30) {
-        // 活躍 AI 復活：原地圖復活
-        ai.state = 'wandering';
+      if (ai.respawnTimer > 5 + Math.random() * 10) {
+        // 死亡後在村莊復活，等待5-15秒後繼續練功
+        ai.state = 'village_resting';
         ai.hp = ai.hpMax;
         ai.mp = ai.mpMax;
         ai.attackCooldown = 0;
         ai.hitTimer = 0;
         ai.targetUid = null;
         ai.respawnTimer = 0;
-        ai.x = 100 + Math.random() * ((CAMERA.worldWidth || 2496) - 200);
-        ai.y = 100 + Math.random() * ((CAMERA.worldHeight || 1664) - 200);
+        ai.restTimer = 5 + Math.random() * 10; // 村莊休息5-15秒
+        ai.tempVillageId = 'village';
+        // 標記在村莊地圖
+        ai.mapId = 'village';
+        ai.x = 200 + Math.random() * 800;
+        ai.y = 600 + Math.random() * 300;
         ai.targetX = ai.x; ai.targetY = ai.y;
         try { createAISprite(ai); } catch (e) { /* ignore */ }
       }
@@ -4582,14 +8260,14 @@ function updateAIPlayers(dt) {
     }
 
     // ===== AI 村莊補給邏輯 =====
-    // 血量低於50%時嘗試喝藥水；藥水用完則返回村莊
+    // 血量低於30%或MP低於20%時嘗試喝藥水；藥水用完則返回村莊
     const hpRatio = ai.hp / ai.hpMax;
     const mpRatio = ai.mp / ai.mpMax;
     if (ai.state !== 'returning_to_village' && ai.state !== 'village_resting') {
       if (ai.potions == null) ai.potions = { hp: 3, mp: 2 };
       // 血量低時喝紅水（戰鬥中更積極）
       const inCombat = ai.targetUid && ai.state !== 'wandering';
-      const hpThreshold = inCombat ? 0.5 : 0.35;
+      const hpThreshold = inCombat ? 0.4 : 0.3;
       if (hpRatio < hpThreshold && (ai.potions.hp || 0) > 0) {
         ai.potions.hp--;
         ai.hp = Math.min(ai.hpMax, ai.hp + ai.hpMax * 0.4);
@@ -4600,12 +8278,12 @@ function updateAIPlayers(dt) {
         }
       }
       // 藍量低時喝藍水
-      if (mpRatio < 0.3 && (ai.potions.mp || 0) > 0) {
+      if (mpRatio < 0.2 && (ai.potions.mp || 0) > 0) {
         ai.potions.mp--;
         ai.mp = Math.min(ai.mpMax, ai.mp + ai.mpMax * 0.5);
       }
-      // 沒藥水且血量低 → 返回村莊
-      if (hpRatio < 0.25 && (ai.potions.hp || 0) <= 0) {
+      // 沒藥水且血量低於30%或MP低於20% → 返回村莊
+      if (hpRatio < 0.3 && (ai.potions.hp || 0) <= 0 || mpRatio < 0.2 && (ai.potions.mp || 0) <= 0) {
         ai.state = 'returning_to_village';
         ai.targetUid = null;
         const allMaps = getAllMaps();
@@ -4638,11 +8316,12 @@ function updateAIPlayers(dt) {
     // 村莊休息狀態：計時結束後返回戰鬥地圖
     if (ai.state === 'village_resting') {
       ai.restTimer -= dt;
-      // 慢慢回血
+      // 慢慢回血回藍
       ai.hp = Math.min(ai.hpMax, ai.hp + ai.hpMax * 0.15 * dt);
+      ai.mp = Math.min(ai.mpMax, ai.mp + ai.mpMax * 0.1 * dt);
       if (ai.restTimer <= 0) {
         // 補給完畢，重新出發
-        ai.potions = { hp: 3 + Math.floor(Math.random() * 2), mp: 1 };
+        ai.potions = { hp: 3 + Math.floor(Math.random() * 2), mp: 2 };
         ai.state = 'wandering';
         ai.targetUid = null;
         // 回到原戰鬥地圖
@@ -4653,51 +8332,77 @@ function updateAIPlayers(dt) {
       return;
     }
     // 找最近的怪物作为目標（優先選擇等級相近的怪物，避開強敵）
+    // 效能優化：目標搜尋是 O(N×M) 的重操作，每 0.5 秒才做一次，其餘幀沿用上次目標
+    ai._targetSearchTimer = (ai._targetSearchTimer || 0) - dt;
     let bestTarget = null;
-    let bestScore = -Infinity;
-    const viewRange = 260;
-    GS.monsters.forEach(m => {
-      if (m.hp <= 0) return;
-      const d = Math.hypot(m.x - ai.x, m.y - ai.y);
-      if (d > viewRange) return;
-      // 等級差距評分：越接近越好，差距大扣分
-      const lvDiff = Math.abs((m.level || 1) - ai.level);
-      // 首領級怪物（高5級以上）視為強敵，優先避開
-      const isBoss = (m.level || 1) > ai.level + 4;
-      if (isBoss && hpRatio > 0.5) return; // 血量高時不惹Boss
-      let score = -d * 0.1 - lvDiff * 30;
-      if (isBoss) score -= 500;
-      // 同級或低級怪優先
-      if (lvDiff <= 2) score += 100;
-      if (score > bestScore) { bestScore = score; bestTarget = m; }
-    });
-    // 找最近的敵對 AI 玩家（不同國家優先攻擊）
+    if (!ai.targetUid || ai._targetSearchTimer <= 0) {
+      ai._targetSearchTimer = 0.5; // 每 0.5 秒重新搜尋一次
+      let bestScore = -Infinity;
+      const viewRange = 260;
+      GS.monsters.forEach(m => {
+        if (m.hp <= 0) return;
+        const d = Math.hypot(m.x - ai.x, m.y - ai.y);
+        if (d > viewRange) return;
+        // 等級差距評分：越接近越好，差距大扣分
+        const lvDiff = Math.abs((m.level || 1) - ai.level);
+        // 首領級怪物（高5級以上）視為強敵，優先避開
+        const isBoss = (m.level || 1) > ai.level + 4;
+        if (isBoss && hpRatio > 0.5) return; // 血量高時不惹Boss
+        let score = -d * 0.1 - lvDiff * 30;
+        if (isBoss) score -= 500;
+        // 同級或低級怪優先
+        if (lvDiff <= 2) score += 100;
+        if (score > bestScore) { bestScore = score; bestTarget = m; }
+      });
+      if (bestTarget) ai._cachedTargetUid = bestTarget.uid;
+    } else {
+      // 沿用快取目標：驗證是否還活著
+      if (ai._cachedTargetUid) {
+        bestTarget = GS.monsters.find(m => m.uid === ai._cachedTargetUid && m.hp > 0);
+        if (!bestTarget) { ai._cachedTargetUid = null; ai._targetSearchTimer = 0; }
+      }
+    }
+    // 找最近的敵對 AI 玩家（不同國家優先攻擊）— 與怪物搜尋同樣 0.5 秒降頻
     let nearestEnemyAI = null;
     let nearestEnemyAIDist = Infinity;
     let enemyAIScore = -Infinity;
-    GS.aiPlayers.forEach(other => {
-      if (other.uid === ai.uid || other.hp <= 0 || other.state === 'dead') return;
-      const sameNation = other.nation === ai.nation;
-      const sameGuild = other.guildId && ai.guildId && other.guildId === ai.guildId;
-      if (sameGuild) return; // 同公会不打
-      const d = Math.hypot(other.x - ai.x, other.y - ai.y);
-      if (d > 200) return;
-      // 不同國家優先攻擊
-      let score = -d * 0.1;
-      if (!sameNation) score += 200; // 敵國加分很多
-      else score -= 100; // 同國扣分
-      if (score > enemyAIScore) { enemyAIScore = score; nearestEnemyAI = other; nearestEnemyAIDist = d; }
-    });
-    // 协助攻擊：附近同國AI正在戰鬥時，加入協助
-    GS.aiPlayers.forEach(other => {
-      if (other.uid === ai.uid || other.hp <= 0 || other.state === 'dead') return;
-      if (other.nation !== ai.nation) return;
-      if (other.guildId && ai.guildId && other.guildId !== ai.guildId) return;
-      const d = Math.hypot(other.x - ai.x, other.y - ai.y);
-      if (d < 150 && other.targetUid && !ai.targetUid && Math.random() < 0.4) {
-        ai.targetUid = other.targetUid;
+    if (ai._targetSearchTimer <= 0 || ai._targetSearchTimer === 0.5) {
+      GS.aiPlayers.forEach(other => {
+        if (other.uid === ai.uid || other.hp <= 0 || other.state === 'dead') return;
+        const sameNation = other.nation === ai.nation;
+        const sameGuild = other.guildId && ai.guildId && other.guildId === ai.guildId;
+        if (sameGuild) return; // 同公会不打
+        const d = Math.hypot(other.x - ai.x, other.y - ai.y);
+        if (d > 200) return;
+        // 不同國家優先攻擊
+        let score = -d * 0.1;
+        if (!sameNation) score += 200; // 敵國加分很多
+        else score -= 100; // 同國扣分
+        if (score > enemyAIScore) { enemyAIScore = score; nearestEnemyAI = other; nearestEnemyAIDist = d; }
+      });
+      ai._cachedEnemyUid = nearestEnemyAI ? nearestEnemyAI.uid : null;
+      ai._cachedEnemyDist = nearestEnemyAIDist;
+      ai._cachedEnemyScore = enemyAIScore;
+      // 协助攻擊：附近同國AI正在戰鬥時，加入協助
+      GS.aiPlayers.forEach(other => {
+        if (other.uid === ai.uid || other.hp <= 0 || other.state === 'dead') return;
+        if (other.nation !== ai.nation) return;
+        if (other.guildId && ai.guildId && other.guildId !== ai.guildId) return;
+        const d = Math.hypot(other.x - ai.x, other.y - ai.y);
+        if (d < 150 && other.targetUid && !ai.targetUid && Math.random() < 0.4) {
+          ai.targetUid = other.targetUid;
+        }
+      });
+    } else {
+      // 沿用快取
+      if (ai._cachedEnemyUid) {
+        nearestEnemyAI = GS.aiPlayers.find(a => a.uid === ai._cachedEnemyUid && a.hp > 0 && a.state !== 'dead');
+        if (nearestEnemyAI) {
+          nearestEnemyAIDist = Math.hypot(nearestEnemyAI.x - ai.x, nearestEnemyAI.y - ai.y);
+          enemyAIScore = ai._cachedEnemyScore || 0;
+        }
       }
-    });
+    }
     // 敌对阵营 AI 会攻擊玩家（一定概率触发 PvP）
     const isEnemy = ai.nation && GS.nation && ai.nation !== GS.nation;
     if (isEnemy && Math.random() < 0.003) {
@@ -4893,15 +8598,58 @@ function updateAIPlayers(dt) {
         ai.targetY = 80 + Math.random() * (worldMaxH() - 160);
       }
     }
-    // 移動
+    // 移動（帶障礙物避開：檢查下一步是否靠近其他單位，若是則側邊繞行）
     const speed = 60 + ai.level * 0.5;
     const mdx = ai.targetX - ai.x;
     const mdy = ai.targetY - ai.y;
     const mdist = Math.hypot(mdx, mdy);
     if (mdist > 2) {
       const moveDist = Math.min(mdist, speed * dt);
-      ai.x += mdx / mdist * moveDist;
-      ai.y += mdy / mdist * moveDist;
+      let newX = ai.x + mdx / mdist * moveDist;
+      let newY = ai.y + mdy / mdist * moveDist;
+
+      // 簡單障礙檢測：檢查前方是否有其他單位或怪物過於靠近，若是則嘗試側邊繞行
+      let blocked = false;
+      const avoidDist = 40;
+      const checkX = ai.x + mdx / mdist * 30;
+      const checkY = ai.y + mdy / mdist * 30;
+
+      // 檢查附近怪物
+      if (GS.monsters) {
+        for (const m of GS.monsters) {
+          if (m.hp <= 0) continue;
+          const d = Math.hypot(m.x - checkX, m.y - checkY);
+          if (d < avoidDist) { blocked = true; break; }
+        }
+      }
+      // 檢查附近AI玩家（避開擁擠）
+      if (!blocked && GS.aiPlayers) {
+        for (const other of GS.aiPlayers) {
+          if (other.uid === ai.uid || other.hp <= 0 || other.state === 'dead') continue;
+          const d = Math.hypot(other.x - checkX, other.y - checkY);
+          if (d < avoidDist) { blocked = true; break; }
+        }
+      }
+
+      if (blocked) {
+        // 側邊繞行：垂直於移動方向偏移
+        const perpX = -mdy / mdist;
+        const perpY = mdx / mdist;
+        // 隨機選擇左或右繞行（增加變化）
+        const side = Math.random() < 0.5 ? 1 : -1;
+        newX = ai.x + perpX * side * moveDist * 0.8;
+        newY = ai.y + perpY * side * moveDist * 0.8;
+        // 同時稍微前進一點，避免原地踏步
+        newX += mdx / mdist * moveDist * 0.3;
+        newY += mdy / mdist * moveDist * 0.3;
+      }
+
+      // 邊界約束
+      newX = Math.max(30, Math.min(worldMaxW() - 30, newX));
+      newY = Math.max(60, Math.min(worldMaxH() - 30, newY));
+
+      ai.x = newX;
+      ai.y = newY;
       ai.facing = mdx >= 0 ? 'right' : 'left';
     }
     // 更新 DOM
@@ -5085,7 +8833,7 @@ function updateRankings() {
     level: GS.player.level,
     power: playerPower,
     wealth: GS.resources?.gold || 0,
-    kills: GS.player.kills || 0,
+    kills: GS.player.pvpKills || GS.player.kills || 0,
     contrib: GS.nationContribution || 0,
     nationId: GS.nation || null,
     nation: GS.nation ? NATIONS.find(n => n.id === GS.nation)?.name : '無',
@@ -5102,7 +8850,8 @@ function updateRankings() {
          level: ai.level,
          power: ai.power || Math.floor((ai.atk || 0) * 2 + (ai.def || 0) * 1.5 + (ai.hpMax || 0) * 0.1),
          gold: ai.gold || 0,
-         kills: ai.pvpKills || ai.kills || 0,
+         // PVP榜用 pvpKills（AI玩家有 pvpKills 就用，否則 fallback kills）
+    pvpKills: ai.pvpKills || ai.kills || 0,
          contrib: Math.floor(ai.contribution || 0),
          nationId: ai.nation || null,
          nation: NATIONS.find(n => n.id === ai.nation)?.name || '無',
@@ -5115,6 +8864,8 @@ function updateRankings() {
   // 根據各維度取前50名
   GS.rankings.level = [...entries].sort((a, b) => b.level - a.level).slice(0, 50);
   GS.rankings.power = [...entries].sort((a, b) => b.power - a.power).slice(0, 50);
+  // PVP榜按 pvpKills 排序（只有擊殺玩家/AI玩家才算）
+  entries.forEach(e => { e.kills = e.pvpKills || e.kills || 0; });
   GS.rankings.kills = [...entries].sort((a, b) => b.kills - a.kills).slice(0, 50);
   // 軍團榜：按軍團總戰力排序（彙編所有成員戰力）
   const guildMap = {};
@@ -5170,7 +8921,7 @@ function getNationCitizens(nationId) {
       level: GS.player.level,
       power: playerPower,
       contribution: GS.nationContribution || 0,
-      kills: GS.player.kills || 0,
+      kills: GS.player.pvpKills || GS.player.kills || 0,
       online: true,
       classId: GS.player.classId,
     });
@@ -5545,7 +9296,7 @@ function renderNationPageEnhanced() {
         </button>
       `).join('')}
     </div>
-    <div class="nation-tab-content" style="padding:10px 8px">
+    <div class="nation-tab-content" style="padding:10px 8px;padding-bottom:calc(var(--bottom-nav-h, 56px) + 30px);overflow-y:auto">
       ${tabContent[activeTab] || ''}
     </div>
   `;
@@ -5675,7 +9426,10 @@ function renderCastleTab(nation) {
     // 按鈕狀態
     let btnHtml = '';
     if (isMine) {
-      btnHtml = `<button class="castle-card-btn" style="width:100%;padding:5px;font-size:10px;opacity:0.7" disabled>我方佔領</button>`;
+      btnHtml = `<div style="display:flex;gap:6px">
+        <button class="castle-card-btn" style="flex:1;padding:5px;font-size:10px;background:linear-gradient(180deg,#604020,#3a2810);border:1px solid #a07030;color:#ffd080;cursor:pointer">管理</button>
+        <button class="castle-card-btn" style="flex:1;padding:5px;font-size:10px;background:linear-gradient(180deg,#206040,#103020);border:1px solid #40a070;color:#80ffc0;cursor:pointer">稅收</button>
+      </div>`;
     } else if (isActiveSiege) {
       btnHtml = `<button class="castle-card-btn" onclick="event.stopPropagation(); window.enterSiegeBattle && window.enterSiegeBattle('${c.id}')" style="width:100%;padding:6px;font-size:11px;font-weight:700;background:linear-gradient(180deg,#b02020,#700808);border:1px solid #e04040;color:#ffe0e0;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.6)">⚔ 進入攻城戰場</button>`;
     } else if (!canDeclare) {
@@ -5685,12 +9439,21 @@ function renderCastleTab(nation) {
     } else {
       btnHtml = `<button class="castle-card-btn declare-war-btn" onclick="event.stopPropagation(); window.declareSiegeWar && window.declareSiegeWar('${c.id}')" style="width:100%;padding:6px;font-size:11px;font-weight:700;background:linear-gradient(180deg,#d4a020,#8a6520);border:1px solid #f0c040;color:#fff;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.6)">⚔ 宣戰攻城</button>`;
     }
+    // 城主軍團名
+    const ownerLegionName = c.ownerGuildId ? (AI_GUILDS.find(g => g.id === c.ownerGuildId)?.name || c.ownerName || '未知軍團') : 'NPC無主';
+    // 模擬佔領天數
+    const occupyDays = c.ownerGuildId ? (Math.floor(Math.abs(c.id.charCodeAt(0) - c.id.charCodeAt(1) % 7)) + 1) : 0;
+    const taxIncome = Math.floor(c.level * 5000 * (c.taxRate / 5));
     return `
-      <div class="castle-card" style="padding:10px 12px;border:1px solid var(--gold-dark);border-radius:8px;background:linear-gradient(135deg, rgba(40,28,16,0.85), rgba(20,14,8,0.9));margin-bottom:10px;box-shadow:inset 0 0 8px rgba(0,0,0,0.4)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px">
+      <div class="castle-card" style="padding:12px;border:1px solid var(--gold-dark);border-radius:10px;background:linear-gradient(135deg, rgba(40,28,16,0.85), rgba(20,14,8,0.9));margin-bottom:10px;box-shadow:inset 0 0 8px rgba(0,0,0,0.4);position:relative;overflow:hidden">
+        ${isMine ? '<div style="position:absolute;top:0;right:0;padding:2px 8px;font-size:9px;font-weight:700;background:linear-gradient(135deg,#50c060,#206030);color:#fff;border-bottom-left-radius:8px">我方領地</div>' : ''}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px">
           <div style="flex:1;min-width:0">
-            <div style="font-weight:700;color:var(--gold-bright);font-size:14px;text-shadow:0 1px 2px rgba(0,0,0,0.8)">${c.name}</div>
-            <div style="font-size:10px;color:var(--parchment-dark);margin-top:2px">Lv.${c.level} · 推薦 ${c.recLevel || '--'}級</div>
+            <div style="font-weight:700;color:var(--gold-bright);font-size:15px;text-shadow:0 1px 2px rgba(0,0,0,0.8);display:flex;align-items:center;gap:6px">
+              🏰 ${c.name}
+              <span style="font-size:10px;font-weight:600;color:var(--parchment-dark);padding:1px 5px;border:1px solid var(--gold-dark);border-radius:10px">Lv.${c.level}</span>
+            </div>
+            <div style="font-size:10px;color:var(--parchment-dark);margin-top:2px">所屬地區：${c.region || '—'}</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
             <div style="font-size:10px;color:${isMine ? '#70ff80' : (hasOwner ? '#ff9090' : '#f0c040')};font-weight:600">
@@ -5699,11 +9462,33 @@ function renderCastleTab(nation) {
             <div style="font-size:9px;color:var(--parchment-dark);margin-top:1px">稅率 ${c.taxRate}%</div>
           </div>
         </div>
-        <div style="height:4px;background:rgba(0,0,0,0.5);border-radius:2px;margin-bottom:6px;overflow:hidden">
-          <div style="height:100%;width:${(c.hp / c.hpMax) * 100}%;background:linear-gradient(90deg,#ff6060,#f0c040);border-radius:2px"></div>
+        <!-- 城主軍團資訊 -->
+        <div style="padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid rgba(240,192,64,0.15);border-radius:6px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px">
+            <span style="color:var(--parchment-dark)">🛡 城主軍團</span>
+            <span style="color:var(--parchment-light);font-weight:600">${ownerLegionName}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-top:4px">
+            <span style="color:var(--parchment-dark)">⏱ 佔領時間</span>
+            <span style="color:var(--parchment-light)">${hasOwner ? occupyDays + ' 天' : '—'}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-top:4px">
+            <span style="color:var(--parchment-dark)">💰 每日稅收</span>
+            <span style="color:#ffd060;font-weight:600">${taxIncome.toLocaleString()} 金幣</span>
+          </div>
+        </div>
+        <!-- 城防血量 -->
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--parchment-dark);margin-bottom:3px">
+            <span>🏯 城防值</span>
+            <span>${c.hp.toLocaleString()} / ${c.hpMax.toLocaleString()}</span>
+          </div>
+          <div style="height:6px;background:rgba(0,0,0,0.5);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${(c.hp / c.hpMax) * 100}%;background:linear-gradient(90deg,#ff6060,#f0c040);border-radius:3px"></div>
+          </div>
         </div>
         <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px">
-          城防 ${c.hp.toLocaleString()}/${c.hpMax.toLocaleString()} · 守軍 ${c.defenders} 人
+          🛡 守軍 ${c.defenders} 人 · 推薦等級 ${c.recLevel || '--'}
         </div>
         ${btnHtml}
       </div>
@@ -5808,7 +9593,8 @@ function getRankAssignment(nationId, citizens, idx) {
 // 官職Tab：旗帜式卡片布局（前三名更大更醒目）
 function renderNobilityTab(nation) {
   const citizens = getNationCitizens(nation.id).filter(c => c.level >= 10);
-  citizens.sort((a, b) => b.power - a.power);
+  // 按戰力×0.6 + 貢獻×0.4 綜合排名（戰力為主、貢獻為輔）
+  citizens.sort((a, b) => (b.power * 0.6 + b.contribution * 0.4) - (a.power * 0.6 + a.contribution * 0.4));
 
   if (citizens.length === 0) {
     return `<div style="text-align:center;padding:40px 20px;color:var(--parchment-dark);font-size:12px">
@@ -5817,50 +9603,86 @@ function renderNobilityTab(nation) {
     </div>`;
   }
 
-  // 分配官職
-  const rankAssignments = [];
+  // 分配官職（從高到低逐位分配，共15席）
+  const assignments = [];
   let idx = 0;
   NOBILITY_RANKS.forEach(rank => {
-    for (let i = 0; i < rank.count && idx < citizens.length; i++, idx++) {
-      rankAssignments.push({ ...citizens[idx], rankKey: rank.key, rankInfo: rank });
+    for (let i = 0; i < rank.count; i++) {
+      if (idx < citizens.length) {
+        assignments.push({ ...citizens[idx], rankKey: rank.key, rankInfo: rank, slot: idx + 1 });
+        idx++;
+      } else {
+        // 空位
+        assignments.push({ name: '空缺', level: 0, power: 0, contribution: 0, isVacant: true, rankKey: rank.key, rankInfo: rank, slot: idx + 1 });
+        idx++;
+      }
     }
   });
 
-  const myRankEntry = rankAssignments.find(r => r.isPlayer);
-  const myRank = myRankEntry?.rankInfo;
-  const king = rankAssignments.find(r => r.rankKey === 'king') || { rankInfo: NOBILITY_RANKS[0], name: '虛位以待' };
+  const myEntry = assignments.find(a => a.isPlayer);
+  const myRank = myEntry?.rankInfo;
+  const king = assignments.find(a => a.rankKey === 'king');
 
-  // 按品級分組展示：國王居中，親王/公爵在兩側，其餘下方
+  // 分組：王室、世襲貴族、武官、文官
   const groups = {
-    king:   rankAssignments.filter(r => r.rankKey === 'king'),
-    high:   rankAssignments.filter(r => ['prince','duke','marquess'].includes(r.rankKey)),
-    mid:    rankAssignments.filter(r => ['earl','viscount','baron'].includes(r.rankKey)),
-    low:    rankAssignments.filter(r => ['paladin','knight','royalguard'].includes(r.rankKey)),
+    royal:    assignments.filter(a => a.rankInfo.tier === 'royal'),
+    noble:    assignments.filter(a => a.rankInfo.tier === 'high'),
+    military: assignments.filter(a => a.rankInfo.tier === 'military'),
+    civil:    assignments.filter(a => a.rankInfo.tier === 'civil'),
   };
 
-  const renderFlag = (entry, size='md') => {
+  const groupTitles = {
+    royal: '王室',
+    noble: '世襲貴族',
+    military: '武官',
+    civil: '文官',
+  };
+
+  const renderSlot = (entry) => {
     const ri = entry.rankInfo;
-    const sizeMap = { lg: 72, md: 50, sm: 36, xs: 28 };
-    const s = sizeMap[size] || 50;
-    const iconKey = ri.iconUrl || 'sword';
-    const iconUrl = NATION_TAB_ICONS[iconKey] || NATION_TAB_ICONS.sword;
+    const iconUrl = NATION_TAB_ICONS[ri.iconKey] || NATION_TAB_ICONS.sword;
+    const isVacant = entry.isVacant;
     return `
-      <div class="noble-flag rarity-${entry.rankKey || 'white'}" style="position:relative;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 4px 8px;background:linear-gradient(180deg, ${ri.color}44 0%, rgba(30,20,10,0.95) 45%, rgba(20,14,8,0.98) 100%);border:1.5px solid ${ri.color};border-radius:8px 8px 4px 4px;box-shadow:0 0 14px ${ri.color}55, inset 0 0 8px ${ri.color}22;min-height:${s * 1.5}px;width:${s * 1.1}px">
-        <div style="width:100%;height:3px;background:linear-gradient(90deg, transparent, ${ri.color}, transparent)"></div>
-        <div style="width:${Math.floor(s*0.7)}px;height:${Math.floor(s*0.7)}px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:radial-gradient(circle, ${ri.color}33, transparent 70%);margin-top:4px;overflow:hidden;border:1.5px solid ${ri.color}">
-          <img src="${iconUrl}" style="width:75%;height:75%;object-fit:contain;display:block;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.8))"/>
+      <div class="noble-slot rarity-${ri.key}" style="position:relative;padding:8px 10px;border:1.5px solid ${isVacant ? '#555' : ri.color};border-radius:8px;background:linear-gradient(135deg, ${isVacant ? 'rgba(60,50,40,0.4)' : ri.color + '22'} 0%, rgba(20,14,8,0.95) 70%);display:flex;align-items:center;gap:10px;box-shadow:inset 0 0 8px ${isVacant ? 'transparent' : ri.color + '22'}">
+        <div style="width:36px;height:36px;border-radius:50%;border:1.5px solid ${isVacant ? '#555' : ri.color};background:radial-gradient(circle, ${isVacant ? '#ffffff11' : ri.color + '33'}, transparent 70%);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">
+          <img src="${iconUrl}" style="width:60%;height:60%;object-fit:contain;display:block;opacity:${isVacant ? 0.4 : 1};filter:drop-shadow(0 1px 2px rgba(0,0,0,0.8))"/>
         </div>
-        <div style="text-align:center">
-          <div style="font-size:${size==='lg' ? 12 : 10}px;font-weight:700;color:${ri.color};line-height:1.2">${ri.name}</div>
-          <div style="font-size:${size==='lg' ? 10 : 8}px;color:var(--parchment-light);margin-top:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px">${entry.name || '虛位以待'}</div>
-          ${entry.online !== undefined ? `<div style="font-size:7px;color:${entry.online ? '#50ff80' : 'var(--parchment-dark)'};margin-top:1px">${entry.online ? '在線' : '離線'}</div>` : ''}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:9px;font-weight:700;color:${isVacant ? '#888' : ri.color};padding:1px 5px;border:1px solid ${isVacant ? '#666' : ri.color};border-radius:10px;background:${isVacant ? 'transparent' : ri.color + '15'}">No.${entry.slot}</span>
+            <span style="font-size:12px;font-weight:700;color:var(--parchment-light)">${ri.name}</span>
+          </div>
+          <div style="font-size:11px;color:${isVacant ? '#666' : 'var(--parchment-light)'};margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${entry.name || '空缺'}</div>
+          ${!isVacant ? `
+            <div style="display:flex;gap:8px;margin-top:2px;font-size:9px;color:var(--parchment-dark)">
+              <span>⚔ ${(entry.power || 0).toLocaleString()}</span>
+              <span>★ ${(entry.contribution || 0).toLocaleString()}</span>
+            </div>` : ''}
         </div>
-        ${entry.isPlayer ? '<div style="position:absolute;top:2px;right:2px;background:var(--gold);color:#000;font-size:7px;padding:0 3px;border-radius:3px;font-weight:700">我</div>' : ''}
+        ${entry.isPlayer ? '<div style="position:absolute;top:4px;right:6px;background:var(--gold-bright);color:#2a1a05;font-size:8px;padding:0 4px;border-radius:3px;font-weight:800">我</div>' : ''}
+      </div>
+    `;
+  };
+
+  const renderGroup = (key) => {
+    const list = groups[key];
+    if (!list || list.length === 0) return '';
+    return `
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <div style="width:3px;height:12px;background:linear-gradient(180deg,var(--gold-bright),transparent);border-radius:2px"></div>
+          <span style="font-size:11px;font-weight:700;color:var(--gold-bright);letter-spacing:1px">${groupTitles[key]}</span>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,rgba(240,192,64,0.3),transparent)"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:${list.length <= 2 ? '1fr 1fr' : '1fr'};gap:6px">
+          ${list.map(renderSlot).join('')}
+        </div>
       </div>
     `;
   };
 
   return `
+    <!-- 我的官職卡片 -->
     <div style="margin-bottom:12px;padding:12px;background:linear-gradient(135deg, rgba(80,50,20,0.7), rgba(40,25,10,0.5));border:2px solid var(--gold-dark);border-radius:10px;display:flex;align-items:center;gap:12px;box-shadow:inset 0 0 20px rgba(240,192,64,0.1)">
       <div style="width:48px;height:48px;border-radius:8px;background:linear-gradient(180deg, ${myRank?.color || '#666'}44, #0a0604);border:2px solid ${myRank?.color || '#666'};display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${myRank?.color || '#666'}55;overflow:hidden">
         <img src="${myRank ? (NATION_TAB_ICONS[myRank.iconKey] || NATION_TAB_ICONS.sword) : NATION_TAB_ICONS.sword}" style="width:65%;height:65%;object-fit:contain;display:block"/>
@@ -5870,31 +9692,36 @@ function renderNobilityTab(nation) {
         <div style="font-size:16px;font-weight:700;color:${myRank?.color || '#ccc'};text-shadow:0 1px 3px rgba(0,0,0,0.8)">${myRank?.name || (GS.player.level < 10 ? '無官職（需10級）' : '平民')}</div>
         <div style="font-size:10px;color:var(--parchment-dark);margin-top:2px">攻擊+${myRank?.atkBonus || 0} · 防禦+${myRank?.defBonus || 0} · 生命+${myRank?.hpBonus || 0}</div>
       </div>
+      <div style="text-align:right">
+        <div style="font-size:9px;color:var(--parchment-dark)">排名</div>
+        <div style="font-size:14px;font-weight:900;color:var(--gold-bright)">${myEntry ? '#' + myEntry.slot : '—'}</div>
+      </div>
     </div>
-    <!-- 國王大旗 -->
-    <div style="display:flex;justify-content:center;margin-bottom:14px">
-      ${groups.king.length > 0 ? renderFlag(groups.king[0], 'lg') : `
-        <div style="width:80px;height:110px;border:2px dashed #666;border-radius:8px 8px 4px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#666;gap:4px">
-          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid #555"><img src="${NATION_TAB_ICONS.crown}" style="width:70%;height:70%;object-fit:contain;display:block;opacity:0.6"/></div>
-          <div style="font-size:10px">國王虛位</div>
-          <div style="font-size:9px;opacity:0.7">有待賢能</div>
+
+    <!-- 國王專欄（最大） -->
+    <div style="margin-bottom:14px;padding:14px;background:radial-gradient(ellipse at 50% 0%, rgba(255,208,64,0.22), transparent 70%), linear-gradient(135deg, rgba(80,50,20,0.6), rgba(30,18,10,0.8));border:2px solid #ffd040;border-radius:12px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:-20px;right:-20px;font-size:80px;opacity:0.06;color:#ffd040;pointer-events:none">♔</div>
+      <div style="display:flex;align-items:center;gap:12px;position:relative">
+        <div style="width:64px;height:64px;border-radius:50%;border:2.5px solid #ffd040;background:radial-gradient(circle, #ffd04044, transparent 70%);display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px rgba(255,208,64,0.6);overflow:hidden;flex-shrink:0">
+          <img src="${NATION_TAB_ICONS.crown}" style="width:60%;height:60%;object-fit:contain;display:block;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.8))"/>
         </div>
-      `}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:9px;color:#ffd040;font-weight:700;letter-spacing:2px">NO.1 · 最高統治者</div>
+          <div style="font-size:18px;font-weight:900;color:#ffd040;text-shadow:0 2px 8px rgba(255,180,20,0.5), 0 1px 3px #000;letter-spacing:2px">國 王</div>
+          <div style="font-size:13px;font-weight:700;color:var(--parchment-light);margin-top:2px">${king?.name || '空缺'}</div>
+          ${king && !king.isVacant ? `<div style="display:flex;gap:10px;margin-top:3px;font-size:10px;color:var(--parchment-dark)">⚔ ${(king.power||0).toLocaleString()} · ★ ${(king.contribution||0).toLocaleString()}</div>` : ''}
+        </div>
+      </div>
     </div>
-    <!-- 高級官職 -->
-    <div class="nobility-high-row" style="display:flex;justify-content:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      ${groups.high.map(e => renderFlag(e, 'md')).join('')}
-      ${groups.high.length === 0 ? '<div style="font-size:10px;color:#666;padding:20px">高級官職虛位以待</div>' : ''}
+
+    ${renderGroup('royal')}
+    ${renderGroup('noble')}
+    ${renderGroup('military')}
+    ${renderGroup('civil')}
+
+    <div style="text-align:center;font-size:10px;color:var(--parchment-dark);margin-top:8px;padding-top:8px;border-top:1px solid rgba(240,192,64,0.15)">
+      共 ${NOBILITY_RANKS.reduce((s,r)=>s+r.count,0)} 個世襲爵位 · 按綜合排名授官（戰力60% + 貢獻40%）
     </div>
-    <!-- 中級官職 -->
-    <div class="nobility-mid-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">
-      ${groups.mid.map(e => renderFlag(e, 'sm')).join('')}
-    </div>
-    <!-- 低級官職 -->
-    <div class="nobility-low-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:10px">
-      ${groups.low.map(e => renderFlag(e, 'xs')).join('')}
-    </div>
-    <div style="text-align:center;font-size:10px;color:var(--parchment-dark)">共 ${citizens.length} 名 Lv.10+ 國民 · 按戰力排名授官</div>
   `;
 }
 
@@ -6502,12 +10329,13 @@ function increaseMonsterCount() {
     if (map.type === 'battle' && map.monsters) {
       let total = 0;
       map.monsters.forEach(spec => {
-        spec.count = Math.max(spec.count * 3, 8); // 至少 8 只
+        // 降低怪物數量：原本約30隻 → 15隻，避免閃退
+        spec.count = Math.max(Math.ceil(spec.count * 1.5), 4);
         total += spec.count;
       });
-      // 确保每张战斗地图至少 30 只怪物
-      if (total < 30 && map.monsters.length > 0) {
-        const boost = Math.ceil((30 - total) / map.monsters.length);
+      // 每張戰鬥地圖至少 15 隻怪物（約為原來的一半）
+      if (total < 15 && map.monsters.length > 0) {
+        const boost = Math.ceil((15 - total) / map.monsters.length);
         map.monsters.forEach(spec => { spec.count += boost; });
       }
     }
@@ -6676,8 +10504,8 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <div class="unit-name"></div>
         <div class="unit-level-tag"></div>
       </div>
-      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}" style="width:${size.w}px;height:${size.h}px">
-        <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy"/>
+      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
+        <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>
         <div class="unit-sprite-tomb" style="display:none">🪦</div>
         <div class="slash-effect"></div>
       </div>
@@ -6692,6 +10520,10 @@ function buildSpriteHTML(spriteObj, kind, lean) {
   const walk3Src = isImg ? (s.walk3 || s.walk || s.idle) : '';
   const walk4Src = isImg ? (s.walk4 || s.walk || s.idle) : '';
   const hitSrc = isImg ? (s.hit || s.idle) : '';
+  // onerror 統一使用全域 handleImgError：
+  //   - 本地資源失敗 → 自動切換到 CDN
+  //   - CDN 也失敗 → 隱藏圖片並為父層加上背景占位，避免顯示破裂圖示
+  const onErrorHide = "handleImgError(this)";
   return `
     <div class="unit-info">
       <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%"></div></div>
@@ -6699,16 +10531,16 @@ function buildSpriteHTML(spriteObj, kind, lean) {
       <div class="unit-name"></div>
       <div class="unit-level-tag"></div>
     </div>
-    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''}" style="width:${size.w}px;height:${size.h}px">
+    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''} ${s.singleFrame ? 'sprite-single-frame' : ''}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
       ${isImg ? `
-        <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrc}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${walk2Src}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${walk3Src}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${walk4Src}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${attackSrc}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${attack2Src}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-hit" src="${hitSrc}" style="filter:${baseFilter};display:none" alt=""/>
+        <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${walk2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${walk3Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${walk4Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${attackSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${attack2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-hit" src="${hitSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
         <div class="unit-sprite-tomb">🪦</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>
@@ -6716,14 +10548,15 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <div class="unit-sprite-emoji" data-sprite-idle="${emojiIdle}" data-sprite-attack="${emojiAttack}" data-sprite-dead="🪦" style="color:${color};font-size:${fontSize}px;filter:${baseFilter}">${emojiIdle}</div>
       `}
     </div>
-    <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;overflow:visible">
-      <img class="effect-img effect-magic-circle" src="" alt=""/>
-      <div class="aura-lightning l1"></div><div class="aura-lightning l2"></div><div class="aura-lightning l3"></div>
-      <img class="effect-img effect-burst effect-burst-main" src="" alt=""/>
-      <img class="effect-img effect-burst effect-burst-2" src="" alt=""/>
-      <div class="aura-wave"></div>
-      <div class="aura-pulse"></div>
-      <div class="aura-particles"></div>
+    <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:-1;overflow:visible">
+      <div class="aura-glow-outer"></div>
+      <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="aura-lightning">
+        <svg class="bolt bolt-1" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="20,0 28,30 18,45 32,75 22,90 35,120 12,120 18,95 8,75 22,50 10,30"/></svg>
+        <svg class="bolt bolt-2" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="18,0 30,25 20,40 35,65 24,80 38,120 10,120 15,90 5,70 20,48 8,25"/></svg>
+        <svg class="bolt bolt-3" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="22,0 12,28 25,42 10,68 24,82 8,120 32,120 28,92 35,72 20,50 32,28"/></svg>
+        <svg class="bolt bolt-4" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="16,0 28,22 15,40 30,60 18,78 32,120 10,120 14,88 6,66 20,44 10,22"/></svg>
+      </div>
     </div>
     <div class="unit-shadow"></div>
   `;
@@ -6735,7 +10568,7 @@ function setSpriteFrame(spriteEl, frameIdx, frameCount) {
   // 所有动画通过 .world-unit 的 idle/walking/attacking/hit/dead 类由 CSS 驱动
 }
 
-const SPRITE_SIZE = { hero: { w: 64, h: 80 }, enemy: { w: 50, h: 56 }, summon: { w: 46, h: 52 } };
+const SPRITE_SIZE = { hero: { w: 64, h: 80 }, enemy: { w: 50, h: 56 }, summon: { w: 46, h: 52 }, pet: { w: 38, h: 42 } };
 
 // 初始化单位动画状态（8帧多帧模式：walk 4帧循环，attack 2帧序列，idle单帧呼吸，hit单帧）
 function initUnitAnimState(uid) {
@@ -6747,63 +10580,94 @@ function initUnitAnimState(uid) {
   });
 }
 
-// 8帧动画每帧时长(ms)：walk每帧150ms，attack1=150/attack2=200，hit=200
+// 8帧动画每帧时长(ms)：walk 4帧来回循环(600ms周期)，attack 3帧序列(300ms)，hit 250ms
 const ANIM_FRAME_DURATIONS = {
-  walk: [150, 150, 150, 150],  // 共600ms循环
-  attack: [150, 200],          // 共350ms（最后一帧后回到之前状态）
-  hit: [200],
+  walk:   [150, 150, 150, 150], // walk1→walk2→walk3→walk2 來回（共600ms）
+  attack: [100, 100, 100],      // attack1→attack2→attack3（共300ms）
+  hit:    [250],
 };
 
 // 切換精靈姿態：idle / walk / attacking / hit / dead 多種狀態
 // 8帧模式下，帧由 unitAnimState.animFrame 驱动（gameLoop每帧调用updateAnimFrames）
+// 效能最佳化：
+//   1. 快取 frame 元素到 unitEl._frames 上，避免每幀 querySelectorAll
+//   2. 畫面外單位跳過 frame 切換（CSS 暫停 + DOM 操作跳過）
+//   3. 狀態與幀索引都沒變時，完全不操作 DOM
 function applyUnitAnimFrame(unitEl, uid, state) {
+  // 畫面外：跳過 frame 切換（節省 DOM 操作 + GPU 重繪）
+  if (unitEl._offscreen) return;
   const anim = unitAnimState.get(uid);
-  // 真實圖片精靈：切換顯示的img幀
-  const imgIdle = unitEl.querySelector('.sprite-frame-idle');
-  if (imgIdle) {
-    const walkFrames = unitEl.querySelectorAll('.sprite-frame-walk');
-    const attackFrames = unitEl.querySelectorAll('.sprite-frame-attack');
-    const imgHit = unitEl.querySelector('.sprite-frame-hit');
-    const tomb = unitEl.querySelector('.unit-sprite-tomb');
-    const isDead = state === 'dead';
-    const isAttack = state === 'attacking' || state === 'casting';
-    const isWalk = state === 'walking' || state === 'chasing' || state === 'wandering';
-    const isHit = state === 'hit';
-
-    // 隐藏所有帧
-    imgIdle.style.display = 'none';
-    walkFrames.forEach(img => img.style.display = 'none');
-    attackFrames.forEach(img => img.style.display = 'none');
-    if (imgHit) imgHit.style.display = 'none';
-    if (tomb) tomb.style.display = 'none';
-
-    // 优先顺序：dead > hit > attack > walk > idle
-    if (isDead) {
-      if (tomb) tomb.style.display = 'flex';
-    } else if (isHit) {
-      if (imgHit) imgHit.style.display = 'block';
-    } else if (isAttack) {
-      const idx = anim ? Math.min(anim.animFrame, attackFrames.length - 1) : 0;
-      if (attackFrames[idx]) attackFrames[idx].style.display = 'block';
-      else if (attackFrames[0]) attackFrames[0].style.display = 'block';
-    } else if (isWalk && walkFrames.length > 0) {
-      const idx = anim ? (anim.animFrame % walkFrames.length) : 0;
-      if (walkFrames[idx]) walkFrames[idx].style.display = 'block';
-      else walkFrames[0].style.display = 'block';
-    } else {
-      imgIdle.style.display = 'block';
+  // 快取 frame 元素（首次才做 DOM 查詢）
+  let frames = unitEl._frames;
+  if (!frames) {
+    const imgIdle = unitEl.querySelector('.sprite-frame-idle');
+    if (!imgIdle) {
+      // emoji 精靈模式：快速處理
+      const emojiEl = unitEl.querySelector('.unit-sprite-emoji');
+      if (!emojiEl) return;
+      let emoji;
+      if (state === 'dead') emoji = emojiEl.dataset.spriteDead || '\uD83E\uDEA6';
+      else if (state === 'attacking' || state === 'casting') emoji = emojiEl.dataset.spriteAttack || emojiEl.dataset.spriteIdle;
+      else emoji = emojiEl.dataset.spriteIdle || '\u2694\uFE0F';
+      if (emojiEl.textContent !== emoji) emojiEl.textContent = emoji;
+      return;
     }
-    return;
+    frames = {
+      idle: imgIdle,
+      walk: Array.prototype.slice.call(unitEl.querySelectorAll('.sprite-frame-walk')),
+      attack: Array.prototype.slice.call(unitEl.querySelectorAll('.sprite-frame-attack')),
+      hit: unitEl.querySelector('.sprite-frame-hit'),
+      tomb: unitEl.querySelector('.unit-sprite-tomb'),
+      lastState: null,
+      lastFrame: -1,
+    };
+    unitEl._frames = frames;
   }
-  // emoji 精靈：改文字
-  const emojiEl = unitEl.querySelector('.unit-sprite-emoji');
-  if (!emojiEl) return;
-  let emoji;
-  if (state === 'dead') emoji = emojiEl.dataset.spriteDead || '🪦';
-  else if (state === 'attacking' || state === 'casting') emoji = emojiEl.dataset.spriteAttack || emojiEl.dataset.spriteIdle;
-  else emoji = emojiEl.dataset.spriteIdle || '⚔️';
-  if (emojiEl.textContent !== emoji) emojiEl.textContent = emoji;
-}
+
+  const isDead = state === 'dead';
+  const isAttack = state === 'attacking' || state === 'casting';
+  const isWalk = state === 'walking' || state === 'chasing' || state === 'wandering';
+  const isHit = state === 'hit';
+
+  // 計算當前應顯示的幀索引
+  let showFrame = 'idle';
+  let showIdx = 0;
+  if (isDead) { showFrame = 'tomb'; }
+  else if (isHit) { showFrame = 'hit'; }
+  else if (isAttack) { showFrame = 'attack'; showIdx = anim ? Math.min(anim.animFrame, frames.attack.length - 1) : 0; }
+  else if (isWalk && frames.walk.length > 0) {
+    showFrame = 'walk';
+    const seq = frames.walk.length >= 3 ? [0, 1, 2, 1] : [0, 1, 0, 1];
+    showIdx = anim ? seq[anim.animFrame % 4] : 0;
+  }
+
+  // 狀態與索引都沒變 → 跳過 DOM 操作
+  if (frames.lastState === showFrame && frames.lastIdx === showIdx) return;
+
+  // 全部隱藏再顯示目標
+  frames.idle.style.display = 'none';
+  for (let i = 0; i < frames.walk.length; i++) frames.walk[i].style.display = 'none';
+  for (let i = 0; i < frames.attack.length; i++) frames.attack[i].style.display = 'none';
+  if (frames.hit) frames.hit.style.display = 'none';
+  if (frames.tomb) frames.tomb.style.display = 'none';
+
+  const isFrameBroken = (el) => el && el.classList && el.classList.contains('frame-error');
+  let target = null;
+  if (showFrame === 'tomb') target = frames.tomb;
+  else if (showFrame === 'hit') target = isFrameBroken(frames.hit) ? frames.idle : frames.hit;
+  else if (showFrame === 'attack') {
+    const atkEl = frames.attack[showIdx] || frames.attack[0];
+    target = !isFrameBroken(atkEl) ? atkEl : frames.idle;
+  } else if (showFrame === 'walk') {
+    const wEl = frames.walk[showIdx] || frames.walk[0];
+    target = !isFrameBroken(wEl) ? wEl : frames.idle;
+  } else {
+    target = frames.idle;
+  }
+  if (target) target.style.display = showFrame === 'tomb' ? 'flex' : 'block';
+
+  frames.lastState = showFrame;
+  frames.lastIdx = showIdx;
 
 // ==================== 职业選擇 ====================
 // ==================== 角色創建系統 ====================
@@ -6835,190 +10699,381 @@ const CLASS_STAT_PREFS = {
   warlock: { int: 13, wis: 14, cha: 10, con: 9,  str: 6,  dex: 8  },
 };
 
+// ===== v2.0.1 創角頁：天堂經典樣式 =====
+// 職業 → 對應真•系列金變 映射
+const CLASS_TRANSFORM_MAP = {
+  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級' },
+  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級' },
+  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級' },
+  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級' },
+  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級' },
+  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級' },
+};
+
+// 職業詳細資訊（繁中）
+const CLASS_DETAIL = {
+  warrior: {
+    name: '戰士',
+    desc: '以強大的體力與厚重的鎧甲站在戰場最前線，揮舞雙手巨劍，將戰鬥帶往勝利。',
+    mainWeapon: '雙手劍 / 長槍',
+    combatType: '近戰物理',
+    trait: '高血量・高防禦・衝鋒控制',
+  },
+  paladin: {
+    name: '聖騎士',
+    desc: '信仰光明神諭的神聖戰士，兼具治癒與防禦能力，是隊伍中最可靠的守護者。',
+    mainWeapon: '聖劍 / 盾牌',
+    combatType: '近戰物理 + 神聖魔法',
+    trait: '治癒・護盾・不死不滅',
+  },
+  rogue: {
+    name: '刺客',
+    desc: '潛伏於暗影中的暗殺者，以極快的速度與致命的暴擊，在瞬間取人性命。',
+    mainWeapon: '雙刃 / 短劍',
+    combatType: '近戰物理',
+    trait: '高暴擊・高閃躲・速攻爆發',
+  },
+  archer: {
+    name: '弓手',
+    desc: '百步穿楊的遠程射手，以精準的箭術與風一般的速度，從遠方擊潰敵人。',
+    mainWeapon: '長弓 / 十字弓',
+    combatType: '遠程物理',
+    trait: '高命中・高暴擊・遠程壓制',
+  },
+  mage: {
+    name: '法師',
+    desc: '操縱元素之力的魔法學者，以強大的範圍法術掃蕩戰場，是隊伍的輸出核心。',
+    mainWeapon: '法杖 / 權杖',
+    combatType: '遠程魔法',
+    trait: '高魔攻・範圍傷害・法力充沛',
+  },
+  warlock: {
+    name: '術士',
+    desc: '與深淵締結契約的召喚者，統御死靈與惡魔大軍，以詛咒與召喚蠶食敵人。',
+    mainWeapon: '魂珠 / 咒書',
+    combatType: '遠程魔法 + 召喚',
+    trait: '召喚・持續傷害・debuff',
+  },
+};
+
 function showCharCreate() {
-  // 重置為默認值（戰士的屬性傾向）
   charCreateState = {
-    stats: { ...CLASS_STAT_PREFS.warrior },
     classId: 'warrior',
     name: '',
+    nameChecked: false,   // 是否通過重複確認
+    nameCheckPending: false,
   };
   const screen = $('char-create-screen');
   if (screen) screen.classList.remove('hidden');
-  initCharCreateUI();
+  initCC2UI();
 }
 
-function initCharCreateUI() {
-  // 職業列表
-  const classList = $('cc-class-list');
-  if (classList) {
-    classList.innerHTML = '';
-    // 6 個職業按順序
-    const classOrder = ['warrior', 'mage', 'archer', 'rogue', 'paladin', 'warlock'];
-    const classIcons = { warrior: '⚔️', mage: '🔮', archer: '🏹', rogue: '🗡️', paladin: '🛡️', warlock: '💀' };
+function initCC2UI() {
+  const classOrder = ['warrior', 'paladin', 'rogue', 'archer', 'mage', 'warlock'];
+  const classRow = $('cc2-class-row');
+  if (classRow) {
+    classRow.innerHTML = '';
     classOrder.forEach(cid => {
-      const cls = CLASSES[cid];
-      if (!cls) return;
       const sp = SPRITE[cid] || SPRITE.warrior;
-      const spriteHTML = sp.useImg && sp.idle
-        ? `<img src="${sp.idle}" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 0 4px ${sp.glow || '#ffd870'})"/>`
-        : `<span style="font-size:28px">${classIcons[cid] || '⚔️'}</span>`;
-      const item = document.createElement('div');
-      item.className = 'cc-class-item' + (cid === charCreateState.classId ? ' active' : '');
-      item.dataset.classId = cid;
-      item.innerHTML = `
-        <div class="cc-class-icon">${spriteHTML}</div>
-        <div class="cc-class-info">
-          <div class="cc-class-item-name">${cls.name}</div>
-          <div class="cc-class-item-desc">${cls.desc || ''}</div>
-        </div>
-      `;
-      item.addEventListener('click', () => {
-        charCreateState.classId = cid;
-        // 切換職業時重置為該職業的屬性傾向
-        charCreateState.stats = { ...CLASS_STAT_PREFS[cid] };
-        classList.querySelectorAll('.cc-class-item').forEach(i => i.classList.remove('active'));
-        item.classList.add('active');
-        const classNameEl = $('cc-current-class');
-        if (classNameEl) classNameEl.textContent = cls.name;
-        updateCCStatsDisplay();
-        updateCCSprite();
-      });
-      classList.appendChild(item);
+      const detail = CLASS_DETAIL[cid];
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.alignItems = 'center';
+      wrap.style.cursor = 'pointer';
+      
+      const btn = document.createElement('button');
+      btn.className = 'cc2-class-icon-btn' + (cid === charCreateState.classId ? ' active' : '');
+      btn.dataset.classId = cid;
+      if (sp.useImg && sp.idle) {
+        btn.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" onerror="this.style.display='none'"/>`;
+      } else {
+        btn.innerHTML = '<span class="cc2-icon-placeholder">?</span>';
+      }
+      
+      const label = document.createElement('span');
+      label.className = 'cc2-class-label';
+      label.textContent = detail.name;
+      
+      wrap.appendChild(btn);
+      wrap.appendChild(label);
+      
+      btn.addEventListener('click', () => selectCC2Class(cid));
+      classRow.appendChild(wrap);
     });
   }
-  // 屬性加減按鈕
-  document.querySelectorAll('.cc-stat-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const row = btn.closest('.cc-stat-row');
-      if (!row) return;
-      const stat = row.dataset.stat;
-      const action = btn.dataset.action;
-      const current = charCreateState.stats[stat];
-      const remaining = getCCRemainingPoints();
-      if (action === 'plus') {
-        if (remaining <= 0) return;
-        if (current >= CHAR_MAX_STAT) return;
-        charCreateState.stats[stat] = current + 1;
-      } else {
-        if (current <= CHAR_MIN_STAT) return;
-        charCreateState.stats[stat] = current - 1;
-      }
-      updateCCStatsDisplay();
-    });
-  });
-  // 隨機分配
-  const diceBtn = $('cc-dice-btn');
-  if (diceBtn) diceBtn.addEventListener('click', randomizeCCStats);
-  // 確認按鈕
-  const confirmBtn = $('cc-confirm-btn');
-  if (confirmBtn) confirmBtn.addEventListener('click', confirmCharCreate);
-  // 名稱輸入
-  const nameInput = $('cc-name-input');
+
+  // 角色名輸入
+  const nameInput = $('cc2-name-input');
   if (nameInput) {
     nameInput.addEventListener('input', () => {
       charCreateState.name = nameInput.value.trim();
+      charCreateState.nameChecked = false; // 修改後需重新確認
+      updateCC2NameStatus('', '');
+      updateCC2CreateBtnState();
+    });
+    nameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') checkCC2Name();
     });
   }
-  updateCCStatsDisplay();
-  updateCCSprite();
-  const classNameEl = $('cc-current-class');
-  if (classNameEl) classNameEl.textContent = CLASSES[charCreateState.classId].name;
+
+  // 重複確認按鈕
+  const checkBtn = $('cc2-check-btn');
+  if (checkBtn) checkBtn.addEventListener('click', checkCC2Name);
+
+  // 創建按鈕
+  const createBtn = $('cc2-create-btn');
+  if (createBtn) createBtn.addEventListener('click', confirmCC2CharCreate);
+
+  // 首次渲染
+  updateCC2Portrait();
+  updateCC2TransformPreview();
+  updateCC2ClassInfo();
+  updateCC2CreateBtnState();
 }
 
-function getCCRemainingPoints() {
-  let used = 0;
-  for (const s in charCreateState.stats) {
-    used += charCreateState.stats[s] - CHAR_CREATE_STATS[s].base;
+function selectCC2Class(cid) {
+  if (charCreateState.classId === cid) return;
+  charCreateState.classId = cid;
+  
+  // 更新 icon 選中樣式
+  const classRow = $('cc2-class-row');
+  if (classRow) {
+    classRow.querySelectorAll('.cc2-class-icon-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.classId === cid);
+    });
   }
-  return CHAR_CREATE_TOTAL_POINTS - used;
+  
+  // 更新介面各區塊
+  updateCC2Portrait();
+  updateCC2TransformPreview();
+  updateCC2ClassInfo();
 }
 
-function updateCCStatsDisplay() {
-  for (const stat in charCreateState.stats) {
-    const valEl = $('cc-stat-' + stat);
-    if (valEl) valEl.textContent = charCreateState.stats[stat];
-  }
-  const remainEl = $('cc-points-remain');
-  if (remainEl) remainEl.textContent = getCCRemainingPoints();
-}
-
-function updateCCSprite() {
-  const spriteEl = $('cc-character-sprite');
-  if (!spriteEl) return;
-  const cls = CLASSES[charCreateState.classId];
-  const spriteKey = charCreateState.classId;
-  const sp = SPRITE[spriteKey] || SPRITE.warrior;
-  const glow = sp.glow || '#ffd870';
-  const filter = `drop-shadow(0 0 12px ${glow}) drop-shadow(0 4px 6px rgba(0,0,0,0.8))`;
+function updateCC2Portrait() {
+  const portraitEl = $('cc2-portrait');
+  if (!portraitEl) return;
+  const cid = charCreateState.classId;
+  const sp = SPRITE[cid] || SPRITE.warrior;
+  const detail = CLASS_DETAIL[cid];
+  
+  // 8 幀 idle 動畫（面朝右，第一幀為主）
+  const frames = [sp.idle, sp.walk, sp.walk2, sp.walk3, sp.walk4].filter(Boolean);
+  
   if (sp.useImg && sp.idle) {
-    spriteEl.innerHTML = `<img src="${sp.idle}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="${cls.name}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/><div class="cc-sprite-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:48px">⚔️</div>`;
-  } else {
-    const icon = { warrior: '⚔️', mage: '🔮', archer: '🏹', rogue: '🗡️', paladin: '🛡️', warlock: '💀' }[spriteKey] || '⚔️';
-    spriteEl.innerHTML = `<div style="font-size:56px;filter:${filter}">${icon}</div>`;
+    portraitEl.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" class="cc2-portrait-img" data-frames='${JSON.stringify(frames)}'/>`;
+    startCC2PortraitAnim(portraitEl.querySelector('img'), frames);
   }
-  const nameEl = $('cc-current-class');
-  if (nameEl) nameEl.textContent = cls.name;
 }
 
-function randomizeCCStats() {
-  // 先重置為基礎值
-  for (const s in charCreateState.stats) {
-    charCreateState.stats[s] = CHAR_CREATE_STATS[s].base;
-  }
-  // 隨機分配剩餘點數
-  let remaining = CHAR_CREATE_TOTAL_POINTS;
-  const statKeys = Object.keys(charCreateState.stats);
-  while (remaining > 0) {
-    const key = statKeys[Math.floor(Math.random() * statKeys.length)];
-    if (charCreateState.stats[key] < CHAR_MAX_STAT) {
-      charCreateState.stats[key]++;
-      remaining--;
+// 8 幀動畫播放（用於創角頁立繪輕微呼吸/待機效果）
+let _cc2PortraitAnimTimer = null;
+function startCC2PortraitAnim(img, frames) {
+  if (_cc2PortraitAnimTimer) clearInterval(_cc2PortraitAnimTimer);
+  if (!frames || frames.length < 2) return;
+  let idx = 0;
+  _cc2PortraitAnimTimer = setInterval(() => {
+    idx = (idx + 1) % frames.length;
+    if (img && img.src) img.src = frames[idx];
+  }, 350);
+}
+
+function updateCC2ClassInfo() {
+  const cid = charCreateState.classId;
+  const detail = CLASS_DETAIL[cid];
+  if (!detail) return;
+  
+  const nameEl = $('cc2-class-name');
+  const descEl = $('cc2-class-desc');
+  const weaponEl = $('cc2-main-weapon');
+  const typeEl = $('cc2-combat-type');
+  const traitEl = $('cc2-class-trait');
+  
+  if (nameEl) nameEl.textContent = detail.name;
+  if (descEl) descEl.textContent = detail.desc;
+  if (weaponEl) weaponEl.textContent = detail.mainWeapon;
+  if (typeEl) typeEl.textContent = detail.combatType;
+  if (traitEl) traitEl.textContent = detail.trait;
+}
+
+function updateCC2TransformPreview() {
+  const cid = charCreateState.classId;
+  const tf = CLASS_TRANSFORM_MAP[cid];
+  if (!tf) return;
+  
+  const nameEl = $('cc2-transform-name');
+  const descEl = $('cc2-transform-desc');
+  const rarityEl = $('cc2-transform-rarity');
+  const spriteEl = $('cc2-transform-sprite');
+  
+  if (nameEl) nameEl.textContent = tf.name;
+  if (rarityEl) rarityEl.textContent = tf.rarity;
+  
+  // 從 TRANSFORM_POOL 拿 description
+  const poolTf = TRANSFORM_POOL.find(t => t.id === tf.id);
+  if (descEl) descEl.textContent = poolTf?.desc || '最強變身形態，全屬性大幅提升';
+  
+  // 變身 8 幀動畫展示
+  const spKey = tf.spriteKey;
+  const sp = SPRITE[spKey];
+  if (sp && sp.useImg && spriteEl) {
+    const frames = [sp.idle, sp.walk, sp.walk2, sp.walk3, sp.walk4].filter(Boolean);
+    spriteEl.innerHTML = `<img src="${sp.idle}" alt="${tf.name}" class="cc2-transform-img"/>`;
+    const img = spriteEl.querySelector('img');
+    if (frames.length > 1) {
+      let idx = 0;
+      if (spriteEl._animTimer) clearInterval(spriteEl._animTimer);
+      spriteEl._animTimer = setInterval(() => {
+        idx = (idx + 1) % frames.length;
+        if (img) img.src = frames[idx];
+      }, 280);
     }
   }
-  updateCCStatsDisplay();
 }
 
-function confirmCharCreate() {
+// ===== 角色名重複確認 =====
+function checkCC2Name() {
   const name = charCreateState.name.trim();
+  const statusEl = $('cc2-name-status');
+  const checkBtn = $('cc2-check-btn');
+  
   if (!name) {
-    alert('請輸入角色名稱');
+    updateCC2NameStatus('請輸入角色名稱', 'error');
     return;
   }
   if (name.length < 2 || name.length > 10) {
-    alert('角色名稱長度需為 2-10 個字');
+    updateCC2NameStatus('角色名稱長度需為 2-10 個字元', 'error');
     return;
   }
-  if (getCCRemainingPoints() > 0) {
-    if (!confirm(`還有 ${getCCRemainingPoints()} 點屬性點未分配，確定要開始遊戲嗎？`)) return;
+  // 簡單敏感詞檢查
+  const forbidden = ['管理員', 'GM', 'gm', '系統', '官方', '總裁', '皇帝', '天王'];
+  for (const w of forbidden) {
+    if (name.indexOf(w) !== -1) {
+      updateCC2NameStatus('名稱含有違禁字詞，請重新輸入', 'error');
+      return;
+    }
   }
-  // 設置玩家名稱與職業
+  
+  charCreateState.nameCheckPending = true;
+  charCreateState.nameChecked = false;
+  updateCC2NameStatus('確認中...', 'checking');
+  if (checkBtn) { checkBtn.disabled = true; }
+  updateCC2CreateBtnState();
+  
+  // 嘗試透過後端查重；失敗則本機檢查
+  const serverInfo = (window.AuthSystem && typeof window.AuthSystem.getCurrentServer === 'function')
+    ? window.AuthSystem.getCurrentServer()
+    : null;
+  const serverId = serverInfo?.id || 'local';
+  const apiPath = '/characters/check-name?name=' + encodeURIComponent(name) + '&server=' + encodeURIComponent(serverId);
+  
+  // 後端有 api 函式的話用之（在線模式）；否則本機檢查（離線模式）
+  const apiFn = window.AuthSystem?.api || null;
+  
+  const checkLocal = () => {
+    // 離線：檢查 localStorage 裡既有角色名
+    let conflict = false;
+    try {
+      for (let i = 0; i < 4; i++) {
+        const raw = localStorage.getItem('mmo_save_' + i);
+        if (raw) {
+          const data = JSON.parse(raw);
+          if (data.name === name) { conflict = true; break; }
+        }
+      }
+    } catch (e) {}
+    if (conflict) {
+      charCreateState.nameChecked = false;
+      updateCC2NameStatus('此角色名稱已存在，請更換', 'error');
+    } else {
+      charCreateState.nameChecked = true;
+      updateCC2NameStatus('此名稱可以使用', 'ok');
+    }
+    if (checkBtn) checkBtn.disabled = false;
+    updateCC2CreateBtnState();
+  };
+  
+  if (apiFn) {
+    apiFn(apiPath).then(data => {
+      if (data && typeof data.available === 'boolean') {
+        if (data.available) {
+          charCreateState.nameChecked = true;
+          updateCC2NameStatus('此名稱可以使用', 'ok');
+        } else {
+          charCreateState.nameChecked = false;
+          updateCC2NameStatus('此角色名稱已存在，請更換', 'error');
+        }
+      } else {
+        checkLocal();
+      }
+      if (checkBtn) checkBtn.disabled = false;
+      updateCC2CreateBtnState();
+    }).catch(() => {
+      // 後端不通 → 本機檢查
+      checkLocal();
+    });
+  } else {
+    // 沒有 api → 本機檢查
+    setTimeout(checkLocal, 200);
+  }
+}
+
+function updateCC2NameStatus(text, type) {
+  const statusEl = $('cc2-name-status');
+  if (!statusEl) return;
+  statusEl.textContent = text || '';
+  statusEl.className = 'cc2-name-status' + (type ? ' ' + type : '');
+}
+
+function updateCC2CreateBtnState() {
+  const btn = $('cc2-create-btn');
+  if (!btn) return;
+  const name = charCreateState.name.trim();
+  const valid = name.length >= 2 && name.length <= 10 && charCreateState.nameChecked;
+  btn.disabled = !valid;
+}
+
+// ===== 最終確認創建 =====
+function confirmCC2CharCreate() {
+  const name = charCreateState.name.trim();
+  if (!name) {
+    updateCC2NameStatus('請輸入角色名稱', 'error');
+    return;
+  }
+  if (!charCreateState.nameChecked) {
+    updateCC2NameStatus('請先點擊「重複確認」檢查名稱', 'error');
+    return;
+  }
+  
+  const cid = charCreateState.classId;
+  const cls = CLASSES[cid];
+  if (!cls) return;
+  
+  // 根據職業預設屬性自動分配（玩家不用手動配點）
+  const pref = CLASS_STAT_PREFS[cid] || CLASS_STAT_PREFS.warrior;
   GS.player.name = name;
-  GS.player.classId = charCreateState.classId;
-  const cls = CLASSES[charCreateState.classId];
-  console.log('[confirmCharCreate] 选择职业:', charCreateState.classId, '| name:', name, '| 类对象:', cls ? cls.name : 'NULL');
-  console.log('[confirmCharCreate] 2. el.topName存在:', !!el.topName, '| el.classBadge存在:', !!el.classBadge);
-  // 根據屬性調整初始屬性
-  const s = charCreateState.stats;
+  GS.player.classId = cid;
+  
+  // 計算初始屬性（基於職業偏好 + 基礎值）
+  const s = pref;
   const strBonus = (s.str - 10) * 1.5;
   const conBonus = (s.con - 10) * 8;
   const dexBonus = (s.dex - 10) * 0.5;
-  const intBonus = (s.int - 10) * 0.5;
   GS.player.atk = Math.floor(Number(cls.baseStats.atk) + strBonus);
   GS.player.def = Math.floor(Number(cls.baseStats.def) + dexBonus * 0.5);
   GS.player.hpMax = Math.floor(Number(cls.baseStats.hpMax) + conBonus);
   GS.player.hp = GS.player.hpMax;
   GS.player.crit = Math.floor(Number(cls.baseStats.crit || 5) + dexBonus * 0.3);
-  // 保存六維屬性
-  GS.player.baseStats6 = { ...charCreateState.stats };
-  // 關閉創建界面
+  GS.player.baseStats6 = { ...pref };
+  
+  // 關閉創建介面
   const screen = $('char-create-screen');
   if (screen) screen.classList.add('hidden');
+  
   // 更新介面
   if (el.topName) el.topName.textContent = name;
   if (el.classBadge) el.classBadge.textContent = cls.name;
-  console.log('[confirmCharCreate] 3. 调用updatePlayerSprite');
   updatePlayerSprite();
-  console.log('[confirmCharCreate] 4. updatePlayerSprite完成');
   updateTransformVisual();
   updateUI();
   updateSkillBar();
@@ -7027,31 +11082,26 @@ function confirmCharCreate() {
   if (topAvatarEl) {
     topAvatarEl.innerHTML = spriteEmojiHTML(cls.sprite, 36);
   }
-  console.log('[confirmCharCreate] 5. 完成，即将addLog');
-  addLog('system', `歡迎來到君主之刃，${name}！`);
+  addLog('system', '歡迎來到君主之刃，' + name + '！');
   addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/公會/城堡。');
   
-  // 初始化音频系统（用户交互后才能启动 AudioContext）
+  // 初始化音訊系統
   if (window.AudioSystem) {
     AudioSystem.init();
     AudioSystem.ensureRunning();
     AudioSystem.startMusic(GS.currentMap);
   }
   
-  // 全局AI池初始化（遊戲開始後，try-catch防止失敗崩潰）
+  // 全局 AI 池初始化
   setTimeout(() => {
-    try {
-      initGlobalAIPool();
-    } catch(e) {
+    try { initGlobalAIPool(); } catch(e) {
       console.error('[AI System] AI初始化失敗，已跳過：', e);
       addLog('system', '⚠ AI玩家系統初始化異常，已跳過');
     }
   }, 1000);
-
-  // 如果还没選擇國家，显示國家選擇界面
-  if (!GS.nation) {
-    showNationSelect();
-  }
+  
+  // 國家選擇
+  if (!GS.nation) showNationSelect();
 }
 
 function showNationSelect() {
@@ -7099,6 +11149,12 @@ function showNationSelect() {
       if (nation) {
         GS.nation = nid;
         addLog('system', `你加入了【${nation.name}】！`);
+        // v1.4.3 修正：加入國家後不自動加入任何軍團
+        // 軍團必須由玩家手動申請 / 接受邀請 / 創建才會加入
+        GS.guild = null;
+        GS.guildId = null;
+        GS.legionId = null;
+        addLog('system', '你尚未加入任何軍團，可在「國家→軍團」頁面申請或創建軍團。');
         modal.style.display = 'none';
         updateUI();
       }
@@ -7336,7 +11392,8 @@ function updatePlayerBadge() {
 
 function updatePlayerSprite() {
   const spriteObj = getPlayerSprite();
-  const unit = worldLayer.querySelector('.world-unit.hero');
+  const parent = worldLayer;
+  const unit = parent.querySelector('.world-unit.hero');
   if (!unit || !spriteObj) return;
   const s = typeof spriteObj === 'object' && spriteObj ? spriteObj : SPRITE.warrior;
   // debug：打印当前职业与实际加载的图资
@@ -7355,6 +11412,7 @@ function updatePlayerSprite() {
     if (spriteWrap) {
       spriteWrap.classList.toggle('sprite-multi-frame', multiFrame);
       spriteWrap.classList.toggle('sprite-cover-mode', coverMode);
+      spriteWrap.classList.toggle('sprite-single-frame', !!s.singleFrame);
     }
     // 检查是否已有8帧结构（通过walk2判断）
     const has8Frames = unit.querySelector('.sprite-frame-walk-2');
@@ -7363,13 +11421,14 @@ function updatePlayerSprite() {
       const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8))';
       const auraHTML = `
         <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;overflow:visible">
-          <img class="effect-img effect-magic-circle" src="" alt=""/>
-          <div class="aura-lightning l1"></div><div class="aura-lightning l2"></div><div class="aura-lightning l3"></div>
-          <img class="effect-img effect-burst effect-burst-main" src="" alt=""/>
-          <img class="effect-img effect-burst effect-burst-2" src="" alt=""/>
-          <div class="aura-wave"></div>
-          <div class="aura-pulse"></div>
-          <div class="aura-particles"></div>
+          <div class="aura-glow-outer"></div>
+          <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="aura-lightning">
+            <svg class="bolt bolt-1" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="20,0 28,30 18,45 32,75 22,90 35,120 12,120 18,95 8,75 22,50 10,30"/></svg>
+            <svg class="bolt bolt-2" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="18,0 30,25 20,40 35,65 24,80 38,120 10,120 15,90 5,70 20,48 8,25"/></svg>
+            <svg class="bolt bolt-3" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="22,0 12,28 25,42 10,68 24,82 8,120 32,120 28,92 35,72 20,50 32,28"/></svg>
+            <svg class="bolt bolt-4" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="16,0 28,22 15,40 30,60 18,78 32,120 10,120 14,88 6,66 20,44 10,22"/></svg>
+          </div>
         </div>`;
       spriteWrap.innerHTML = auraHTML + `
         <img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${baseFilter}" alt=""/>
@@ -7379,6 +11438,7 @@ function updatePlayerSprite() {
         <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${s.walk4 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
         <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
         <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
+        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-3" src="${s.attack3 || s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
         <img class="unit-sprite-img sprite-frame-hit" src="${s.hit || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
         <div class="unit-sprite-tomb">🪦</div>
         <div class="slash-effect"></div>
@@ -7393,7 +11453,7 @@ function updatePlayerSprite() {
       if (imgIdle) imgIdle.src = s.idle;
       const walkSrcs = [s.walk, s.walk2, s.walk3, s.walk4];
       walkImgs.forEach((img, i) => { img.src = walkSrcs[i] || s.walk || s.idle; });
-      const atkSrcs = [s.attack, s.attack2];
+      const atkSrcs = [s.attack, s.attack2, s.attack3];
       attackImgs.forEach((img, i) => { img.src = atkSrcs[i] || s.attack || s.idle; });
       if (imgHit) imgHit.src = s.hit || s.idle;
     }
@@ -7430,27 +11490,27 @@ function updateTransformVisual() {
 
   const tf = TRANSFORM_POOL.find(t => t.id === GS.player.transformId);
   const aura = unit.querySelector('.transform-aura');
+  const spriteData = tf ? (SPRITE[tf.spriteKey] || {}) : {};
+  const isTrueGold = spriteData.trueGold;
   if (tf) {
-    // 加品質光環 class
+    // 加品質光環 class + 真系列標記
     unit.classList.add('transform-rarity-' + tf.rarity);
+    if (isTrueGold) unit.classList.add('transform-true-gold');
     // 光環用 visibility 切換，避免 display 變化導致佈局重排
     if (aura) {
       aura.style.visibility = 'visible';
-      aura.style.opacity = '0.9';
+      aura.style.opacity = '1';
       // 同步品級 class 到 aura 上便於 CSS 控制
-      aura.className = 'transform-aura transform-rarity-' + tf.rarity;
-      // 特效圖片 src 切換（閃電光環 + 魔法陣）
-      const lightningSrc = tf.rarity === 'gold' ? 'https://aka.doubaocdn.com/s/Bm7QnJD8GM' : (tf.rarity === 'purple' ? 'https://aka.doubaocdn.com/s/38AbJxx35a' : '');
-      aura.querySelectorAll('.effect-burst').forEach(img => { img.src = lightningSrc; });
-      aura.querySelectorAll('.effect-magic-circle').forEach(img => { img.src = 'https://aka.doubaocdn.com/s/JnjUPjCz1B'; });
-      // 啟動上升粒子生成器
-      startAuraParticles(tf.rarity);
+      aura.className = 'transform-aura transform-rarity-' + tf.rarity + (isTrueGold ? ' aura-true-gold' : '');
     }
     // 神話變身時給場景加金光閃爍
     if (tf.rarity === 'gold' && el.sceneBg) {
       el.scene.classList.add('gold-mythic-flash');
+      if (isTrueGold) el.scene.classList.add('true-gold-scene');
+      else el.scene.classList.remove('true-gold-scene');
     } else if (el.scene) {
       el.scene.classList.remove('gold-mythic-flash');
+      el.scene.classList.remove('true-gold-scene');
     }
   } else {
     // 沒變身，隱藏光環（visibility:hidden + opacity:0，完全不影響文檔流）
@@ -7458,10 +11518,8 @@ function updateTransformVisual() {
       aura.style.visibility = 'hidden';
       aura.style.opacity = '0';
       aura.className = 'transform-aura';
-      aura.querySelectorAll('.effect-burst, .effect-magic-circle').forEach(img => { img.src = ''; });
     }
     if (el.scene) el.scene.classList.remove('gold-mythic-flash');
-    stopAuraParticles();
   }
 
   // 攻城战场景也更新（如果有玩家单位）——同樣只切 class
@@ -7472,22 +11530,21 @@ function updateTransformVisual() {
        'transform-rarity-red','transform-rarity-purple','transform-rarity-gold',
       ].forEach(c => siegeUnit.classList.remove(c));
       const siegeAura = siegeUnit.querySelector('.transform-aura');
-      if (tf && tf.unlocked) {
+      const siegeSpriteData = tf ? (SPRITE[tf.spriteKey] || {}) : {};
+      const siegeIsTrueGold = siegeSpriteData.trueGold;
+      if (tf) {
         siegeUnit.classList.add('transform-rarity-' + tf.rarity);
+        if (siegeIsTrueGold) siegeUnit.classList.add('transform-true-gold');
         if (siegeAura) {
           siegeAura.style.visibility = 'visible';
-          siegeAura.style.opacity = '0.9';
-          siegeAura.className = 'transform-aura transform-rarity-' + tf.rarity;
-          const lightningSrc = tf.rarity === 'gold' ? 'https://aka.doubaocdn.com/s/Bm7QnJD8GM' : (tf.rarity === 'purple' ? 'https://aka.doubaocdn.com/s/38AbJxx35a' : '');
-          siegeAura.querySelectorAll('.effect-burst').forEach(img => { img.src = lightningSrc; });
-          siegeAura.querySelectorAll('.effect-magic-circle').forEach(img => { img.src = 'https://aka.doubaocdn.com/s/JnjUPjCz1B'; });
+          siegeAura.style.opacity = '1';
+          siegeAura.className = 'transform-aura transform-rarity-' + tf.rarity + (siegeIsTrueGold ? ' aura-true-gold' : '');
         }
       } else {
         if (siegeAura) {
           siegeAura.style.visibility = 'hidden';
           siegeAura.style.opacity = '0';
           siegeAura.className = 'transform-aura';
-          siegeAura.querySelectorAll('.effect-burst, .effect-magic-circle').forEach(img => { img.src = ''; });
         }
       }
     }
@@ -7498,38 +11555,6 @@ function updateTransformVisual() {
     positionUnit(unit, GS.player.x, GS.player.y, 'hero');
   }
   // console.log('[Transform] 變身狀態:', tf ? tf.id : '無', '單位位置:', unit.getBoundingClientRect());
-}
-
-// 變身上升粒子生成器
-let auraParticleTimer = null;
-function startAuraParticles(rarity) {
-  stopAuraParticles();
-  const unit = worldLayer.querySelector('.world-unit.hero');
-  if (!unit) return;
-  const container = unit.querySelector('.aura-particles');
-  if (!container) return;
-  const interval = rarity === 'purple' ? 220 : 350;
-  auraParticleTimer = setInterval(() => {
-    if (!container.isConnected) { stopAuraParticles(); return; }
-    const p = document.createElement('div');
-    p.className = 'aura-particle';
-    const left = 20 + Math.random() * 60;
-    const size = 2 + Math.random() * 4;
-    const delay = Math.random() * 0.5;
-    p.style.left = left + '%';
-    p.style.bottom = '15%';
-    p.style.width = size + 'px';
-    p.style.height = size + 'px';
-    p.style.animationDelay = delay + 's';
-    container.appendChild(p);
-    setTimeout(() => { if (p.parentNode) p.remove(); }, rarity === 'purple' ? 2300 : 3000);
-  }, interval);
-}
-function stopAuraParticles() {
-  if (auraParticleTimer) {
-    clearInterval(auraParticleTimer);
-    auraParticleTimer = null;
-  }
 }
 
 // 根据等級設定精灵图发光效果（8档）
@@ -7570,12 +11595,18 @@ function positionUnit(el, x, y, kind) {
   // 脚底对齐：精灵图底部 = 地面 y
   el.style.left = (x - size.w / 2) + 'px';
   el.style.top = (y - size.h) + 'px';
+  // 深度排序：y 越大越靠前（z-index 越高）
+  // 基礎值 10 + y/10，建築用 15，英雄用 20+，確保層級正確
+  const baseZ = kind === 'hero' ? 20 : (kind === 'enemy' ? 10 : 12);
+  const zIndex = Math.floor(baseZ + y / 8);
+  el.style.zIndex = zIndex;
   // 視口剔除：屏幕外單位暫停CSS動畫，節省GPU
   // worldW/worldH 是scene的client寬高（即視口大小）
   const margin = 100; // 邊界緩衝，避免邊緣閃爍
+  let sx, sy;
   const zoom = CAMERA.zoom || 1;
-  const sx = (x - CAMERA.x) * zoom;
-  const sy = (y - CAMERA.y) * zoom;
+  sx = (x - CAMERA.x) * zoom;
+  sy = (y - CAMERA.y) * zoom;
   const vw = worldW || 800;
   const vh = worldH || 600;
   const offscreen = sx < -margin || sx > vw + margin || sy < -margin || sy > vh + margin;
@@ -7587,7 +11618,9 @@ function positionUnit(el, x, y, kind) {
 
 function renderPlayer() {
   const p = GS.player;
-  const unit = worldLayer.querySelector('.world-unit.hero');
+  // 玩家始終在 worldLayer 中
+  const parent = worldLayer;
+  const unit = parent.querySelector('.world-unit.hero');
   if (!unit) return;
   const hpPct = Math.max(0, (p.hp / getTotalHpMax()) * 100);
   const hpFill = unit.querySelector('.unit-hp-fill');
@@ -7612,7 +11645,8 @@ function renderPlayer() {
 
 // 更新玩家名字旁國旗
 function updatePlayerNameFlag() {
-  const unit = worldLayer.querySelector('.world-unit.hero');
+  const parent = worldLayer;
+  const unit = parent.querySelector('.world-unit.hero');
   if (!unit) return;
   const nameEl = unit.querySelector('.unit-name');
   if (!nameEl) return;
@@ -7642,11 +11676,15 @@ function loadMap(mapId) {
   // 切换背景音乐
   if (window.AudioSystem) AudioSystem.changeMapMusic(mapId);
 
+  // 根据地圖尺寸设置世界座標系（攻城地圖2048×2048與背景圖1:1對應）
+  CAMERA.worldWidth = map.w || WORLD_W || 2496;
+  CAMERA.worldHeight = map.h || WORLD_H || 1664;
+
   // 确保攻城战场景隐藏（旧系统遗留清理）
   if (el.siegeScene) el.siegeScene.style.display = 'none';
   if (el.scene) el.scene.style.visibility = 'visible';
 
-  sceneBg.style.backgroundImage = `url(${map.bg})`;
+  safeBackgroundUrl(sceneBg, map.bg);
   sceneBg.style.backgroundRepeat = 'no-repeat';
   el.locationName.textContent = map.name;
   if (el.minimapTitle) el.minimapTitle.textContent = map.name;
@@ -7655,6 +11693,12 @@ function loadMap(mapId) {
   GS.aiPlayers.forEach(ai => { if (ai.el) { ai.el.remove(); ai.el = null; } });
   GS.aiPlayers = [];
   GS.targetAiUid = null;
+  // 清理怪物動畫狀態（unitAnimState中的怪物条目），避免地圖切換後內存泄漏
+  if (GS.monsters) {
+    for (const m of GS.monsters) {
+      unitAnimState.delete(m.uid);
+    }
+  }
   // 双重保险：直接清除DOM中所有AI玩家元素
   if (worldLayer) {
     worldLayer.querySelectorAll('.world-unit.ai-player').forEach(el => el.remove());
@@ -7685,6 +11729,13 @@ function loadMap(mapId) {
     const t1 = performance.now();
     spawnAIPlayers();
     console.log(`[loadMap] AI生成完成，耗時 ${(performance.now() - t1).toFixed(0)}ms，共 ${GS.aiPlayers.length} 個`);
+  }
+
+  // ===== 多人連線：進入新地圖（同步世界尺寸） =====
+  if (window.MultiplayerClient && MultiplayerClient.connected) {
+    try {
+      MultiplayerClient.enterMap(mapId, 0, CAMERA.worldWidth, CAMERA.worldHeight);
+    } catch (e) { /* ignore */ }
   }
 
   // 城堡地圖：根据是否宣戰生成攻城战元素
@@ -7734,20 +11785,51 @@ function renderNPCs(map) {
     healer: 'npc_healer',
     wizard: 'npc_wizard',
     postman: 'npc_postman',
+    trader: 'npc_merchant_new',
   };
+  let npcIdx = 0;
   map.npcs.forEach(npc => {
     const elDiv = document.createElement('div');
     elDiv.className = 'npc-unit';
     elDiv.dataset.npcId = npc.id;
+    // 為同 id 的多個 NPC（如多個警衛）生成唯一 uid
+    const npcUid = 'npc_' + npc.id + '_' + npcIdx;
+    npcIdx++;
+    elDiv.dataset.npcUid = npcUid;
     elDiv.style.left = npc.x + 'px';
-    elDiv.style.top = (npc.y - 56) + 'px';
+    elDiv.style.top = (npc.y - 64) + 'px';
     const spriteKey = npcSpriteMap[npc.id] || 'npc_shop';
     const sp = SPRITE[spriteKey] || { idle: npc.icon || '🧙', color: '#c0a060', glow: '#ffe090' };
     const isImg = !!sp.useImg;
-    const filter = `drop-shadow(0 0 5px ${sp.glow || '#ffe090'}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
-    const spriteHTML = isImg
-      ? `<img class="npc-sprite-img" src="${sp.idle}" alt="${npc.name}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/><div class="npc-sprite-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:32px">${npc.icon || '🧙'}</div>`
-      : `<div style="font-size:32px;line-height:48px;filter:${filter};color:${sp.color || '#c0a060'}">${npc.icon || '🧙'}</div>`;
+    const multiFrame = !!sp.multiFrame;
+    const filter = `drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
+
+    let spriteHTML = '';
+    if (isImg && multiFrame) {
+      // 8 幀 NPC：完整圖片結構 + 呼吸動畫
+      const walkSrcs = [sp.walk || sp.idle, sp.walk2 || sp.walk || sp.idle, sp.walk3 || sp.walk || sp.idle, sp.walk4 || sp.walk || sp.idle];
+      const atkSrcs = [sp.attack || sp.idle, sp.attack2 || sp.attack || sp.idle];
+      spriteHTML = `
+        <div class="npc-sprite-wrap sprite-multi-frame" style="position:relative;width:56px;height:64px">
+          <img class="unit-sprite-img sprite-frame-idle" src="${sp.idle}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrcs[0]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${walkSrcs[1]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${walkSrcs[2]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${walkSrcs[3]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${atkSrcs[0]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${atkSrcs[1]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-hit" src="${sp.hit || sp.idle}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+        </div>
+      `;
+      // 註冊 NPC 動畫狀態（呼吸：idle 時慢速輪播 walk 幀）
+      unitAnimState.set(npcUid, { animFrame: 0, animTimer: Math.random() * 400, state: 'idle', breathPhase: Math.random() * 6 });
+    } else if (isImg) {
+      spriteHTML = `
+        <img class="npc-sprite-img" src="${sp.idle}" alt="${npc.name}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" onerror="handleImgError(this)"/>
+      `;
+    } else {
+      spriteHTML = `<div style="font-size:32px;line-height:48px;filter:${filter};color:${sp.color || '#c0a060'}">${npc.icon || '🧙'}</div>`;
+    }
     elDiv.innerHTML = `
       <div class="npc-sprite">
         ${npc.quest ? '<div class="npc-quest-mark">!</div>' : ''}
@@ -7757,6 +11839,7 @@ function renderNPCs(map) {
     `;
     elDiv.addEventListener('click', () => {
       if (npc.id === 'shop') openSidePage('shop');
+      else if (npc.id === 'trader') { openAuctionHouse(); }
       else if (npc.id === 'blacksmith') {
         const hasWeapon = GS.equipment.weapon;
         const cost = hasWeapon ? (GS.equipment.weapon.level || 0) * 500 + 200 : 0;
@@ -7873,10 +11956,13 @@ function buildMapCard(map, current, isSafe, locked, isSiege) {
   card.dataset.map = map.id;
   const lvlText = isSafe ? '安全區' : (isSiege ? '攻城戰' : `Lv.${map.levelMin}-${map.levelMax}`);
   card.innerHTML = `
-    <div class="map-card-bg" style="background-image:url(${map.bg})"></div>
+    <div class="map-card-bg" data-bg="${map.bg}" style="background-image:none"></div>
     <div class="map-card-info">${map.name}</div>
     <div class="map-card-level">${lvlText}</div>
   `;
+  // 延遲到 DOM 插入後再載入背景（支援 CDN fallback）
+  const bgEl = card.querySelector('.map-card-bg');
+  if (bgEl) safeBackgroundUrl(bgEl, map.bg);
   if (!locked) {
     card.addEventListener('click', () => {
       loadMap(map.id);
@@ -7903,9 +11989,15 @@ function spawnMonsters() {
     for (let i = 0; i < spec.count; i++) {
       const levelJitter = Math.floor(Math.random() * 3);
       const level = spec.level + levelJitter;
-      const isAggro = aggroCountPool > 0 && Math.random() > 0.5;
-      if (isAggro) aggroCountPool--;
-      pending.push({ type: spec.type, name: spec.name, level, behavior: isAggro ? 'aggro' : 'passive' });
+      let behavior;
+      if (spec.behavior) {
+        behavior = spec.behavior; // 怪物指定了固定行为
+      } else {
+        const isAggro = aggroCountPool > 0 && Math.random() > 0.5;
+        if (isAggro) aggroCountPool--;
+        behavior = isAggro ? 'aggro' : 'passive';
+      }
+      pending.push({ type: spec.type, name: spec.name, level, behavior });
     }
   });
 
@@ -7922,7 +12014,8 @@ function spawnMonsters() {
       requestAnimationFrame(spawnBatch);
     } else {
       // 全部生成完畢再生成 Boss
-      if (map.boss) spawnMapBoss(map);
+      if (map.boss) spawnMapBoss(map, 'boss');
+      if (map.worldBoss) spawnMapBoss(map, 'worldBoss');
       console.log(`[Monster] 當前地圖生成 ${GS.monsters.length} 隻怪物（分幀完成）`);
     }
   }
@@ -7932,15 +12025,30 @@ function spawnMonsters() {
 // Boss 系统：每张地圖一个 Boss，有重生時間
 const bossState = {}; // mapId -> { respawnAt, spawned }
 
-function spawnMapBoss(map) {
-  const bs = bossState[map.id];
+function spawnMapBoss(map, slot = 'boss') {
+  const bsKey = map.id + ':' + slot;
+  const bs = bossState[bsKey];
   if (bs && bs.respawnAt && Date.now() < bs.respawnAt) return; // 冷卻中
   if (bs?.spawned) return;
 
-  const boss = map.boss;
+  const boss = slot === 'worldBoss' ? map.worldBoss : map.boss;
+  if (!boss) return;
   const m = createMonster(boss.type, boss.name, boss.level, 'aggro');
   m.isBoss = true;
+  m.bossSlot = slot;
+  m.bossMapId = map.id;
+  const oldSprite = m.sprite;
   m.sprite = SPRITE['boss_' + boss.type] || SPRITE.boss_demon;
+  // 如果Boss sprite是多帧而原怪物sprite不是（或反之），需要重建DOM以匹配帧结构
+  const wasMulti = oldSprite && oldSprite.multiFrame;
+  const isMulti = m.sprite && m.sprite.multiFrame;
+  if (wasMulti !== isMulti || isMulti) {
+    // 重建sprite DOM：先移除旧DOM，再重新创建
+    const oldEl = m.el;
+    if (oldEl && oldEl.parentNode) oldEl.parentNode.removeChild(oldEl);
+    unitAnimState.delete(m.uid);
+    createMonsterSprite(m);
+  }
   m.hpMax = Math.floor(m.hpMax * boss.hpMult);
   m.hp = m.hpMax;
   m.atk = Math.floor(m.atk * boss.atkMult);
@@ -7960,16 +12068,22 @@ function spawnMapBoss(map) {
   const elDiv = worldLayer.querySelector(`[data-id="${m.uid}"]`);
   if (elDiv) {
     elDiv.classList.add('boss-unit');
-    // Boss 精靈放大 1.5 倍（僅放大精靈容器，不改變單位定位）
+    // Boss 精靈放大：多幀Boss用2.0倍，單幀Boss用1.5倍
     const spriteWrap = elDiv.querySelector('.unit-sprite-wrap');
     if (spriteWrap) {
       const baseW = SPRITE_SIZE.enemy?.w || 50;
       const baseH = SPRITE_SIZE.enemy?.h || 56;
-      const scale = 1.5;
+      const scale = (m.sprite && m.sprite.multiFrame) ? 2.0 : 1.5;
       spriteWrap.style.width = (baseW * scale) + 'px';
       spriteWrap.style.height = (baseH * scale) + 'px';
       spriteWrap.style.marginLeft = -(baseW * scale - baseW) / 2 + 'px';
       spriteWrap.style.marginTop = -(baseH * scale - baseH) + 'px';
+    }
+    // 多幀Boss：初始化8幀動畫狀態（普通怪物在createMonsterSprite中处理，但Boss在spawnMapBoss中改了sprite后需要重新初始化）
+    if (m.sprite && m.sprite.multiFrame) {
+      unitAnimState.delete(m.uid);
+      initUnitAnimState(m.uid);
+      elDiv.classList.add('enemy-multiframe');
     }
     // Boss 血條加寬加醒目（比例縮小但仍比普通怪物醒目）
     const hpBar = elDiv.querySelector('.unit-hp-bar');
@@ -7992,18 +12106,18 @@ function spawnMapBoss(map) {
     positionUnit(elDiv, m.x, m.y, 'enemy');
     updateMonsterRender(m);
   }
-  bossState[map.id] = { respawnAt: 0, spawned: true, uid: m.uid };
+  bossState[bsKey] = { respawnAt: 0, spawned: true, uid: m.uid, slot: slot };
   addLog('system', `⚠️ 【BOSS】${boss.name} 出現了！`);
 }
 
-function onBossKilled(mapId, boss) {
+function onBossKilled(mapId, boss, slot = 'boss') {
   const respawnSec = boss.respawn || 1800;
-  bossState[mapId] = { respawnAt: Date.now() + respawnSec * 1000, spawned: false };
+  bossState[mapId + ':' + slot] = { respawnAt: Date.now() + respawnSec * 1000, spawned: false, slot: slot };
   addLog('system', `擊敗了 ${boss.name}！重生時間：${respawnSec}秒`);
 }
 
-function getBossRespawnTime(mapId) {
-  const bs = bossState[mapId];
+function getBossRespawnTime(mapId, slot = 'boss') {
+  const bs = bossState[mapId + ':' + slot];
   if (!bs || !bs.respawnAt) return 0;
   return Math.max(0, Math.floor((bs.respawnAt - Date.now()) / 1000));
 }
@@ -8011,11 +12125,17 @@ function getBossRespawnTime(mapId) {
 // 游戏循环中检查Boss重生
 function checkBossRespawn() {
   const map = getAllMaps()[GS.currentMap];
-  if (!map?.boss) return;
-  const bs = bossState[GS.currentMap];
-  if (!bs || bs.spawned) return;
-  if (bs.respawnAt && Date.now() >= bs.respawnAt) {
-    spawnMapBoss(map);
+  if (!map) return;
+  const slots = [];
+  if (map.boss) slots.push('boss');
+  if (map.worldBoss) slots.push('worldBoss');
+  for (const slot of slots) {
+    const bsKey = GS.currentMap + ':' + slot;
+    const bs = bossState[bsKey];
+    if (!bs || bs.spawned) continue;
+    if (bs.respawnAt && Date.now() >= bs.respawnAt) {
+      spawnMapBoss(map, slot);
+    }
   }
 }
 
@@ -8086,7 +12206,14 @@ function createMonsterSprite(m) {
   const elDiv = document.createElement('div');
   elDiv.className = `world-unit enemy idle ${m.isBoss ? 'boss-unit ' : ''}${m.behavior === 'passive' ? 'passive' : 'aggro'}`;
   elDiv.dataset.id = m.uid;
-  elDiv.innerHTML = buildSpriteHTML(m.sprite, 'enemy', true);
+  // 多帧怪物使用完整8帧结构（和玩家一样），单帧怪物用精简结构+CSS动画
+  const isMultiFrame = !!(m.sprite && m.sprite.multiFrame);
+  elDiv.innerHTML = buildSpriteHTML(m.sprite, 'enemy', !isMultiFrame);
+  if (isMultiFrame) {
+    initUnitAnimState(m.uid);
+    // 为怪物添加额外的多帧标记类，便于CSS微调
+    elDiv.classList.add('enemy-multiframe');
+  }
   // 填充名字（等級已隱藏，僅顯示名稱）
   const info = elDiv.querySelector('.unit-info');
   info.querySelector('.unit-name').textContent = m.name;
@@ -8096,8 +12223,7 @@ function createMonsterSprite(m) {
   worldLayer.appendChild(elDiv);
   positionUnit(elDiv, m.x, m.y, 'enemy');
   m.el = elDiv;
-  // 怪物/AI使用單張圖+CSS動畫，不需要JS幀切換，節省CPU
-  // 只有玩家/英雄/變身才走 initUnitAnimState 8幀模式
+  // 只有非多帧怪物使用纯CSS动画模式；多帧怪物走updateSpriteFrames的8帧JS驱动
 }
 
 function updateMonsterRender(m) {
@@ -8117,6 +12243,14 @@ function updateMonsterRender(m) {
   // 攻城战建筑使用特殊定位
   if (m.isSiegeStructure) {
     positionSiegeStructure(elDiv, m.x, m.y, m.structureType);
+    // 城門：每次HP變化都檢查地圖切換（不受0.5%優化限制，確保及時切換）
+    if (m.type === 'gate') {
+      updateSiegeMapByPhase('城門HP變化');
+    }
+    // 守護塔：HP 變化時切換背景圖（背景圖已包含塔）
+    if (m.type === 'tower') {
+      updateSiegeMapByPhase('守護塔HP變化');
+    }
     // 城门损坏视觉效果
     if (m.type === 'gate' && hpPct < 50) elDiv.classList.add('damaged');
     else elDiv.classList.remove('damaged');
@@ -8165,16 +12299,28 @@ function onMonsterClick(m) {
   // 攻城战建筑点击：直接作为目標
   GS.targetMonsterUid = m.uid;
   if (m.behavior === 'passive') m.aggroed = true;
-  // 走过去
+  // 走过去（攻城建築擴大射程，城門限制在南側）
   const cls = CLASSES[GS.player.classId];
-  const range = cls.atkType === 'ranged' ? 120 : 40;
+  const isSiege = m.isSiegeStructure;
+  const baseRange = cls.atkType === 'ranged' ? 120 : 40;
+  const range = isSiege ? (cls.atkType === 'ranged' ? 350 : 150) : baseRange;
   const dx = m.x - GS.player.x;
   const dy = m.y - GS.player.y;
   const dist = Math.hypot(dx, dy);
   if (dist > range) {
     const ratio = (dist - range + 5) / dist;
-    GS.player.targetX = GS.player.x + dx * ratio;
-    GS.player.targetY = GS.player.y + dy * ratio;
+    let tx = GS.player.x + dx * ratio;
+    let ty = GS.player.y + dy * ratio;
+    // 城門目標：玩家站在 y=1150 攻擊（城門前方）
+    if (m.type === 'gate') {
+      ty = Math.max(ty, 1150);
+    }
+    // 守護塔目標：玩家站在 y=620 攻擊（塔下方，與角色同高）
+    if (m.type === 'tower') {
+      ty = Math.min(ty, 620);
+    }
+    GS.player.targetX = tx;
+    GS.player.targetY = ty;
   }
   GS.player.state = 'walking';
   GS.player.facing = dx >= 0 ? 'right' : 'left';
@@ -8192,6 +12338,41 @@ function createSummonSprite(s) {
   worldLayer.appendChild(elDiv);
   positionUnit(elDiv, s.x, s.y, 'summon');
   initUnitAnimState(s.id);
+  return elDiv;
+}
+
+// 完整 8 幀英雄召喚（用於 spriteKey 英雄，走完整動畫結構）
+function createSummonSpriteFull(s) {
+  const elDiv = document.createElement('div');
+  elDiv.className = 'world-unit summon idle';
+  elDiv.dataset.id = s.id;
+  elDiv.innerHTML = buildSpriteHTML(s.sprite, 'summon', false); // lean=false 用完整8幀
+  const info = elDiv.querySelector('.unit-info');
+  info.querySelector('.unit-name').textContent = s.name;
+  info.querySelector('.unit-level-tag').textContent = '';
+  worldLayer.appendChild(elDiv);
+  positionUnit(elDiv, s.x, s.y, 'summon');
+  initUnitAnimState(s.id);
+  return elDiv;
+}
+
+// 守護寵物世界跟隨精靈
+function createPetFollowerSprite(p) {
+  const elDiv = document.createElement('div');
+  elDiv.className = 'world-unit pet-follower idle';
+  elDiv.dataset.id = p.id;
+  const lean = !p.multiFrame;
+  elDiv.innerHTML = buildSpriteHTML(p.sprite, 'pet', lean);
+  const info = elDiv.querySelector('.unit-info');
+  if (info) {
+    const nameEl = info.querySelector('.unit-name');
+    if (nameEl) nameEl.textContent = p.name;
+    const lvlEl = info.querySelector('.unit-level-tag');
+    if (lvlEl) lvlEl.textContent = '';
+  }
+  worldLayer.appendChild(elDiv);
+  positionUnit(elDiv, p.x, p.y, 'pet');
+  if (p.multiFrame) initUnitAnimState(p.id);
   return elDiv;
 }
 
@@ -8223,36 +12404,95 @@ function updateSpriteFrames(dt) {
     const unit = worldLayer.querySelector('.world-unit.hero');
     if (unit) updateUnitAnimFrame('player', GS.player.state, unit);
   }
-  // 怪物：使用單張圖+CSS動畫，完全跳過JS幀切換，節省大量CPU
+  // 多帧怪物：使用8幀JS驅動動畫（walk 4幀循環、attack 2幀、hit 1幀）
+  if (worldLayer && GS.monsters && GS.monsters.length > 0) {
+    for (const m of GS.monsters) {
+      if (!m.sprite || !m.sprite.multiFrame) continue;
+      if (m.hp <= 0 && m.state === 'dead') {
+        // 死亡的怪物：如果动画状态还存在，保持dead帧即可，不再推进
+        if (unitAnimState.has(m.uid)) {
+          const el = m.el || worldLayer.querySelector(`[data-id="${m.uid}"]`);
+          if (el) {
+            const anim = unitAnimState.get(m.uid);
+            if (anim.lastCategory !== 'dead') {
+              anim.lastCategory = 'dead';
+              applyUnitAnimFrame(el, m.uid, 'dead');
+            }
+          }
+        }
+        continue;
+      }
+      const el = m.el || worldLayer.querySelector(`[data-id="${m.uid}"]`);
+      if (!el) continue;
+      // 畫面外單位暫停動畫更新（節省效能，但後台邏輯繼續）
+      if (el._offscreen) {
+        // 只確保狀態顯示正確，不推進幀
+        const anim = unitAnimState.get(m.uid);
+        if (anim && anim.lastCategory !== _stateToCategory(m.state)) {
+          anim.lastCategory = _stateToCategory(m.state);
+          applyUnitAnimFrame(el, m.uid, m.state);
+        }
+        continue;
+      }
+      updateUnitAnimFrame(m.uid, m.state, el);
+    }
+  }
   // AI玩家：使用單張圖+CSS動畫，完全跳過JS幀切換
-  // 召喚：使用單張圖+CSS動畫，跳過JS幀切換
-  // （如需召喚也走8幀，可自行開啟下面區塊）
-  // if (GS.summons && worldLayer) {
-  //   for (const s of GS.summons) {
-  //     const el = worldLayer.querySelector(`[data-id="summon-${s.id}"]`);
-  //     if (el) updateUnitAnimFrame('summon-' + s.id, s.state || 'idle', el);
-  //   }
-  // }
+  // 召喚：multiFrame 英雄走 8 幀 JS 驅動，其餘用單張圖+CSS動畫
+  if (GS.summons && worldLayer) {
+    for (const s of GS.summons) {
+      if (!s.multiFrame) continue;
+      const el = worldLayer.querySelector(`[data-id="${s.id}"]`);
+      if (el) updateUnitAnimFrame(s.id, s.state || 'idle', el);
+    }
+  }
+
+  // 狀態轉類別的輔助函數
+  function _stateToCategory(state) {
+    if (state === 'dead') return 'dead';
+    if (state === 'hit') return 'hit';
+    if (state === 'attacking' || state === 'casting') return 'attack';
+    if (state === 'walking' || state === 'chasing' || state === 'wandering') return 'walk';
+    return 'idle';
+  }
 
   function updateUnitAnimFrame(uid, state, unitEl) {
     const anim = unitAnimState.get(uid);
     if (!anim) return;
     // 判断状态类别
-    let category;
-    if (state === 'dead') category = 'dead';
-    else if (state === 'hit') category = 'hit';
-    else if (state === 'attacking' || state === 'casting') category = 'attack';
-    else if (state === 'walking' || state === 'chasing' || state === 'wandering') category = 'walk';
-    else category = 'idle';
+    const category = _stateToCategory(state);
 
-    // 状态切换时重置帧和计时器
+    // 状态切换时的处理
     if (anim.lastCategory !== category) {
+      const prevCat = anim.lastCategory;
       anim.lastCategory = category;
+
+      // attack 被新攻擊中斷時：重啟attack1（新動畫從頭播放）
+      if (category === 'attack') {
+        anim.animFrame = 0;
+        anim.animTimer = ANIM_FRAME_DURATIONS.attack[0];
+        applyUnitAnimFrame(unitEl, uid, state);
+        return;
+      }
+      // walk → idle 或 idle → walk：保持animFrame位置，walk循環不重置，流暢切換
+      // 只有從非walk狀態（attack/hit/dead）切換到walk時才重置到第0幀
+      if (category === 'walk') {
+        if (prevCat === 'attack' || prevCat === 'hit' || prevCat === 'dead' || !prevCat) {
+          anim.animFrame = 0;
+          anim.animTimer = ANIM_FRAME_DURATIONS.walk[0];
+        }
+        // idle ↔ walk 切換時保持循環位置，不需重置
+        applyUnitAnimFrame(unitEl, uid, state);
+        return;
+      }
+      if (category === 'hit') {
+        anim.animTimer = ANIM_FRAME_DURATIONS.hit[0];
+        applyUnitAnimFrame(unitEl, uid, state);
+        return;
+      }
+      // idle / dead：直接顯示對應幀
       anim.animFrame = 0;
-      if (category === 'walk') anim.animTimer = ANIM_FRAME_DURATIONS.walk[0];
-      else if (category === 'attack') anim.animTimer = ANIM_FRAME_DURATIONS.attack[0];
-      else if (category === 'hit') anim.animTimer = ANIM_FRAME_DURATIONS.hit[0];
-      else anim.animTimer = 0;
+      anim.animTimer = 0;
       applyUnitAnimFrame(unitEl, uid, state);
       return;
     }
@@ -8266,10 +12506,11 @@ function updateSpriteFrames(dt) {
 
     // 进入下一帧
     if (category === 'walk') {
-      anim.animFrame = (anim.animFrame + 1) % 4;
-      anim.animTimer = ANIM_FRAME_DURATIONS.walk[anim.animFrame];
+      anim.animFrame = (anim.animFrame + 1) % 4; // walk 來回 4 狀態循環
+      anim.animTimer = ANIM_FRAME_DURATIONS.walk[anim.animFrame % 4];
     } else if (category === 'attack') {
-      if (anim.animFrame < ANIM_FRAME_DURATIONS.attack.length - 1) {
+      const atkLen = ANIM_FRAME_DURATIONS.attack.length;
+      if (anim.animFrame < atkLen - 1) {
         anim.animFrame++;
         anim.animTimer = ANIM_FRAME_DURATIONS.attack[anim.animFrame];
       } else {
@@ -8282,6 +12523,34 @@ function updateSpriteFrames(dt) {
     }
     applyUnitAnimFrame(unitEl, uid, state);
   }
+}
+
+// NPC 8 幀呼吸動畫：idle 狀態下慢速輪播 walk 幀（用於 NPC 站立呼吸感）
+const NPC_BREATH_FRAME_DURATION = 700; // 每帧 700ms，比走路慢很多
+function updateNPCAnimFrames(dt) {
+  if (!npcLayer) return;
+  const dtMs = dt * 1000;
+  const npcEls = npcLayer.querySelectorAll('.npc-unit');
+  npcEls.forEach(el => {
+    const uid = el.dataset.npcUid;
+    if (!uid) return;
+    const anim = unitAnimState.get(uid);
+    if (!anim) return;
+    const wrap = el.querySelector('.npc-sprite-wrap.sprite-multi-frame');
+    if (!wrap) return;
+    // NPC 永遠處於 idle 呼吸狀態：慢速循環 walk 4 帧
+    anim.animTimer -= dtMs;
+    if (anim.animTimer > 0) return;
+    const walkFrames = wrap.querySelectorAll('.sprite-frame-walk');
+    const idleImg = wrap.querySelector('.sprite-frame-idle');
+    if (walkFrames.length === 0) return;
+    anim.animFrame = (anim.animFrame + 1) % walkFrames.length;
+    anim.animTimer = NPC_BREATH_FRAME_DURATION;
+    // 隐藏所有帧，显示当前 walk 帧
+    if (idleImg) idleImg.style.display = 'none';
+    walkFrames.forEach(img => img.style.display = 'none');
+    if (walkFrames[anim.animFrame]) walkFrames[anim.animFrame].style.display = 'block';
+  });
 }
 
 // 攻擊动画：单图模式下通过 CSS .attacking 类实现冲刺缩放
@@ -8362,7 +12631,10 @@ function updatePlayer(dt) {
   // MP 自動恢復（每秒恢復 2% 最大魔力）
   const mpMax = getTotalMpMax();
   if (p.mp < mpMax) {
-    p.mp = Math.min(mpMax, p.mp + mpMax * 0.02 * dt);
+    let mpRegenRate = 0.02;
+    const petBonus = getPetBonus();
+    if (petBonus.mpRegenPct) mpRegenRate = mpRegenRate * (1 + petBonus.mpRegenPct / 100);
+    p.mp = Math.min(mpMax, p.mp + mpMax * mpRegenRate * dt);
   }
 
   // 移動
@@ -8402,6 +12674,10 @@ function updatePlayer(dt) {
     p.y = newY;
     if (p.state !== 'attacking' && p.hitTimer <= 0 && p.state !== 'casting') p.state = 'walking';
     p.facing = dx >= 0 ? 'right' : 'left';
+    // ===== 多人連線：節流廣播移動 =====
+    if (window.MultiplayerClient && MultiplayerClient.connected) {
+      try { MultiplayerClient.reportMove(p.x, p.y, p.facing); } catch (e) { /* ignore */ }
+    }
   } else {
     if (p.state === 'walking') p.state = 'idle';
   }
@@ -8425,6 +12701,8 @@ function updatePlayer(dt) {
     // 手动模式：锁定目標后自動走到射程内普攻
     manualCombat(dt);
   }
+  // 自動戰鬥目標準星更新
+  if (typeof updateAutoTargetCrosshair === 'function') updateAutoTargetCrosshair();
 
   // 自動喝水 / 回魔
   if (p.hp > 0) {
@@ -8516,14 +12794,64 @@ function updatePlayer(dt) {
   }
 }
 
+// 攻城戰自動目標選取優先級：最近敵對守軍/玩家 > 城門(若存在) > 守護塔(若存在) > 權杖(若軍團長/國王)
+function findSiegeAutoTarget() {
+  if (!castleSiegeActive) return null;
+  if (isPlayerSiegeDefender()) return null; // 守城方不打己方建築
+
+  const p = GS.player;
+  // 優先級1：最近的敵對守軍NPC（距離較近時優先攻擊）
+  const closeRange = 220;
+  let nearestDefender = null, nearestDefD = Infinity;
+  GS.monsters.forEach(m => {
+    if (m.hp <= 0) return;
+    if (!m.isSiegeDefender) return;
+    const d = Math.hypot(m.x - p.x, m.y - p.y);
+    if (d < closeRange && d < nearestDefD) { nearestDefD = d; nearestDefender = m; }
+  });
+  if (nearestDefender) return nearestDefender;
+
+  // 優先級2：城門（如果還在）
+  if (castleSiegeGate && castleSiegeGate.hp > 0) {
+    return castleSiegeGate;
+  }
+
+  // 優先級3：守護塔（如果還在，城門已破）
+  if (castleSiegeTowers && castleSiegeTowers.length > 0) {
+    const tower = castleSiegeTowers.find(t => t.hp > 0);
+    if (tower) return tower;
+  }
+
+  // 優先級4：權杖（只有軍團長/國王才自動走向權杖）
+  if (castleSiegeScepter && castleSiegePhase === 'scepter') {
+    const myLegion = GS.legionId ? AI_GUILDS.find(g => g.id === GS.legionId) : null;
+    const isLeader = myLegion && GS.guild && GS.guild.role === 'leader';
+    const isKing = GS.nation && getNationKingInfo(GS.nation)?.name === GS.player.name;
+    if (isLeader || isKing) {
+      return castleSiegeScepter;
+    }
+  }
+
+  return null;
+}
+
 function findNearestMonster() {
   const p = GS.player;
   let best = null, bestD = Infinity;
+  const playerIsDef = castleSiegeActive && isPlayerSiegeDefender();
   GS.monsters.forEach(m => {
     if (m.hp <= 0) return;
+    // 攻城戰：守城方不自動選取己方建築/守軍為目標
+    if (castleSiegeActive && playerIsDef) {
+      if (m.isSiegeStructure) return; // 跳過城門/守護塔/權杖
+      if (m.isSiegeDefender) return;  // 跳過己方守軍
+    }
     const d = Math.hypot(m.x - p.x, m.y - p.y);
     if (d < bestD) { bestD = d; best = m; }
   });
+  if (castleSiegeActive && best) {
+    console.log('[AutoCombat] 自動選取目標=' + best.name + ' 類型=' + (best.type || best.isSiegeDefender ? '守衛' : '怪物') + ' 玩家陣營=' + (playerIsDef ? '守城方' : '攻城方'));
+  }
   return best;
 }
 
@@ -8548,16 +12876,28 @@ function manualCombat(dt) {
   if (!target) return;
 
   const cls = CLASSES[p.classId];
-  const range = cls.atkType === 'ranged' ? 120 : 40;
-  const tDist = Math.hypot(target.x - p.x, target.y - p.y);
+  const isSiegeTarget = target && target.isSiegeStructure;
+  const baseRange = cls.atkType === 'ranged' ? 120 : 40;
+  const range = isSiegeTarget ? (cls.atkType === 'ranged' ? 350 : 150) : baseRange;
 
+  const tDist = Math.hypot(target.x - p.x, target.y - p.y);
   if (tDist > range + 10) {
-    // 走过去
+    // 走过去（攻城建築：走到城門南側，不嘗試穿過城牆）
     const tdx = target.x - p.x;
     const tdy = target.y - p.y;
     const ratio = (tDist - range + 5) / tDist;
-    p.targetX = p.x + tdx * ratio;
-    p.targetY = p.y + tdy * ratio;
+    let tx = p.x + tdx * ratio;
+    let ty = p.y + tdy * ratio;
+    // 攻城城門：玩家站在 y=1150 攻擊（城門前方）
+    if (target.type === 'gate') {
+      ty = Math.max(ty, 1150);
+    }
+    // 守護塔：玩家站在 y=620 攻擊（塔下方）
+    if (target.type === 'tower') {
+      ty = Math.min(ty, 620);
+    }
+    p.targetX = tx;
+    p.targetY = ty;
     if (p.state !== 'attacking' && p.state !== 'casting') p.state = 'walking';
     p.facing = target.x >= p.x ? 'right' : 'left';
   } else {
@@ -8572,10 +12912,10 @@ function manualCombat(dt) {
       if (isAITarget) {
         dealDamageToAIPlayer(target, calcPlayerDamage(), 'normal');
       } else {
-        dealDamage(target, calcPlayerDamage(), 'normal');
+        doPlayerNormalAttack(target, false);
       }
       spawnEffect(atkType, target.x, target.y - 28, { direction: p.facing, classColor: atkColor });
-      if (window.AudioSystem) AudioSystem.sfxNormalAttack(p.classId);
+      // 普攻音效在命中时播放（doPlayerNormalAttack内部播放）
       p.attackCooldown = cls.atkInterval || 1.0;
       p.state = 'attacking';
       setTimeout(() => {
@@ -8591,7 +12931,7 @@ function autoCombat(dt) {
   if (p.state === 'attacking' || p.state === 'casting') return;
 
   const cls = CLASSES[p.classId];
-  const range = cls.atkType === 'ranged' ? 120 : 40;
+  const baseRange = cls.atkType === 'ranged' ? 120 : 40;
 
   // 先嘗試攻擊已鎖定的 AI 目標（PvP）
   let target = null;
@@ -8613,12 +12953,14 @@ function autoCombat(dt) {
     }
   }
 
-  // 沒有 PvP 目標 → 找怪物
+  // 沒有 PvP 目標 → 找怪物/攻城建築
   if (!target) {
-    if (!GS.targetMonsterUid || !GS.monsters.find(m => m.uid === GS.targetMonsterUid && m.hp > 0)) {
-      const n = findNearestMonster();
-      if (n) GS.targetMonsterUid = n.uid;
-      else {
+    const needNewTarget = !GS.targetMonsterUid || !GS.monsters.find(m => m.uid === GS.targetMonsterUid && m.hp > 0);
+    if (needNewTarget) {
+      const n = findSiegeAutoTarget() || findNearestMonster();
+      if (n) {
+        GS.targetMonsterUid = n.uid;
+      } else {
         // 沒有目標就在附近隨機走動
         p.state = 'walking';
         p.wanderTimer = (p.wanderTimer || 3) - dt;
@@ -8632,7 +12974,19 @@ function autoCombat(dt) {
     }
     target = GS.monsters.find(m => m.uid === GS.targetMonsterUid && m.hp > 0);
     if (!target) return;
+    // 攻城戰：守城方不能攻擊己方建築與守軍
+    if (castleSiegeActive && isPlayerSiegeDefender()) {
+      if (target.isSiegeStructure || target.isSiegeDefender) {
+        GS.targetMonsterUid = null;
+        console.log('[AutoCombat] 守城方取消攻擊己方單位：' + target.name);
+        return;
+      }
+    }
   }
+
+  // 攻城建築目標擴大攻擊距離
+  const isSiegeTarget = target && target.isSiegeStructure;
+  const range = isSiegeTarget ? (cls.atkType === 'ranged' ? 350 : 150) : baseRange;
 
   const tDist = Math.hypot(target.x - p.x, target.y - p.y);
   if (tDist > range + 10) {
@@ -8640,8 +12994,23 @@ function autoCombat(dt) {
     const tdx = target.x - p.x;
     const tdy = target.y - p.y;
     const ratio = (tDist - range + 5) / tDist;
-    p.targetX = p.x + tdx * ratio;
-    p.targetY = p.y + tdy * ratio;
+    let tx = p.x + tdx * ratio;
+    let ty = p.y + tdy * ratio;
+    // 攻城城門：玩家站在 y=1150 攻擊（城門前方）
+    if (target.type === 'gate') {
+      ty = Math.max(ty, 1150);
+    }
+    // 守護塔：玩家站在 y=620 攻擊（塔下方）
+    if (target.type === 'tower') {
+      ty = Math.min(ty, 620);
+    }
+    // 權杖：直接走到權杖下方拾取位置
+    if (target.type === 'scepter') {
+      tx = SIEGE_SCEPTER_POS.x;
+      ty = SIEGE_SCEPTER_PICKUP_Y;
+    }
+    p.targetX = tx;
+    p.targetY = ty;
     p.state = 'walking';
   } else {
     // 在射程內
@@ -8724,6 +13093,13 @@ function doPlayerNormalAttack(target, isAITarget) {
   const isCrit = Math.random() < (getTotalCrit() || 0) / 100;
   let dmg = Math.max(1, Math.floor(atkVal * (1 - dr) * (0.9 + Math.random() * 0.2)));
   if (isCrit) dmg = Math.floor(dmg * (1.5 + (getTotalCritDmg() || 50) / 100));
+  // 變身 PVP 傷害加成（僅對 AI 玩家目標生效）
+  if (isAITarget) {
+    const tfInfo = TRANSFORM_POOL.find(t => t.id === p.transformId);
+    if (tfInfo?.stats?.pvpDmgPct) dmg = Math.floor(dmg * (1 + tfInfo.stats.pvpDmgPct / 100));
+  }
+
+  const targetDir = target.x > p.x ? 'right' : 'left';
 
   if (isAITarget) {
     target.hp = Math.max(0, target.hp - dmg);
@@ -8731,14 +13107,26 @@ function doPlayerNormalAttack(target, isAITarget) {
     target.hitTimer = 0.2;
     if (target.el) {
       target.el.classList.add('hit');
+      triggerHitFlash(target.el, isCrit, targetDir);
       setTimeout(() => { if (target.el) target.el.classList.remove('hit'); }, 150);
       const hpBar = target.el.querySelector('.unit-hp-fill');
       if (hpBar) hpBar.style.width = (target.hp / target.hpMax * 100) + '%';
+    }
+    // 暴擊特效強化
+    if (isCrit) enhancedCritEffect(target.x, target.y);
+    // 命中音效
+    if (window.AudioSystem) {
+      AudioSystem.ensureRunning();
+      AudioSystem.sfxNormalAttack(p.classId);
+      if (isCrit) AudioSystem.sfxCrit();
     }
     // 被動反擊：目標若是AI且未鎖定玩家，開始反擊
     if (Math.random() < 0.8) target.targetUid = 'player';
     addLog('damage-dealt', `【${target.name}】受到你的攻擊，造成 ${dmg} 傷害${isCrit ? '（暴擊）' : ''}`);
     if (target.hp <= 0) {
+      // 擊殺靈魂消散
+      spawnSoulDissolve(target.x, target.y);
+      if (target.el) triggerDeathFade(target.el, target.x, target.y);
       // PVP擊殺AI：僅給予極少量經驗，不掉落金幣/道具/裝備
       const exp = Math.min(10, Math.max(5, target.level));
       GS.player.exp += exp;
@@ -8747,24 +13135,47 @@ function doPlayerNormalAttack(target, isAITarget) {
     }
   } else {
     target.hp = Math.max(0, target.hp - dmg);
+    if (target.type === 'gate') console.log('Gate hit! HP:', target.hp, '/', target.hpMax);
+    if (target.type === 'tower') console.log('Tower hit! HP:', target.hp, '/', target.hpMax);
     showDamage(target.x, target.y - 50, dmg, isCrit ? 'crit' : 'normal');
+    // ===== 多人連線：廣播攻擊怪物 =====
+    if (window.MultiplayerClient && MultiplayerClient.connected) {
+      try { MultiplayerClient.attackMonster(target.uid, 'basic_attack'); } catch (e) { /* ignore */ }
+    }
     target.aggroed = true;
-    const mEl = worldLayer.querySelector(`[data-id="${target.uid}"]`);
-    if (mEl) mEl.querySelector('.unit-hp-fill').style.width = (target.hp / target.hpMax * 100) + '%';
+    const mEl = npcLayer.querySelector(`[data-id="${target.uid}"]`) || worldLayer.querySelector(`[data-id="${target.uid}"]`);
+    if (mEl) {
+      mEl.querySelector('.unit-hp-fill').style.width = (target.hp / target.hpMax * 100) + '%';
+      triggerHitFlash(mEl, isCrit, targetDir);
+    }
+    // 暴擊特效強化
+    if (isCrit) enhancedCritEffect(target.x, target.y);
+    // 命中音效（普攻音效在傷害實際發生時播放）
+    if (window.AudioSystem) {
+      AudioSystem.ensureRunning();
+      AudioSystem.sfxNormalAttack(p.classId);
+      if (isCrit) AudioSystem.sfxCrit();
+    }
     addLog('damage-dealt', `【${target.name}】受到你的攻擊，造成 ${dmg} 傷害${isCrit ? '（暴擊）' : ''}`);
     if (target.hp <= 0) {
+      // 擊殺靈魂消散 + 死亡漸隱
+      if (mEl) triggerDeathFade(mEl, target.x, target.y);
+      else spawnSoulDissolve(target.x, target.y);
       const expGain = Math.floor(target.level * 5 + 10);
       const goldGain = Math.floor(target.level * 3 + 5);
-      GS.player.exp += expGain;
-      GS.resources.gold += goldGain;
+      const petBonus = getPetBonus();
+      const finalExp = Math.floor(expGain * (1 + petBonus.expPct / 100));
+      const finalGold = Math.floor(goldGain * (1 + petBonus.goldPct / 100));
+      GS.player.exp += finalExp;
+      GS.resources.gold += finalGold;
       p.kills = (p.kills || 0) + 1;
-      addLog('kill', `擊敗【${target.name}】，獲得 ${expGain} 經驗，${goldGain} 金幣`);
+      addLog('kill', `擊敗【${target.name}】，獲得 ${finalExp} 經驗，${finalGold} 金幣`);
       onMonsterDead(target);
     }
   }
 
   // 屏幕輕微震動
-  shakeScreen(0.3, 2);
+  shakeScreen(isCrit ? 0.8 : 0.3, isCrit ? 0.25 : 0.15);
   // 普攻特效（揮砍／射擊／施法）
   playNormalAttackEffect(p, target);
 
@@ -8774,121 +13185,32 @@ function doPlayerNormalAttack(target, isAITarget) {
   }, 300);
 }
 
-// 普攻視覺特效
+// 普攻視覺特效（強化版：按職業區分刀光／拖尾／法術彈）
 function playNormalAttackEffect(p, target) {
-  if (!el.effectLayer) return;
+  if (!effectLayer && !el.effectLayer) return;
+  const layer = effectLayer || el.effectLayer;
   const cls = CLASSES[p.classId];
-  const effect = document.createElement('div');
-  effect.style.position = 'absolute';
-  effect.style.left = (target.x - 25) + 'px';
-  effect.style.top = (target.y - 35) + 'px';
-  effect.style.width = '50px';
-  effect.style.height = '50px';
-  effect.style.pointerEvents = 'none';
-  effect.style.zIndex = '50';
+  const direction = target.x > p.x ? 'right' : 'left';
+
+  // 攻擊時角色發光
+  const playerEl = worldLayer.querySelector('.world-unit.hero');
+  triggerAttackGlow(playerEl);
+
   if (cls.atkType === 'ranged') {
-    // 射擊光線：從玩家到目標
-    const line = document.createElement('div');
-    const dx = target.x - p.x, dy = target.y - p.y;
-    const len = Math.hypot(dx, dy);
-    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-    line.style.position = 'absolute';
-    line.style.left = p.x + 'px';
-    line.style.top = (p.y - 28) + 'px';
-    line.style.width = len + 'px';
-    line.style.height = '2px';
-    line.style.background = 'linear-gradient(90deg, transparent, #ffe080, #fff8d0, #ffe080, transparent)';
-    line.style.transformOrigin = 'left center';
-    line.style.transform = `rotate(${angle}deg)`;
-    line.style.boxShadow = '0 0 6px rgba(255,220,120,0.8)';
-    line.style.animation = 'arrowLineFx 0.25s ease-out forwards';
-    line.style.pointerEvents = 'none';
-    line.style.zIndex = '49';
-    el.effectLayer.appendChild(line);
-    setTimeout(() => line.remove(), 300);
-    effect.style.background = 'radial-gradient(circle, #fff0a0 0%, #ff9040 40%, transparent 70%)';
-    effect.style.borderRadius = '50%';
-    effect.style.animation = 'rangedHit 0.3s ease-out forwards';
-    effect.style.boxShadow = '0 0 12px rgba(255,200,80,0.9)';
+    // 弓手：箭矢拖尾 + 濺射粒子
+    enhancedArrowTrail(p.x, p.y, target.x, target.y);
   } else if (cls.atkType === 'magic') {
-    effect.style.background = 'radial-gradient(circle, #a0d0ff 0%, #4080ff 40%, transparent 70%)';
-    effect.style.borderRadius = '50%';
-    effect.style.animation = 'magicHit 0.35s ease-out forwards';
-    effect.style.boxShadow = '0 0 14px rgba(100,160,255,0.9)';
+    // 法師/術士：法術彈旋轉粒子 + 元素爆炸
+    const effect = cls.baseStats?.int > 12 ? 'lightning' : 'fire';
+    enhancedMagicOrb(p.x, p.y, target.x, target.y, effect);
   } else {
-    // 近戰揮砍：弧形閃光 + 粒子
-    effect.innerHTML = `<svg viewBox="0 0 50 50" style="width:100%;height:100%">
-      <path d="M5 42 Q 25 5 45 42" stroke="#fff8d0" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <path d="M10 40 Q 25 10 40 40" stroke="#ffd060" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.7"/>
-    </svg>`;
-    effect.style.animation = 'slashHit 0.28s ease-out forwards';
-    effect.style.filter = 'drop-shadow(0 0 6px rgba(255,240,160,0.9))';
-  }
-  el.effectLayer.appendChild(effect);
-  setTimeout(() => effect.remove(), 400);
-  // 命中火花粒子
-  spawnHitSparks(target.x, target.y - 30, cls.sprite?.slashColor || '#fff0a0');
-}
-
-// 命中火花粒子
-function spawnHitSparks(x, y, color) {
-  if (!el.effectLayer) return;
-  const count = 6;
-  for (let i = 0; i < count; i++) {
-    const spark = document.createElement('div');
-    const angle = (Math.PI * 2 / count) * i + Math.random() * 0.5;
-    const dist = 8 + Math.random() * 18;
-    const size = 3 + Math.random() * 4;
-    const dx = Math.cos(angle) * dist;
-    const dy = Math.sin(angle) * dist - 5;
-    spark.style.cssText = `
-      position: absolute;
-      left: ${x - size / 2}px;
-      top: ${y - size / 2}px;
-      width: ${size}px;
-      height: ${size}px;
-      border-radius: 50%;
-      background: radial-gradient(circle, #fff 0%, ${color} 40%, transparent 70%);
-      box-shadow: 0 0 ${size * 2}px ${color};
-      pointer-events: none;
-      z-index: 55;
-      --dx: ${dx}px;
-      --dy: ${dy}px;
-      animation: sparkBurst 0.45s ease-out forwards;
-    `;
-    el.effectLayer.appendChild(spark);
-    setTimeout(() => spark.remove(), 500);
-  }
-}
-
-// 命中火花粒子
-function spawnHitSparks(x, y, color) {
-  if (!el.effectLayer) return;
-  const count = 6;
-  for (let i = 0; i < count; i++) {
-    const spark = document.createElement('div');
-    const angle = (Math.PI * 2 / count) * i + Math.random() * 0.5;
-    const dist = 8 + Math.random() * 18;
-    const size = 3 + Math.random() * 4;
-    const dx = Math.cos(angle) * dist;
-    const dy = Math.sin(angle) * dist - 5;
-    spark.style.cssText = `
-      position: absolute;
-      left: ${x - size / 2}px;
-      top: ${y - size / 2}px;
-      width: ${size}px;
-      height: ${size}px;
-      border-radius: 50%;
-      background: radial-gradient(circle, #fff 0%, ${color} 40%, transparent 70%);
-      box-shadow: 0 0 ${size * 2}px ${color};
-      pointer-events: none;
-      z-index: 55;
-      --dx: ${dx}px;
-      --dy: ${dy}px;
-      animation: sparkBurst 0.45s ease-out forwards;
-    `;
-    el.effectLayer.appendChild(spark);
-    setTimeout(() => spark.remove(), 500);
+    // 近戰：斜向刀光斬擊 + 衝擊波粒子
+    let classColor = '#ffffff';
+    if (p.classId === 'warrior') classColor = '#ff8060';
+    else if (p.classId === 'paladin') classColor = '#ffd060';
+    else if (p.classId === 'assassin') classColor = '#c060ff';
+    else if (p.classId === 'knight') classColor = '#80a0ff';
+    enhancedMeleeSlash(target.x, target.y, direction, classColor);
   }
 }
 
@@ -9022,6 +13344,8 @@ function castSkill(idx) {
   const flashColor = skillElemMap[elemType] || 'rgba(255,200,120,0.25)';
   if (skill.id !== 'normal') {
     spawnScreenFlash(flashColor, 0.25);
+    // 技能施放：角色周圍環繞粒子（詠唱效果）
+    spawnCastParticles(p.x, p.y, elemType);
     // 技能震動（AOE 更強）
     if (skill.type === 'aoe') shakeScreen(0.6, 0.2);
     else if (skill.cd >= 12) shakeScreen(0.3, 0.15);
@@ -9078,7 +13402,8 @@ function castSkill(idx) {
   if (!target) return;
 
   const dist = Math.hypot(target.x - p.x, target.y - p.y);
-  const castRange = skill.range || (cls.atkType === 'ranged' ? 140 : 40);
+  const baseCastRange = skill.range || (cls.atkType === 'ranged' ? 140 : 40);
+  const castRange = target?.isSiegeStructure ? (cls.atkType === 'ranged' ? 350 : 150) : baseCastRange;
   if (dist > castRange) return;
 
   p.state = 'attacking';
@@ -9109,6 +13434,8 @@ function castSkill(idx) {
         }, i * 120);
       }
     } else if (skill.type === 'aoe') {
+      // AOE：地面魔法陣擴散效果
+      spawnAoeMagicCircle(target.x, target.y, skill.effect, (skill.aoeRadius || 50) * 2);
       // AOE：对範圍内所有怪物和敌方 AI 玩家造成傷害
       GS.monsters.forEach(m => {
         if (m.hp <= 0) return;
@@ -9181,28 +13508,63 @@ function dealSkillDamage(target, baseDmg, effectType, skill, isAoe) {
   }
   if (p.buffs.warcry) atkBuffPct += 30; // 舊格式兼容
   if (atkBuffPct > 0) dmg = Math.floor(dmg * (1 + atkBuffPct / 100));
+  // 變身技能傷害加成
+  const tfInfo = TRANSFORM_POOL.find(t => t.id === p.transformId);
+  if (tfInfo?.stats?.skillDmgPct) dmg = Math.floor(dmg * (1 + tfInfo.stats.skillDmgPct / 100));
+  // 寵物技能傷害加成
+  const pet = GS.ownedPets?.find(pt => pt.id === GS.equippedPetId);
+  if (pet) {
+    const petData = PET_POOL.find(pp => pp.id === pet.id) || pet;
+    if (petData?.stats?.skillDmgPct) dmg = Math.floor(dmg * (1 + petData.stats.skillDmgPct / 100));
+  }
+  // 英雄火屬性傷害加成（僅對火/火球/隕石等火系技能生效）
+  const fireEffects = ['fire', 'fireball', 'meteor', 'inferno'];
+  const hero = GS.ownedHeroes?.find(h => h.id === GS.equippedHeroId);
+  if (hero) {
+    const heroData = SUMMON_POOL.find(s => s.id === hero.id) || hero;
+    if (heroData?.stats?.fireDmgPct && fireEffects.includes(effectType)) {
+      dmg = Math.floor(dmg * (1 + heroData.stats.fireDmgPct / 100));
+    }
+  }
 
   target.hp = Math.max(0, target.hp - dmg);
   target.hitTimer = 0.3;
   if (target.behavior === 'passive') target.aggroed = true;
   showDamage(target.x, target.y - 50, dmg, isCrit ? 'crit' : 'normal');
 
+  // 命中音效（技能音效在傷害實際發生時播放，而非施法開始時）
+  if (window.AudioSystem && skill) {
+    AudioSystem.ensureRunning();
+    AudioSystem.sfxSkill(skill.id, p.classId);
+  }
+
+  // 目標受擊反饋
+  const tEl = worldLayer.querySelector(`[data-id="${target.uid}"]`);
+  if (tEl) triggerHitFlash(tEl, isCrit, target.x > GS.player.x ? 'right' : 'left');
+
   // 特效：根据技能类型 + 是否暴擊
   if (isCrit) {
     // 暴擊：大爆炸 + 屏幕震动 + 元素特效 + 紅色屏幕閃光
     spawnEffect(effectType, target.x, target.y - 28, { particles: 12, shake: 10 });
-    spawnEffect('fire', target.x, target.y - 28, { isCrit: true, shakeIntensity: 8 });
+    spawnElementBurst(target.x, target.y - 28, effectType, 18);
+    enhancedCritEffect(target.x, target.y);
     spawnScreenFlash('rgba(255,60,40,0.4)', 0.2);
     shakeScreen(0.8, 0.2);
     if (window.AudioSystem) AudioSystem.sfxCrit();
   } else {
     spawnEffect(effectType, target.x, target.y - 28);
+    spawnElementBurst(target.x, target.y - 28, effectType, 10);
   }
 
   addLog('skill-damage',
     `你施放了【${skill?.name || '攻擊'}】對【${target.name}】造成 ${dmg} 傷害${isCrit ? '（暴擊）' : ''}`);
   updateMonsterRender(target);
-  if (target.hp <= 0) onMonsterDead(target);
+  if (target.hp <= 0) {
+    // 擊殺靈魂消散 + 死亡漸隱
+    if (tEl) triggerDeathFade(tEl, target.x, target.y);
+    else spawnSoulDissolve(target.x, target.y);
+    onMonsterDead(target);
+  }
   return dmg;
 }
 
@@ -9277,18 +13639,8 @@ function updateSkillBar() {
     } else if (slot.type === 'item') {
       const item = GS.inventory.find(it => it.id === slot.itemId);
       const count = item ? item.count : 0;
-      // 根據道具類型顯示圖資
-      let itemIconKey = 'default';
-      if (item) {
-        if (item.id && item.id.includes('hp')) itemIconKey = 'potion_hp';
-        else if (item.id && (item.id.includes('mp') || item.id.includes('mana'))) itemIconKey = 'potion_mp';
-        else if (item.itemType === 'consumable') itemIconKey = 'potion_hp';
-        else if (item.itemType === 'scroll') itemIconKey = 'scroll';
-        else if (item.itemType === 'gem') itemIconKey = 'gem';
-        else if (item.icon === '💎') itemIconKey = 'gem';
-      }
-      const iconUrl = ITEM_ICON_MAP[itemIconKey] || ITEM_ICON_MAP.default;
-      iconDiv.innerHTML = `<img src="${iconUrl}" style="width:26px;height:26px;object-fit:cover;display:block;border-radius:4px"/>`;
+      const iconUrl = item ? getItemIconUrl(item) : ITEM_ICON_MAP.default;
+      iconDiv.innerHTML = `<img src="${iconUrl}" style="width:26px;height:26px;object-fit:contain;display:block;border-radius:4px"/>`;
       iconDiv.style.cssText = 'background:rgba(20,14,8,0.9);display:flex;align-items:center;justify-content:center;border-radius:4px;';
       btn.title = item ? `${item.name} ×${count}（點擊使用）` : '道具已用完';
       btn.classList.toggle('empty', count <= 0);
@@ -9365,16 +13717,8 @@ function updateSiegeSkillBar() {
     } else if (slot.type === 'item') {
       const item = GS.inventory.find(it => it.id === slot.itemId);
       const count = item ? item.count : 0;
-      let itemIconKey = 'default';
-      if (item) {
-        if (item.id && item.id.includes('hp')) itemIconKey = 'potion_hp';
-        else if (item.id && (item.id.includes('mp') || item.id.includes('mana'))) itemIconKey = 'potion_mp';
-        else if (item.itemType === 'consumable') itemIconKey = 'potion_hp';
-        else if (item.icon === '💎') itemIconKey = 'gem';
-      }
-      const svg = SKILL_SVG_MAP[itemIconKey] || SKILL_SVG_MAP.default;
-      const color = item?.rarity === 'rare' ? '#60a0ff' : (item?.rarity === 'epic' ? '#c080ff' : '#ff6060');
-      iconDiv.innerHTML = `<div style="width:22px;height:22px;color:${color}">${svg}</div>`;
+      const iconUrl = item ? getItemIconUrl(item) : ITEM_ICON_MAP.default;
+      iconDiv.innerHTML = `<img src="${iconUrl}" style="width:24px;height:24px;object-fit:contain;display:block;border-radius:4px"/>`;
       iconDiv.style.cssText = 'background:rgba(30,20,10,0.9);display:flex;align-items:center;justify-content:center;border-radius:4px;';
       btn.title = item ? `${item.name} ×${count}` : '道具已用完';
       btn.classList.toggle('empty', count <= 0);
@@ -9401,6 +13745,12 @@ function updateMonsters(dt) {
     }
     if (m.hitTimer > 0) m.hitTimer -= dt;
     m.attackCooldown = Math.max(0, m.attackCooldown - dt);
+
+    // 守城軍除錯：首次更新輸出狀態
+    if (m.isSiegeDefender && m._firstUpdate) {
+      m._firstUpdate = false;
+      console.log('[DefenderAI] 守衛啟動:', m.name, '行為:', m.behavior, '位置:', Math.round(m.x), Math.round(m.y));
+    }
 
     // DOT 傷害
     if (m.dots.length > 0) {
@@ -9546,6 +13896,43 @@ function updateMonsters(dt) {
     const canSee = m.aggroed || (dist < 200 && m.behavior === 'aggro');
     const canAttack = m.behavior === 'aggro' || m.aggroed;
 
+    // 攻城戰：守城NPC只攻擊攻城方玩家，不攻擊守城方
+    if (m.isSiegeDefender && castleSiegeActive) {
+      const playerIsDefender = isPlayerSiegeDefender();
+      if (m._debugFactionLogged !== true) {
+        m._debugFactionLogged = true;
+        console.log('[DefenderFaction] 守衛=' + m.name + ' uid=' + m.uid + ' 目標玩家陣營=' + (playerIsDefender ? '守城方' : '攻城方') + ' 是否可攻擊=' + (!playerIsDefender));
+      }
+      if (playerIsDefender) {
+        // 守城方玩家：守軍不攻擊，閒置或巡邏
+        m.wanderTimer -= dt;
+        if (m.wanderTimer <= 0) {
+          const r = m.wanderRadius || 100;
+          m.targetX = m.homeX + (Math.random() - 0.5) * r * 2;
+          m.targetY = m.homeY + (Math.random() - 0.5) * r * 1.5;
+          m.targetX = Math.max(30, Math.min(worldW - 30, m.targetX));
+          m.targetY = Math.max(70, Math.min(worldH - 40, m.targetY));
+          m.wanderTimer = 3 + Math.random() * 3;
+        }
+        const tdx = m.targetX - m.x;
+        const tdy = m.targetY - m.y;
+        const tdist = Math.hypot(tdx, tdy);
+        if (tdist > 2) {
+          const speed = 20;
+          m.x += (tdx / tdist) * speed * dt;
+          m.y += (tdy / tdist) * speed * dt;
+          m.state = 'walking';
+          m.facing = tdx >= 0 ? 'right' : 'left';
+        } else {
+          m.state = 'idle';
+        }
+        if (m.el && !m.el._offscreen) {
+          updateMonsterRender(m);
+        }
+        return; // 跳過後續攻擊邏輯
+      }
+    }
+
     if (canSee && canAttack && p.hp > 0) {
       if (dist > 36) {
         const speed = m.behavior === 'aggro' ? 42 : 35;
@@ -9624,17 +14011,42 @@ function damagePlayer(dmg, sourceName) {
   p.hp = Math.max(0, p.hp - dmg);
   p.hitTimer = 0.3;
   showDamage(p.x, p.y - 58, dmg, 'normal');
+  // 玩家受擊閃紅反饋
+  const playerEl = worldLayer.querySelector('.world-unit.hero');
+  if (playerEl) {
+    playerEl.classList.remove('hit-flash-red');
+    void playerEl.offsetWidth;
+    playerEl.classList.add('hit-flash-red');
+    setTimeout(() => playerEl.classList.remove('hit-flash-red'), 120);
+  }
   if (sourceName) addLog('damage-taken', `受到【${sourceName}】的攻擊，造成 ${dmg} 傷害`);
   if (p.hp <= 0) {
     p.lastKiller = sourceName || '未知';
     p.state = 'dead';
-    addLog('system', '你倒下了...');
-    setTimeout(() => {
-      p.hp = getTotalHpMax();
-      p.mp = getTotalMpMax();
-      loadMap('village');
-      addLog('system', '你已復活，回到了村莊。');
-    }, 2000);
+    // 攻城戰中死亡：5秒後在城外復活點復活，攻城戰繼續
+    if (castleSiegeActive && GS.currentMap && getAllMaps()[GS.currentMap]?.type === 'castle_siege') {
+      addLog('siege', `你被【${p.lastKiller}】擊倒了，將在5秒後於城外復活`);
+      addLog('system', `你被【${p.lastKiller}】擊倒了！`);
+      setTimeout(() => {
+        if (!castleSiegeActive) return; // 攻城戰已結束就不用復活
+        p.hp = getTotalHpMax();
+        p.mp = getTotalMpMax();
+        p.state = 'idle';
+        p.x = SIEGE_PLAYER_SPAWN.x;
+        p.y = SIEGE_PLAYER_SPAWN.y;
+        addLog('system', '你在城外復活了');
+        updateUI();
+        renderPlayer();
+      }, 5000);
+    } else {
+      addLog('system', '你倒下了...');
+      setTimeout(() => {
+        p.hp = getTotalHpMax();
+        p.mp = getTotalMpMax();
+        loadMap('village');
+        addLog('system', '你已復活，回到了村莊。');
+      }, 2000);
+    }
   }
   updateUI();
   renderPlayer();
@@ -9645,6 +14057,13 @@ function doMonsterAttack(m) {
 }
 
 function onMonsterDead(m) {
+  // 死亡特效：靈魂消散（防重複：加標記）
+  if (!m._deathFxDone) {
+    m._deathFxDone = true;
+    const mEl = worldLayer.querySelector(`[data-id="${m.uid}"]`);
+    if (mEl) triggerDeathFade(mEl, m.x, m.y);
+    else spawnSoulDissolve(m.x, m.y);
+  }
   if (window.AudioSystem) AudioSystem.sfxKillMonster();
   // 攻城战建筑/守卫死亡特殊处理：无經驗、无金幣、推进攻城战阶段
   if (m.isSiegeStructure || m.isSiegeDefender) {
@@ -9656,11 +14075,15 @@ function onMonsterDead(m) {
     setTimeout(() => {
       const el = worldLayer.querySelector(`[data-id="${m.uid}"]`);
       if (el) el.remove();
+      unitAnimState.delete(m.uid);
     }, 800);
     return;
   }
   GS.killCount++;
   el.killCount.textContent = GS.killCount;
+  // 怪物擊殺不計入 pvpKills，單獨計 monsterKills（向後兼容kills字段）
+  if (!GS.player.monsterKills) GS.player.monsterKills = 0;
+  GS.player.monsterKills++;
   if (!GS.player.kills) GS.player.kills = 0;
   GS.player.kills++;
   // 記入怪物圖鑑
@@ -9672,7 +14095,9 @@ function onMonsterDead(m) {
   // Boss 死亡处理
   if (m.isBoss) {
     const map = getAllMaps()[GS.currentMap];
-    if (map?.boss) onBossKilled(GS.currentMap, map.boss);
+    const slot = m.bossSlot || 'boss';
+    const bossData = slot === 'worldBoss' ? map?.worldBoss : map?.boss;
+    if (bossData) onBossKilled(GS.currentMap, bossData, slot);
   }
   const exp = m.level * 10;
   let gold = m.level * 5 + Math.floor(Math.random() * 5);
@@ -9716,6 +14141,10 @@ function onMonsterDead(m) {
     // 刷新變身解锁状态（等級提升可能解锁新變身）
 
   }
+  // ===== 多人連線：升級後同步 =====
+  if (window.MultiplayerClient && MultiplayerClient.connected) {
+    try { syncMultiplayerProfile(); } catch (e) { /* ignore */ }
+  }
 
   if (m.type === 'goblin') {
     GS.quest.current = Math.min(GS.quest.total, GS.quest.current + 1);
@@ -9725,6 +14154,7 @@ function onMonsterDead(m) {
   setTimeout(() => {
     const el = worldLayer.querySelector(`[data-id="${m.uid}"]`);
     if (el) el.remove();
+    unitAnimState.delete(m.uid);
     GS.monsters = GS.monsters.filter(x => x.uid !== m.uid);
     if (GS.targetMonsterUid === m.uid) GS.targetMonsterUid = null;
     if (allMaps[GS.currentMap]?.type === 'battle' && GS.monsters.length < 6) {
@@ -9801,19 +14231,19 @@ function rollConsumableDrop(level, isBoss) {
     pool.push({ item: { id: 'mp2', name: '中型魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.mp2, effect: { mp: 100 } }, w: 20 });
     pool.push({ item: { id: 'move1', name: '行走加速藥水', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.move1, effect: { moveSpeed: 20, duration: 3600 } }, w: 8 });
     pool.push({ item: { id: 'town_scroll', name: '回城卷軸', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.teleport, effect: { teleport: 'town' } }, w: 5 });
-    pool.push({ item: { id: 'enhance_stone_low', name: '初級強化石', type: 'consumable', itemType: 'material', rarity: 'white', icon: ITEM_ICONS.enhance_stone, effect: { enhance: [1,3] } }, w: 12 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 12 });
   } else if (level < 45) {
     pool.push({ item: { id: 'hp4', name: '體力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.hp3, effect: { hp: 500 } }, w: 25 });
     pool.push({ item: { id: 'mp4', name: '高級魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.mp3, effect: { mp: 200 } }, w: 15 });
     pool.push({ item: { id: 'spd1', name: '加速藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.spd1, effect: { atkSpeed: 20, moveSpeed: 20, duration: 1800 } }, w: 10 });
-    pool.push({ item: { id: 'enhance_stone_mid', name: '中級強化石', type: 'consumable', itemType: 'material', rarity: 'green', icon: ITEM_ICONS.bless_stone, effect: { enhance: [4,6] } }, w: 15 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 15 });
     pool.push({ item: { id: 'mgem', name: '魔法寶石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.mgem, effect: {} }, w: 10 });
     pool.push({ item: { id: 'town_scroll', name: '回城卷軸', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.teleport, effect: { teleport: 'town' } }, w: 5 });
   } else {
     pool.push({ item: { id: 'hp4', name: '體力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.hp3, effect: { hp: 500 } }, w: 20 });
     pool.push({ item: { id: 'mp4', name: '高級魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.mp3, effect: { mp: 200 } }, w: 12 });
     pool.push({ item: { id: 'spd2', name: '狂暴藥水', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.spd2, effect: { atkSpeed: 30, moveSpeed: 30, duration: 1800 } }, w: 8 });
-    pool.push({ item: { id: 'enhance_stone_high', name: '高級強化石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.crystal_frag, effect: { enhance: [7,9] } }, w: 12 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 12 });
     pool.push({ item: { id: 'revive_scroll', name: '復活卷軸', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.revive_scroll, effect: { revive: true } }, w: 5 });
      pool.push({ item: { id: 'tscroll', name: '變身卷軸', type: 'consumable', itemType: 'consumable', rarity: 'purple', icon: ITEM_ICONS.tscroll, effect: {} }, w: 3 });
      pool.push({ item: { id: 'mgem', name: '魔法寶石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.mgem, effect: {} }, w: 10 });
@@ -9821,7 +14251,7 @@ function rollConsumableDrop(level, isBoss) {
    }
   // Boss加碼：增加高級道具權重
   if (isBoss) {
-    pool.push({ item: { id: 'enhance_stone_high', name: '高級強化石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.crystal_frag, effect: { enhance: [7,9] } }, w: 20 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 20 });
     pool.push({ item: { id: 'revive_scroll', name: '復活卷軸', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.revive_scroll, effect: { revive: true } }, w: 15 });
   }
   if (pool.length === 0) return null;
@@ -9898,6 +14328,22 @@ const BAG_EXPAND_COST = 100; // 擴充卷軸鑽石價
 
 function addToInventory(item, count) {
   count = count || 1;
+  // 裝備類不可堆疊，每一件獨立佔用一個格子
+  if (item.itemType === 'equipment') {
+    const maxSlots = GS.bagMaxSlots || BAG_BASE_SLOTS;
+    for (let i = 0; i < count; i++) {
+      if (GS.inventory.length >= maxSlots) {
+        addLog('system', `背包已滿，無法獲得【${item.name}】！`);
+        showFloatingText('背包已滿!', '#ff6040');
+        if (i === 0) return false;
+        break;
+      }
+      GS.inventory.push({ ...item, count: 1, enhanceLevel: item.enhanceLevel || 0, uid: 'eq_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) });
+    }
+    recordEquipToCodex(item.id);
+    updateUI();
+    return true;
+  }
   const existing = GS.inventory.find(i => i.id === item.id && i.itemType === item.itemType);
   if (existing) {
     existing.count = (existing.count || 1) + count;
@@ -9953,14 +14399,18 @@ function equipItem(item) {
     }
   }
   const oldEquip = GS.equipment[slot];
+  // 先把舊裝備放回背包（若有）
   if (oldEquip) {
     addToInventory(oldEquip, 1);
   }
-  GS.equipment[slot] = { ...item };
-  removeFromInventory(item.id, item.itemType, 1);
+  // 直接使用原物件（保留 uid 與 enhanceLevel），不拷貝
+  GS.equipment[slot] = item;
+  // 從背包按 uid 移除該件裝備
+  const idx = GS.inventory.findIndex(i => i.uid === item.uid);
+  if (idx >= 0) GS.inventory.splice(idx, 1);
   recordEquipToCodex(item.id);
   // 重新計算戰力
-  calcCP();
+  recalcPlayerStats();
   updateUI();
 }
 
@@ -9970,7 +14420,7 @@ function unequipItem(slot) {
   if (!item) return;
   addToInventory(item, 1);
   delete GS.equipment[slot];
-  calcCP();
+  recalcPlayerStats();
   updateUI();
 }
 
@@ -9985,25 +14435,46 @@ function openEquipDetailModal(slotId) {
   if (eq) {
     const rc = RARITY_CONFIG[eq.rarity] || RARITY_CONFIG.white;
     const statNameMap = { atk: '攻擊力', def: '防禦力', hpMax: '最大生命', crit: '暴擊率', critDmg: '暴擊傷害' };
+    const enhanceLv = eq.enhanceLevel || 0;
+    const enhanceBonusPct = enhanceLv * 5; // 每級 +5%
+    const isWeapon = isWeaponSlot(slotId);
+    const isArmor = isArmorSlot(slotId);
     const statRows = Object.entries(eq.baseStats || {}).map(([k, v]) => {
+      let display = `+${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
+      if (enhanceLv > 0 && ((k === 'atk' && isWeapon) || (k === 'def' && isArmor))) {
+        const bonusVal = Math.floor(v * enhanceLv * 0.05);
+        display = `<span style="color:var(--parchment-light)">+${v}</span> <span style="color:#80ff90;font-weight:700">(+${bonusVal})</span>`;
+      }
       return `<div class="equip-detail-stat-row">
         <span class="stat-name">${statNameMap[k] || k}</span>
-        <span class="stat-value">+${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}</span>
+        <span class="stat-value">${display}${k === 'crit' || k === 'critDmg' ? '%' : ''}</span>
       </div>`;
     }).join('');
+    const canEnhance = getEnhanceRateTable(eq);
     body.innerHTML = `
       <div class="equip-detail-header">
-        <div class="equip-detail-icon" style="display:flex;align-items:center;justify-content:center"><img src="${eq.icon || slotIconUrl(slotId)}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;display:block"/></div>
+        <div class="equip-detail-icon" style="display:flex;align-items:center;justify-content:center;position:relative">
+          <img src="${eq.icon || slotIconUrl(slotId)}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>
+          ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:-4px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:10px;font-weight:800;padding:0 6px;border-radius:6px;line-height:16px">+${enhanceLv}</div>` : ''}
+        </div>
         <div class="equip-detail-name">${eq.name}</div>
         <div class="equip-detail-rarity" style="color:${rc.color};text-shadow:0 0 8px ${rc.color}">${rc.name}</div>
+        ${enhanceLv > 0 ? `<div style="font-size:10px;color:#80ff90;margin-top:2px">強化等級 +${enhanceLv}（${enhanceBonusPct}% 加成）</div>` : ''}
       </div>
       <div class="equip-detail-stats">${statRows || '<div style="text-align:center;color:#888;font-size:11px">無附加屬性</div>'}</div>
       <div class="equip-detail-desc">${eq.desc || '一件品質精良的裝備。'}</div>
       <div class="equip-detail-actions">
+        ${canEnhance ? `<button class="equip-detail-btn" id="equip-detail-enhance" style="background:linear-gradient(180deg,#d4a020,#8a6520);border-color:#f0c040;color:#fff">強化</button>` : ''}
         <button class="equip-detail-btn secondary" id="equip-detail-unequip">卸下</button>
         <button class="equip-detail-btn" id="equip-detail-close-btn">確定</button>
       </div>
     `;
+    const enhanceBtn = body.querySelector('#equip-detail-enhance');
+    if (enhanceBtn) enhanceBtn.addEventListener('click', () => {
+      closeEquipDetailModal();
+      openSidePage('hero');
+      openEnhancePage(eq);
+    });
     body.querySelector('#equip-detail-unequip').addEventListener('click', () => {
       unequipItem(slotId);
       closeEquipDetailModal();
@@ -10065,8 +14536,8 @@ function respawnMonster() {
   if (GS.monsters.length >= 8) return;
   const spec = map.monsters[Math.floor(Math.random() * map.monsters.length)];
   const level = spec.level + Math.floor(Math.random() * 3);
-  const isAggro = Math.random() > 0.6;
-  createMonster(spec.type, spec.name, level, isAggro ? 'aggro' : 'passive');
+  const behavior = spec.behavior || (Math.random() > 0.6 ? 'aggro' : 'passive');
+  createMonster(spec.type, spec.name, level, behavior);
 }
 
 // ==================== 召喚更新 ====================
@@ -10117,15 +14588,24 @@ function updateSummons(dt) {
         }
       }
     } else {
-      const dx = GS.player.x - s.x + 25;
-      const dy = GS.player.y - s.y + 10;
+      // 跟隨：英雄在玩家右後方，距離拉遠避免重疊
+      // 多個召喚物時按索引分散排列
+      const sIdx = GS.summons.indexOf(s);
+      const offsetX = 75 + (sIdx % 2) * 30;   // 第1個75px、第2個105px
+      const offsetY = 20 + Math.floor(sIdx / 2) * 35; // 排兩列，每列上下錯開
+      const targetX = GS.player.x + offsetX;
+      const targetY = GS.player.y + offsetY;
+      const dx = targetX - s.x;
+      const dy = targetY - s.y;
       const dist = Math.hypot(dx, dy);
-      if (dist > 45) {
-        const speed = 70;
-        s.x += (dx / dist) * speed * dt;
-        s.y += (dy / dist) * speed * dt;
+      if (dist > 55) {
+        // 跟隨有延遲感，不緊貼玩家
+        const followFactor = Math.min(1, dist / 130);
+        const speed = 80;
+        s.x += (dx / dist) * speed * followFactor * dt;
+        s.y += (dy / dist) * speed * followFactor * dt;
         s.state = 'walking';
-        s.facing = dx >= 0 ? 'right' : 'left';
+        s.facing = GS.player.facing || 'right';
       } else {
         s.state = 'idle';
       }
@@ -10134,8 +14614,49 @@ function updateSummons(dt) {
   });
 }
 
+// 守護寵物跟隨玩家
+function updatePetFollower(dt) {
+  const p = GS.petFollower;
+  if (!p || !worldLayer) return;
+  // 守護在玩家左後方，距離拉遠避免重疊
+  const targetX = GS.player.x - 70;
+  const targetY = GS.player.y + 15;
+  const dx = targetX - p.x;
+  const dy = targetY - p.y;
+  const dist = Math.hypot(dx, dy);
+  const speed = 95;
+  if (dist > 50) {
+    // 跟隨有延遲感：距離越遠速度越快，近距離慢一點
+    const followFactor = Math.min(1, dist / 120);
+    p.x += (dx / dist) * speed * followFactor * dt;
+    p.y += (dy / dist) * speed * followFactor * dt;
+    p.state = 'walking';
+    p.facing = GS.player.facing || (dx >= 0 ? 'right' : 'left');
+  } else {
+    p.state = 'idle';
+  }
+  const elDiv = worldLayer.querySelector(`[data-id="${p.id}"]`);
+  if (elDiv) {
+    positionUnit(elDiv, p.x, p.y, 'pet');
+    elDiv.classList.toggle('face-left', p.facing === 'left');
+    const newState = p.state === 'walking' ? 'walking' : 'idle';
+    if (p._renderState !== newState) {
+      elDiv.classList.remove('idle','walking');
+      elDiv.classList.add(newState);
+      p._renderState = newState;
+    }
+    if (p.multiFrame) {
+      updateUnitAnimFrame(p.id, newState, elDiv);
+    }
+  }
+}
+
 // ==================== 飘字 / 特效 ====================
 function showDamage(x, y, value, type) {
+  // 上限保護：超過 MAX_DAMAGE_NUMS 時移除最舊的
+  if (damageLayer && damageLayer.childElementCount >= MAX_DAMAGE_NUMS) {
+    damageLayer.firstChild.remove();
+  }
   const el = document.createElement('div');
   el.className = 'damage-number dmg-num ' + (type || 'normal');
   el.textContent = value;
@@ -10143,7 +14664,10 @@ function showDamage(x, y, value, type) {
   el.style.left = x + 'px';
   el.style.top = (y - 10) + 'px';
   el.style.transform = 'translateX(-50%)';
-  damageLayer.appendChild(el);
+  // 傷害數字和特效總是放在全局 damageLayer / effectLayer
+  const dmgLayer = damageLayer;
+  const fxLayer = effectLayer;
+  dmgLayer.appendChild(el);
   // 普通命中也有轻微震屏+闪光
   if (type === 'normal' && el.scene) {
     el.scene.classList.remove('hit-shake');
@@ -10155,7 +14679,7 @@ function showDamage(x, y, value, type) {
     flash.className = 'hit-flash';
     flash.style.left = (x - 20) + 'px';
     flash.style.top = (y - 20) + 'px';
-    effectLayer.appendChild(flash);
+    fxLayer.appendChild(flash);
     setTimeout(() => flash.remove(), 200);
   }
   setTimeout(() => el.remove(), type === 'crit' ? 1400 : 900);
@@ -10228,11 +14752,11 @@ function spawnEffect(type, x, y, opts = {}) {
       el.scene.appendChild(flash);
       setTimeout(() => flash.remove(), 300);
     }
-    // 暴擊附加28个粒子（更大範圍）
-    for (let i = 0; i < 28; i++) {
+    // 暴擊附加12个粒子（優化：從28減少到12，仍保留爆炸感但降低 DOM 壓力）
+    for (let i = 0; i < 12; i++) {
       const p = document.createElement('div');
       p.className = 'fx-particle';
-      const angle = (i / 28) * Math.PI * 2 + Math.random() * 0.4;
+      const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.4;
       const dist = 70 + Math.random() * 60;
       const tx = Math.cos(angle) * dist;
       const ty = Math.sin(angle) * dist - 10;
@@ -10273,11 +14797,11 @@ function spawnEffect(type, x, y, opts = {}) {
     ripple.style.boxShadow = `0 0 12px ${classColor}`;
     effectLayer.appendChild(ripple);
     setTimeout(() => ripple.remove(), 350);
-    // 命中閃光粒子（8 個）
-    for (let i = 0; i < 8; i++) {
+    // 命中閃光粒子（5 個，優化數量）
+    for (let i = 0; i < 5; i++) {
       const p = document.createElement('div');
       p.className = 'fx-particle';
-      const angle = (i / 8) * Math.PI * 2 + Math.random() * 0.5;
+      const angle = (i / 5) * Math.PI * 2 + Math.random() * 0.5;
       const dist = 20 + Math.random() * 25;
       p.style.left = x + 'px';
       p.style.top = y + 'px';
@@ -10302,8 +14826,8 @@ function spawnEffect(type, x, y, opts = {}) {
     elDiv.style.top = y + 'px';
     effectLayer.appendChild(elDiv);
     setTimeout(() => elDiv.remove(), 900);
-    // 上升粒子
-    for (let i = 0; i < 6; i++) {
+    // 上升粒子（4個，優化數量）
+    for (let i = 0; i < 4; i++) {
       const p = document.createElement('div');
       p.className = 'fx-particle';
       p.style.left = (x + (Math.random() - 0.5) * 30) + 'px';
@@ -10354,8 +14878,8 @@ function spawnEffect(type, x, y, opts = {}) {
 
   effectLayer.appendChild(wrapper);
 
-  // 中层：粒子（从中心向四周扩散，数量更多更密）
-  const pCount = opts.particles || 14;
+  // 中层：粒子（从中心向四周扩散，優化數量）
+  const pCount = opts.particles || 8;
   for (let i = 0; i < pCount; i++) {
     const p = document.createElement('div');
     p.className = 'fx-particle';
@@ -10412,6 +14936,356 @@ function screenShake(intensity = 6) {
     el.scene.style.animation = '';
     style.remove();
   }, 400);
+}
+
+// ==================== 強化戰鬥特效系統 ====================
+// 特效總量上限（含粒子、刀光、衝擊波等全部特效 DOM）
+const MAX_EFFECTS = 25;
+// 傷害飄字上限
+const MAX_DAMAGE_NUMS = 20;
+let _effectCount = 0;
+
+// 強制收屍：確保 effectLayer / damageLayer 不會超過上限
+function _enforceEffectCap() {
+  if (effectLayer) {
+    while (effectLayer.childElementCount > MAX_EFFECTS) {
+      effectLayer.firstChild.remove();
+    }
+  }
+  if (damageLayer) {
+    while (damageLayer.childElementCount > MAX_DAMAGE_NUMS) {
+      damageLayer.firstChild.remove();
+    }
+  }
+}
+// 定期收屍（避免 setTimeout 延遲移除造成瞬間峰值）
+let _effectGcTimer = null;
+function _scheduleEffectGc() {
+  if (_effectGcTimer) return;
+  _effectGcTimer = setTimeout(function() {
+    _effectGcTimer = null;
+    _enforceEffectCap();
+  }, 100);
+}
+
+function _registerEffect(el) {
+  _effectCount++;
+  // 超出上限時淘汰最舊的
+  if (effectLayer && effectLayer.childElementCount >= MAX_EFFECTS) {
+    effectLayer.firstChild.remove();
+    _effectCount = Math.max(0, _effectCount - 1);
+  }
+  const origRemove = el.remove.bind(el);
+  el.remove = function() {
+    _effectCount = Math.max(0, _effectCount - 1);
+    origRemove();
+  };
+  _scheduleEffectGc();
+  return el;
+}
+
+// 元素顏色映射
+const ELEMENT_COLORS = {
+  fire:     { main: '#ff4400', light: '#ffcc40', dark: '#cc1100' },
+  ice:      { main: '#44aaff', light: '#aaddff', dark: '#0066cc' },
+  lightning:{ main: '#ffdd00', light: '#ffffaa', dark: '#cc9900' },
+  dark:     { main: '#8844cc', light: '#cc88ff', dark: '#441166' },
+  holy:     { main: '#ffdd66', light: '#fff5cc', dark: '#cc9922' },
+  poison:   { main: '#44cc44', light: '#aaffaa', dark: '#116611' },
+  physical: { main: '#ffffff', light: '#fff8d0', dark: '#ffcc60' },
+  arrow:    { main: '#ffcc40', light: '#fff5d0', dark: '#ff9920' },
+};
+
+function getElementColor(effectType) {
+  const map = {
+    fire: 'fire', fireball: 'fire', meteor: 'fire', fire_blast: 'fire', inferno: 'fire',
+    ice: 'ice', frost: 'ice', ice_lance: 'ice', frost_nova: 'ice', blizzard: 'ice',
+    lightning: 'lightning', thunder: 'lightning', chain_lightning: 'lightning', thunder_strike: 'lightning',
+    holy: 'holy', judgment: 'holy', holy_smite: 'holy', divine_shield: 'holy', healing_light: 'holy',
+    dark: 'dark', shadow: 'dark', shadow_bolt: 'dark', life_drain: 'dark', dark_curse: 'dark',
+    poison: 'poison', toxic: 'poison', deadly_poison: 'poison', poison_arrow: 'poison', poison_blade: 'poison',
+    heal: 'holy', healing: 'holy',
+    slash: 'physical', physical: 'physical', melee: 'physical',
+    arrow: 'arrow', ranged: 'arrow',
+  };
+  return ELEMENT_COLORS[map[effectType] || 'physical'] || ELEMENT_COLORS.physical;
+}
+
+// 強化普攻特效：近戰刀光 + 衝擊波
+function enhancedMeleeSlash(x, y, direction, classColor) {
+  if (!effectLayer) return;
+  const arc = document.createElement('div');
+  arc.className = 'slash-arc-enhanced';
+  arc.style.left = x + 'px';
+  arc.style.top = (y - 25) + 'px';
+  if (direction === 'left') arc.style.transform = 'translate(-50%, -50%) scaleX(-1)';
+  if (classColor) arc.style.setProperty('--slash-color', classColor);
+  effectLayer.appendChild(_registerEffect(arc));
+  setTimeout(() => arc.remove(), 300);
+
+  // 衝擊波
+  const shock = document.createElement('div');
+  shock.className = 'impact-shock';
+  shock.style.left = x + 'px';
+  shock.style.top = (y - 25) + 'px';
+  effectLayer.appendChild(_registerEffect(shock));
+  setTimeout(() => shock.remove(), 400);
+
+  // 濺射粒子
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement('div');
+    p.className = 'arrow-splash-p';
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI;
+    const dist = 15 + Math.random() * 20;
+    p.style.left = x + 'px';
+    p.style.top = (y - 25) + 'px';
+    p.style.setProperty('--sx', Math.cos(angle) * dist + 'px');
+    p.style.setProperty('--sy', Math.sin(angle) * dist + 'px');
+    p.style.background = `radial-gradient(circle, #fff, ${classColor || '#ffd060'})`;
+    p.style.boxShadow = `0 0 6px ${classColor || '#ffd060'}`;
+    effectLayer.appendChild(_registerEffect(p));
+    setTimeout(() => p.remove(), 350);
+  }
+}
+
+// 強化遠程箭矢拖尾
+function enhancedArrowTrail(fromX, fromY, toX, toY) {
+  if (!effectLayer) return;
+  const dx = toX - fromX, dy = toY - fromY - 28;
+  const len = Math.hypot(dx, dy);
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const trail = document.createElement('div');
+  trail.className = 'arrow-trail';
+  trail.style.left = fromX + 'px';
+  trail.style.top = (fromY - 28) + 'px';
+  trail.style.width = len + 'px';
+  trail.style.transform = `rotate(${angle}deg)`;
+  effectLayer.appendChild(_registerEffect(trail));
+  setTimeout(() => trail.remove(), 250);
+
+  // 命中濺射
+  setTimeout(() => {
+    for (let i = 0; i < 10; i++) {
+      const p = document.createElement('div');
+      p.className = 'arrow-splash-p';
+      const a = (i / 10) * Math.PI * 2 + Math.random() * 0.4;
+      const d = 15 + Math.random() * 25;
+      p.style.left = toX + 'px';
+      p.style.top = (toY - 30) + 'px';
+      p.style.setProperty('--sx', Math.cos(a) * d + 'px');
+      p.style.setProperty('--sy', Math.sin(a) * d + 'px');
+      effectLayer.appendChild(_registerEffect(p));
+      setTimeout(() => p.remove(), 350);
+    }
+  }, 180);
+}
+
+// 強化法術彈：旋轉軌跡 + 爆炸
+function enhancedMagicOrb(fromX, fromY, toX, toY, effectType) {
+  if (!effectLayer) return;
+  const c = getElementColor(effectType);
+  // 飛行軌跡粒子
+  const steps = 6;
+  for (let i = 0; i < steps; i++) {
+    setTimeout(() => {
+      const t = i / steps;
+      const px = fromX + (toX - fromX) * t;
+      const py = fromY - 28 + (toY - fromY - 28) * t;
+      const p = document.createElement('div');
+      p.className = 'magic-orb';
+      p.style.left = px + 'px';
+      p.style.top = py + 'px';
+      p.style.setProperty('--orb-color', c.main);
+      p.style.transform = 'translate(-50%, -50%)';
+      effectLayer.appendChild(_registerEffect(p));
+      setTimeout(() => p.remove(), 200);
+    }, i * 40);
+  }
+  // 命中爆炸
+  setTimeout(() => {
+    spawnElementBurst(toX, toY - 28, effectType, 14);
+  }, steps * 40);
+}
+
+// 元素爆炸粒子
+function spawnElementBurst(x, y, effectType, count) {
+  if (!effectLayer) return;
+  const c = getElementColor(effectType);
+  count = count || 12;
+  // 衝擊波圈
+  const ring = document.createElement('div');
+  ring.className = 'crit-shock-ring';
+  ring.style.left = x + 'px';
+  ring.style.top = y + 'px';
+  ring.style.borderColor = c.light;
+  ring.style.boxShadow = `0 0 20px ${c.main}, inset 0 0 15px ${c.light}`;
+  effectLayer.appendChild(_registerEffect(ring));
+  setTimeout(() => ring.remove(), 500);
+  // 粒子
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'elem-burst-p';
+    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+    const dist = 30 + Math.random() * 40;
+    p.style.left = x + 'px';
+    p.style.top = y + 'px';
+    p.style.background = `radial-gradient(circle, ${c.light}, ${c.main})`;
+    p.style.boxShadow = `0 0 8px ${c.main}`;
+    p.style.setProperty('--bx', Math.cos(angle) * dist + 'px');
+    p.style.setProperty('--by', Math.sin(angle) * dist + 'px');
+    effectLayer.appendChild(_registerEffect(p));
+    setTimeout(() => p.remove(), 600);
+  }
+}
+
+// 技能施放：角色周圍環繞粒子（詠唱效果）
+function spawnCastParticles(x, y, effectType) {
+  if (!effectLayer) return;
+  const c = getElementColor(effectType);
+  const count = 10;
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'cast-orbital-p';
+    const angle = (i / count) * 360;
+    p.style.left = x + 'px';
+    p.style.top = (y - 30) + 'px';
+    p.style.setProperty('--angle', angle + 'deg');
+    p.style.setProperty('--cast-color', c.main);
+    p.style.background = `radial-gradient(circle, #fff, ${c.main})`;
+    p.style.boxShadow = `0 0 8px ${c.main}`;
+    p.style.animationDelay = (i * 0.04) + 's';
+    effectLayer.appendChild(_registerEffect(p));
+    setTimeout(() => p.remove(), 800);
+  }
+}
+
+// 範圍技能地面魔法陣
+function spawnAoeMagicCircle(x, y, effectType, size) {
+  if (!effectLayer) return;
+  const c = getElementColor(effectType);
+  size = size || 100;
+  const circle = document.createElement('div');
+  circle.className = 'aoe-magic-circle';
+  circle.style.left = x + 'px';
+  circle.style.top = y + 'px';
+  circle.style.width = size + 'px';
+  circle.style.height = size + 'px';
+  circle.style.setProperty('--aoe-color', c.main);
+  circle.style.borderColor = c.main;
+  circle.style.boxShadow = `0 0 25px ${c.main}, inset 0 0 20px ${c.main}`;
+  effectLayer.appendChild(_registerEffect(circle));
+  setTimeout(() => circle.remove(), 600);
+}
+
+// 暴擊特效：金色衝擊波 + 放大數字（已在 showDamage 處理，這裡補充震屏+粒子）
+function enhancedCritEffect(x, y) {
+  if (!effectLayer) return;
+  // 雙重衝擊波
+  for (let i = 0; i < 2; i++) {
+    setTimeout(() => {
+      const ring = document.createElement('div');
+      ring.className = 'crit-shock-ring';
+      ring.style.left = x + 'px';
+      ring.style.top = (y - 30) + 'px';
+      effectLayer.appendChild(_registerEffect(ring));
+      setTimeout(() => ring.remove(), 500);
+    }, i * 80);
+  }
+  // 大量金色粒子
+  for (let i = 0; i < 20; i++) {
+    const p = document.createElement('div');
+    p.className = 'elem-burst-p';
+    const angle = (i / 20) * Math.PI * 2 + Math.random() * 0.4;
+    const dist = 40 + Math.random() * 50;
+    p.style.left = x + 'px';
+    p.style.top = (y - 30) + 'px';
+    p.style.background = 'radial-gradient(circle, #fff, #ffcc40)';
+    p.style.boxShadow = '0 0 10px #ffcc40';
+    p.style.setProperty('--bx', Math.cos(angle) * dist + 'px');
+    p.style.setProperty('--by', Math.sin(angle) * dist + 'px');
+    effectLayer.appendChild(_registerEffect(p));
+    setTimeout(() => p.remove(), 600);
+  }
+  // 螢幕震動（暴擊加強版）
+  shakeScreen(1.2, 0.25);
+}
+
+// 擊殺靈魂消散粒子
+function spawnSoulDissolve(x, y) {
+  if (!effectLayer) return;
+  for (let i = 0; i < 12; i++) {
+    const p = document.createElement('div');
+    p.className = 'soul-dissolve-p';
+    p.style.left = (x + (Math.random() - 0.5) * 30) + 'px';
+    p.style.top = (y - 20) + 'px';
+    const sway1 = (Math.random() - 0.5) * 30 + 'px';
+    const sway2 = (Math.random() - 0.5) * 20 + 'px';
+    p.style.setProperty('--sway', sway1);
+    p.style.setProperty('--sway2', sway2);
+    p.style.animationDelay = (i * 0.06) + 's';
+    effectLayer.appendChild(_registerEffect(p));
+    setTimeout(() => p.remove(), 1200);
+  }
+}
+
+// 受擊閃紅反饋
+function triggerHitFlash(unitEl, isCrit, direction) {
+  if (!unitEl) return;
+  unitEl.classList.remove('hit-flash-red', 'hit-knockback');
+  void unitEl.offsetWidth;
+  unitEl.classList.add('hit-flash-red');
+  setTimeout(() => unitEl.classList.remove('hit-flash-red'), 120);
+  if (isCrit) {
+    unitEl.style.setProperty('--kb', (direction === 'left' ? '' : '-') + '8px');
+    unitEl.classList.add('hit-knockback');
+    setTimeout(() => unitEl.classList.remove('hit-knockback'), 200);
+  }
+}
+
+// 死亡漸隱 + 靈魂消散
+function triggerDeathFade(unitEl, x, y) {
+  if (!unitEl) {
+    spawnSoulDissolve(x, y);
+    return;
+  }
+  unitEl.classList.add('dead-fade');
+  spawnSoulDissolve(x, y);
+}
+
+// 攻擊時角色發光
+function triggerAttackGlow(unitEl) {
+  if (!unitEl) return;
+  unitEl.classList.remove('attack-glow');
+  void unitEl.offsetWidth;
+  unitEl.classList.add('attack-glow');
+  setTimeout(() => unitEl.classList.remove('attack-glow'), 150);
+}
+
+// 自動戰鬥目標準星
+let _currentTargetUid = null;
+function updateAutoTargetCrosshair() {
+  if (!worldLayer) return;
+  // 移除舊準星
+  const old = worldLayer.querySelector('.auto-target-crosshair');
+  if (old) old.remove();
+  if (!GS.autoMode) return;
+  // 找當前目標
+  let targetUid = null;
+  if (GS.targetAiUid) { targetUid = GS.targetAiUid; }
+  else if (GS.targetMonsterUid) { targetUid = GS.targetMonsterUid; }
+  if (!targetUid || targetUid === _currentTargetUid) {
+    _currentTargetUid = targetUid;
+    if (!targetUid) return;
+  }
+  _currentTargetUid = targetUid;
+  const unitEl = worldLayer.querySelector(`[data-id="${targetUid}"]`);
+  if (!unitEl) return;
+  const info = unitEl.querySelector('.unit-info');
+  if (!info) return;
+  const ch = document.createElement('div');
+  ch.className = 'auto-target-crosshair';
+  ch.innerHTML = '<div class="ch-ring"></div>';
+  info.appendChild(ch);
 }
 
 function validatePlayerName(name) {
@@ -10472,12 +15346,35 @@ function getGuildSkillBonus() {
   };
 }
 
+function getPetBonus() {
+  const pet = GS.ownedPets?.find(p => p.id === GS.equippedPetId);
+  if (!pet) return { expPct: 0, goldPct: 0, mpRegenPct: 0, skillDmgPct: 0, atkPct: 0, critDmgPct: 0 };
+  const petData = PET_POOL.find(pp => pp.id === pet.id) || pet;
+  const s = petData?.stats || {};
+  return {
+    expPct: Number(s.expPct) || 0,
+    goldPct: Number(s.goldPct) || 0,
+    mpRegenPct: Number(s.mpRegenPct) || 0,
+    skillDmgPct: Number(s.skillDmgPct) || 0,
+    atkPct: Number(s.atkPct) || 0,
+    critDmgPct: Number(s.critDmgPct) || 0,
+  };
+}
+
 function getTotalAtk() {
   let atk = Number(GS.player.atk) || 0;
   for (const slot in GS.equipment) {
     const eq = GS.equipment[slot];
     const s = eq?.baseStats || eq?.stats;
-    if (s?.atk) atk += Number(s.atk) || 0;
+    if (s?.atk) {
+      let bonus = Number(s.atk) || 0;
+      // 強化加成：每+1級 +5% 基礎攻擊（武器部位）
+      const el = eq.enhanceLevel || 0;
+      if (el > 0 && isWeaponSlot(slot)) {
+        bonus = bonus * (1 + el * 0.05);
+      }
+      atk += bonus;
+    }
   }
   const tfInfo = TRANSFORM_POOL.find(t => t.id === GS.player.transformId);
   if (tfInfo?.stats?.atk) atk += Number(tfInfo.stats.atk) || 0;
@@ -10490,6 +15387,10 @@ function getTotalAtk() {
     const bond = getHeroBondBonus();
     atk += Number(hero.stats.atk) * (bond.mult - 1) || 0;
   }
+  // 英雄百分比加成（在羁绊之后、其他加成之前叠乘）
+  if (hero?.stats?.atkPct) atk = atk * (1 + hero.stats.atkPct / 100);
+  // 寵物百分比加成
+  if (pet?.stats?.atkPct) atk = atk * (1 + pet.stats.atkPct / 100);
   atk += getGuildSkillBonus().atk;
   const cb = getCollectionBonus();
   atk += cb.atk || 0;
@@ -10498,6 +15399,8 @@ function getTotalAtk() {
   atk += ecb.atk || 0;
   const rb = getRankBonus();
   atk += rb.atk || 0;
+  // 變身全屬性加成
+  if (tfInfo?.stats?.allStatPct) atk = atk * (1 + tfInfo.stats.allStatPct / 100);
   if (isNaN(atk)) atk = 0;
   return atk;
 }
@@ -10506,7 +15409,15 @@ function getTotalDef() {
   for (const slot in GS.equipment) {
     const eq = GS.equipment[slot];
     const s = eq?.baseStats || eq?.stats;
-    if (s?.def) def += Number(s.def) || 0;
+    if (s?.def) {
+      let bonus = Number(s.def) || 0;
+      // 強化加成：每+1級 +5% 基礎防禦（防具部位）
+      const el = eq.enhanceLevel || 0;
+      if (el > 0 && isArmorSlot(slot)) {
+        bonus = bonus * (1 + el * 0.05);
+      }
+      def += bonus;
+    }
   }
   const tfInfo = TRANSFORM_POOL.find(t => t.id === GS.player.transformId);
   if (tfInfo?.stats?.def) def += Number(tfInfo.stats.def) || 0;
@@ -10519,6 +15430,8 @@ function getTotalDef() {
     const bond = getHeroBondBonus();
     def += Number(hero.stats.def) * (bond.mult - 1) || 0;
   }
+  // 英雄百分比加成
+  if (hero?.stats?.defPct) def = def * (1 + hero.stats.defPct / 100);
   def += getGuildSkillBonus().def;
   const cb = getCollectionBonus();
   def += cb.def || 0;
@@ -10527,6 +15440,8 @@ function getTotalDef() {
   def += ecb.def || 0;
   const rb = getRankBonus();
   def += rb.def || 0;
+  // 變身全屬性加成
+  if (tfInfo?.stats?.allStatPct) def = def * (1 + tfInfo.stats.allStatPct / 100);
   if (isNaN(def)) def = 0;
   return def;
 }
@@ -10548,6 +15463,8 @@ function getTotalHpMax() {
     const bond = getHeroBondBonus();
     hp += Number(hero.stats.hpMax) * (bond.mult - 1) || 0;
   }
+  // 英雄百分比加成
+  if (hero?.stats?.hpPct) hp = hp * (1 + hero.stats.hpPct / 100);
   hp += getGuildSkillBonus().hpMax;
   const cb = getCollectionBonus();
   hp += cb.hpMax || 0;
@@ -10555,6 +15472,8 @@ function getTotalHpMax() {
   hp += ecb.hpMax || 0;
   const rb = getRankBonus();
   hp += rb.hpMax || 0;
+  // 變身全屬性加成
+  if (tfInfo?.stats?.allStatPct) hp = hp * (1 + tfInfo.stats.allStatPct / 100);
   if (isNaN(hp)) hp = 100;
   return hp;
 }
@@ -10569,6 +15488,8 @@ function getTotalMpMax() {
   if (tfInfo?.stats?.mpMax) mp += Number(tfInfo.stats.mpMax) || 0;
   const ecb = getEquipComboBonus();
   mp += ecb.mpMax || 0;
+  // 變身全屬性加成
+  if (tfInfo?.stats?.allStatPct) mp = mp * (1 + tfInfo.stats.allStatPct / 100);
   if (isNaN(mp)) mp = 100;
   return mp;
 }
@@ -10590,6 +15511,8 @@ function getTotalCrit() {
     const bond = getHeroBondBonus();
     c += Number(hero.stats.crit) * (bond.mult - 1) || 0;
   }
+  // 英雄百分比/额外加成
+  if (hero?.stats?.critAdd) c += Number(hero.stats.critAdd) || 0;
   c += getGuildSkillBonus().crit;
   const cb = getCollectionBonus();
   c += cb.crit || 0;
@@ -10598,6 +15521,8 @@ function getTotalCrit() {
   c += ecb.crit || 0;
   const rb = getRankBonus();
   c += rb.crit || 0;
+  // 變身全屬性加成
+  if (tfInfo?.stats?.allStatPct) c = c * (1 + tfInfo.stats.allStatPct / 100);
   if (isNaN(c)) c = 0;
   return c;
 }
@@ -10620,11 +15545,15 @@ function getTotalCritDmg() {
     cd += Number(hero.stats.critDmg) * (bond.mult - 1) || 0;
   }
   cd += getGuildSkillBonus().critDmg;
+  // 寵物暴擊傷害百分比加成
+  if (pet?.stats?.critDmgPct) cd = cd * (1 + pet.stats.critDmgPct / 100);
   const cb = getCollectionBonus();
   cd += cb.critDmg || 0;
   if (cb.critDmgPct) cd = cd * (1 + cb.critDmgPct / 100);
   const ecb = getEquipComboBonus();
   cd += ecb.critDmg || 0;
+  // 變身全屬性加成
+  if (tfInfo?.stats?.allStatPct) cd = cd * (1 + tfInfo.stats.allStatPct / 100);
   if (isNaN(cd)) cd = 150;
   return cd;
 }
@@ -10645,6 +15574,14 @@ function calcCP() {
   const cd = getTotalCritDmg() || 150;
   const cp = Math.floor(atk * 10 + def * 5 + hp * 0.5 + crit * 8 + cd * 2);
   return isNaN(cp) ? 100 : cp;
+}
+
+// 重新計算玩家所有屬性並同步UI（裝備/強化變動後呼叫）
+function recalcPlayerStats() {
+  calcCP();
+  // 確保血條按當前上限比例顯示
+  if (GS.player.hp > getTotalHpMax()) GS.player.hp = getTotalHpMax();
+  if (GS.player.mp > getTotalMpMax()) GS.player.mp = getTotalMpMax();
 }
 
 // ==================== UI ====================
@@ -10677,8 +15614,9 @@ function updateSlotDisplay() {
       const rarity = hero.rarity || 'white';
       heroSlot.className = 'log-bar-slot hero-slot rarity-badge rarity-' + rarity;
       // 重新構建內容（保留標籤）
+      const heroSprite = hero.sprite || (hero.spriteKey ? SPRITE[hero.spriteKey] : null) || { idle: '⚔️', color: '#c0a060' };
       heroSlot.innerHTML = `
-        <div class="slot-filled">${spriteEmojiHTML(hero.sprite, 44)}</div>
+        <div class="slot-filled">${spriteEmojiHTML(heroSprite, 44)}</div>
         <div class="log-bar-slot-label">英雄</div>
       `;
     }
@@ -10720,7 +15658,7 @@ function escapeHTML(str) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
   })[s]);
 }
-const LOG_MAX_LINES = 100;
+const LOG_MAX_LINES = 50;
 const chatMessages = { battle: [], general: [], guild: [], nation: [] };
 let currentLogTab = 'battle';
 let logExpanded = false;
@@ -10766,6 +15704,10 @@ function sendChatMessage() {
   const ch = currentLogTab;
   addLog('chat', `【${GS.player.name}】：${txt}`, ch);
   input.value = '';
+  // ===== 多人連線：廣播聊天 =====
+  if (window.MultiplayerClient && MultiplayerClient.connected) {
+    try { MultiplayerClient.sendChat(txt, ch); } catch (e) { /* ignore */ }
+  }
   // AI 玩家根據內容回應
   if (GLOBAL_AI_POOL && GLOBAL_AI_POOL.length > 0 && Math.random() < 0.55) {
     setTimeout(() => {
@@ -10881,10 +15823,11 @@ function triggerAIChatOnEvent(eventType, data) {
 
 // 定期讓 AI 隨機發送聊天訊息
 let aiChatTimer = 0;
+const _aiLastMsg = new Map(); // uid -> {time, text}
 function tickAIChat(dt) {
   if (!GLOBAL_AI_POOL || GLOBAL_AI_POOL.length === 0) return;
   aiChatTimer += dt;
-  const interval = 40 + Math.random() * 50; // 40~90 秒一次，避免刷屏
+  const interval = 30 + Math.random() * 40; // 30~70 秒一次，避免刷屏
   if (aiChatTimer >= interval) {
     aiChatTimer = 0;
     const channels = ['general', 'general', 'general', 'guild', 'nation']; // general 频道更频繁
@@ -10896,7 +15839,7 @@ function tickAIChat(dt) {
     const mapType = MAPS[GS.currentMap]?.type || 'safe';
     const isSiege = !!GS.siegeActive;
     const nationFlag = getNationFlag(ai.nation);
-    // 多樣化消息池
+    // 多樣化消息池（顯著擴充，避免重複）
     const msgs = {
       general: {
         safe: [
@@ -10907,6 +15850,9 @@ function tickAIChat(dt) {
           '練功練到快睡著', '這遊戲真耐玩', '終於攢夠錢買新裝備了',
           '低價出售綠色武器', '收藍裝防具有的密', '尋找固定隊友',
           '新手求帶', '有人打過深淵副本嗎', 'PVP有人切磋嗎',
+          '今天風和日麗適合練功', '村莊廣場好多人啊', '剛剛強化+5成功了',
+          '有沒有人要一起下副本', '收購各種材料', '高價出售稀有裝備',
+          '有沒有法師一起組隊', '有戰士缺隊友嗎', '今天運氣好差強化失敗了',
         ],
         field: [
           '這邊怪好多小心', '剛剛差點死掉', '誰來幫個忙',
@@ -10914,6 +15860,8 @@ function tickAIChat(dt) {
           '有隊友嗎？單刷有點累', '小心精英怪很痛', '組隊效率高很多',
           '今天的運氣還行', '這地方挺危險的', '又升一級了！',
           '這裡Boss刷新了快來', '組個5人隊穩穩刷', '裝備耐久快沒了',
+          '這邊怪密度適合練級', '剛剛被怪圍攻差點掛了', '掉了個藍裝運氣不錯',
+          '終於找到這個稀有怪了', '這區的BOSS什麼時候刷新', '藥水喝光了得回城補',
         ],
         dungeon: [
           '副本裡好黑啊', '前面好像有BOSS', '跟緊別走丟',
@@ -10926,6 +15874,19 @@ function tickAIChat(dt) {
           '敵人來了準備戰鬥', '為了國家的榮譽', '支援東門！',
           '把他們趕出去', '勝利就在眼前', '不要退後！',
           '南門快撐不住了', '醫療兵在哪裡', '衝鋒！',
+          '城門破了快進去', '守護塔還在堅守', '小心敵方弓箭手',
+          '騎兵準備出擊', '敵軍後援來了', '這場一定要拿下',
+          '城主還在堅守', '為了軍團的榮耀！', '大家堅持住',
+        ],
+        combat: [
+          '可惡被偷襲了！', '幫忙！這怪太強了', '我快撐不住了',
+          '誰來救救我', '這Boss傷害好高', '我要回城了打不過',
+          '差點就打死了可惜', '終於把這精英怪解決了', '掉了好東西！',
+          '被包圍了快來支援', '這怪防好高打不動', '終於贏了太不容易',
+        ],
+        levelup: [
+          '升級了！感覺力量湧入身體', '終於達到目標等級', '又升一級繼續衝',
+          '今天升級運氣不錯', '感謝隊友一起升級', '這區練級效率真高',
         ],
       },
       guild: [
@@ -10934,6 +15895,8 @@ function tickAIChat(dt) {
         '今天軍團任務做了嗎', '記得領軍團獎勵', '我們軍團越來越強了',
         '新成員歡迎加入', '軍團倉庫有新貨', '一起衝軍團排名',
         '軍團招募活躍玩家', '軍團副本八點開打', '軍團長換人了？',
+        '軍團戰準備好了嗎', '軍團商店更新了', '軍團技能加什麼好',
+        '有人要加入我們軍團嗎', '軍團等級又升了',
       ],
       nation: [
         '我們國家越來越強了', '期待下一場攻城戰', '大家記得領國家獎勵',
@@ -10941,16 +15904,33 @@ function tickAIChat(dt) {
         '今晚攻城戰別遲到', '我們的國家技能很強', '團結一致！',
         '國家排名又上升了', '為國爭光', '一起守護家園',
         '招募新血加入國家軍團', '敵國又在挑釁了', '國家商店更新了',
+        '國家戰爭準備中', '大家記得繳稅啊', '國家領土又擴大了',
       ],
     };
     let pool;
     if (ch === 'general') {
-      const scene = isSiege ? 'siege' : (mapType === 'dungeon' ? 'dungeon' : mapType === 'field' ? 'field' : 'safe');
+      let scene;
+      if (isSiege) scene = 'siege';
+      else if (mapType === 'dungeon') scene = 'dungeon';
+      else if (mapType === 'battle') scene = Math.random() < 0.7 ? 'field' : 'combat';
+      else scene = 'safe';
+      // 有小概率播放升級感言
+      if (Math.random() < 0.1 && ai.level > 5) scene = 'levelup';
       pool = msgs.general[scene] || msgs.general.safe;
     } else {
       pool = msgs[ch] || msgs.general.safe;
     }
-    const msg = pool[Math.floor(Math.random() * pool.length)];
+    // 避免重複：過去5條內不出現相同訊息
+    let msg = pool[Math.floor(Math.random() * pool.length)];
+    const last = _aiLastMsg.get(ai.uid);
+    let tries = 0;
+    while (last && last.text === msg && pool.length > 1 && tries < 5) {
+      msg = pool[Math.floor(Math.random() * pool.length)];
+      tries++;
+    }
+    _aiLastMsg.set(ai.uid, { time: Date.now(), text: msg });
+    // 定期清理記憶
+    if (_aiLastMsg.size > 100) _aiLastMsg.clear();
     addLog('chat-ai', `${nationFlag}【${ai.name}】：${msg}`, ch);
   }
 }
@@ -11062,6 +16042,11 @@ const GACHA_COST_SINGLE = 120;
 const GACHA_COST_TEN = 1200;
 const GACHA_COST_BIG = 3600; // 30+5抽
 
+// 金幣抽卡（單抽，每日上限）
+const GACHA_GOLD_COST_SINGLE = 50000; // 英雄/守護：50,000 金幣 / 抽
+const GACHA_GOLD_COST_SINGLE_TRANSFORM = 30000; // 變身：30,000 金幣 / 抽
+const GACHA_GOLD_DAILY_MAX = 10; // 每日 10 抽（全抽卡共享）
+
 function rollRarity() {
   // 抽卡：史詩以上掉落率減半（紅/紫/金）
   const w = { white: 50, green: 30, blue: 14, purple: 0.9, red: 1.5, gold: 0.1 };
@@ -11072,6 +16057,51 @@ function rollRarity() {
     if (r <= 0) return rarity;
   }
   return 'white';
+}
+
+// 金幣抽：史詩以上機率降低 2.5 倍（紅/紫/金）
+// 白60% / 綠25% / 藍12% / 紅2.4% / 紫0.5% / 金0.1%
+function rollRarityGold() {
+  const w = { white: 60, green: 25, blue: 12, red: 2.4, purple: 0.5, gold: 0.1 };
+  const total = Object.values(w).reduce((a,b) => a+b, 0);
+  let r = Math.random() * total;
+  for (const [rarity, weight] of Object.entries(w)) {
+    r -= weight;
+    if (r <= 0) return rarity;
+  }
+  return 'white';
+}
+
+// 獲取今日金幣抽卡剩餘次數（每日 6:00 重置）
+function getGoldGachaDailyInfo() {
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  // 若在 6:00 前，算「昨天」的重置週期
+  const hour = now.getHours();
+  const resetHour = 6;
+  let cycleDate = todayKey;
+  if (hour < resetHour) {
+    const y = new Date(now.getTime() - 86400000);
+    cycleDate = y.toISOString().slice(0, 10);
+  }
+  if (!GS.goldGachaDaily) GS.goldGachaDaily = {};
+  if (GS.goldGachaDaily.date !== cycleDate) {
+    GS.goldGachaDaily.date = cycleDate;
+    GS.goldGachaDaily.used = 0;
+  }
+  const remaining = Math.max(0, GACHA_GOLD_DAILY_MAX - GS.goldGachaDaily.used);
+  // 計算下次重置時間
+  const nextReset = new Date(now);
+  if (hour >= resetHour) nextReset.setDate(nextReset.getDate() + 1);
+  nextReset.setHours(resetHour, 0, 0, 0);
+  return { used: GS.goldGachaDaily.used, remaining, max: GACHA_GOLD_DAILY_MAX, nextReset };
+}
+
+function consumeGoldGachaDaily() {
+  const info = getGoldGachaDailyInfo();
+  if (info.remaining <= 0) return false;
+  GS.goldGachaDaily.used = (GS.goldGachaDaily.used || 0) + 1;
+  return true;
 }
 
 function pickFromPool(pool, rarity) {
@@ -11126,19 +16156,34 @@ function announceGachaResults(results, label) {
 }
 
 function doGacha(pool, count, mode) {
-  // mode: 'single' | 'ten' | 'big' (30+5)
+  // mode: 'single' | 'ten' | 'big' (30+5) | 'goldSingle' (金幣單抽)
   if (window.AudioSystem) AudioSystem.sfxGacha();
-  let cost, actualCount, guaranteedMin;
-  if (mode === 'big') { cost = GACHA_COST_BIG; actualCount = 35; guaranteedMin = 2; /* blue */ }
+  let cost, actualCount, guaranteedMin, currency = 'gem';
+  const isGold = mode === 'goldSingle';
+  if (isGold) {
+    // 金幣單抽
+    const dailyInfo = getGoldGachaDailyInfo();
+    if (dailyInfo.remaining <= 0) { alert('今日金幣抽卡次數已用完，明日6:00重置'); return []; }
+    if (GS.resources.gold < GACHA_GOLD_COST_SINGLE) { alert('金幣不足！'); return []; }
+    cost = GACHA_GOLD_COST_SINGLE;
+    actualCount = 1;
+    guaranteedMin = 0;
+    currency = 'gold';
+    consumeGoldGachaDaily();
+  } else if (mode === 'big') { cost = GACHA_COST_BIG; actualCount = 35; guaranteedMin = 2; /* blue */ }
   else if (mode === 'ten') { cost = GACHA_COST_TEN; actualCount = 11; guaranteedMin = 1; /* green */ }
   else { cost = GACHA_COST_SINGLE; actualCount = 1; guaranteedMin = 0; }
-  if (GS.resources.gem < cost) { alert('鑽石不足！'); return []; }
-  GS.resources.gem -= cost;
-  collectTax(0, cost);
+  if (!isGold) {
+    if (GS.resources.gem < cost) { alert('鑽石不足！'); return []; }
+    GS.resources.gem -= cost;
+    collectTax(0, cost);
+  } else {
+    GS.resources.gold -= cost;
+  }
   const results = [];
   const rarityRank = { white: 0, green: 1, blue: 2, red: 3, purple: 4, gold: 5 };
   for (let i = 0; i < actualCount; i++) {
-    let rarity = rollRarity();
+    let rarity = isGold ? rollRarityGold() : rollRarity();
     // 最後一張保底
     if (i === actualCount - 1 && guaranteedMin > 0) {
       const hasGood = results.some(r => rarityRank[r.rarity] >= guaranteedMin);
@@ -11147,12 +16192,10 @@ function doGacha(pool, count, mode) {
     results.push(pickFromPool(pool, rarity));
   }
   const ownedList = pool === SUMMON_POOL ? GS.ownedHeroes : GS.ownedPets;
-  // 標記是否為首次獲得（先比對當前擁有列表，再加入）
-  results.forEach(item => { item._isNew = !ownedList.find(o => o.id === item.id); });
+  // 標記是否為首次獲得並加入收藏（重複累計）
   results.forEach(item => {
-    const existing = ownedList.find(o => o.id === item.id);
-    if (existing) { existing.level = (existing.level || 1) + 1; }
-    else { ownedList.push({ ...item, level: 1 }); }
+    const { isNew } = addCardToCollection(item, pool === SUMMON_POOL ? 'hero' : 'pet');
+    item._isNew = isNew;
   });
   updateUI();
   updateSlotDisplay();
@@ -11162,6 +16205,53 @@ function doGacha(pool, count, mode) {
 }
 
 const rarityOrderArr = ['white','green','blue','red','purple','gold'];
+
+// ===== 卡牌收集：重複累計，保留count屬性 =====
+function addCardToCollection(card, poolType) {
+  console.log(`[addCardToCollection] START 卡名=${card.name}，類型=${poolType}，ID=${card.id}`);
+  let ownedList;
+  if (poolType === 'hero') ownedList = GS.ownedHeroes;
+  else if (poolType === 'pet') ownedList = GS.ownedPets;
+  else if (poolType === 'transform') ownedList = GS.ownedTransforms;
+  else { console.warn('[addCardToCollection] 未知 poolType:', poolType); return { card, isNew: false }; }
+  if (!ownedList) ownedList = [];
+  const existing = ownedList.find(o => o.id === card.id);
+  if (existing) {
+    existing.count = (existing.count || 1) + 1;
+    console.log(`[addCardToCollection] END 重複卡：${card.name}，owned=true，count=${existing.count}（${poolType}）`);
+    return { card: existing, isNew: false };
+  } else {
+    const newCard = { ...card, count: 1, level: card.level || 1 };
+    ownedList.push(newCard);
+    console.log(`[addCardToCollection] END 新卡：${card.name}，owned=true，count=1（${poolType}）`);
+    return { card: newCard, isNew: true };
+  }
+}
+
+// 計算某稀有度下可用於合成的卡牌總數（總count - 1張底線，最低為0）
+function getSynthAvailableByRarity(rarity, poolType) {
+  const ownedList = poolType === 'hero' ? GS.ownedHeroes : GS.ownedPets;
+  let total = 0;
+  ownedList.filter(c => c.rarity === rarity).forEach(c => {
+    total += Math.max(0, (c.count || 1) - 1);
+  });
+  return total;
+}
+
+// 消耗指定稀有度的重複卡牌作為合成材料（每種至少保留1張）
+function consumeDuplicateCardsForSynth(rarity, count, poolType) {
+  const ownedList = poolType === 'hero' ? GS.ownedHeroes : GS.ownedPets;
+  let remaining = count;
+  const candidates = ownedList.filter(c => c.rarity === rarity && (c.count || 1) > 1);
+  for (const card of candidates) {
+    if (remaining <= 0) break;
+    const available = (card.count || 1) - 1; // 保留1張
+    const take = Math.min(available, remaining);
+    card.count -= take;
+    remaining -= take;
+  }
+  return remaining === 0;
+}
 
 function showGachaResults(results, poolType) {
   el.gachaResult.innerHTML = '';
@@ -11222,7 +16312,8 @@ function showGachaResults(results, poolType) {
 
     let spriteHTML;
     if (poolType === 'hero') {
-      spriteHTML = `<div class="gacha-sprite">${spriteEmojiHTML(item.sprite, 64)}</div>`;
+      const hSprite = item.sprite || (item.spriteKey ? SPRITE[item.spriteKey] : null) || { idle: '⚔️', color: '#c0a060' };
+      spriteHTML = `<div class="gacha-sprite">${spriteEmojiHTML(hSprite, 64)}</div>`;
     } else if (poolType === 'pet') {
       const petSprite = SPRITE[item.spriteKey] || { idle: '🐾', color: '#c0a060', glow: '#ffe090' };
       spriteHTML = `<div class="gacha-sprite gacha-pet-sprite">${spriteEmojiHTML(petSprite, 56)}</div>`;
@@ -11236,6 +16327,14 @@ function showGachaResults(results, poolType) {
     if (poolType === 'transform') typeLabel = item.type || '變身';
 
     const isNew = item._isNew;
+    // 計算該卡當前擁有數量（重複卡顯示×N）
+    let ownedListForCount;
+    if (poolType === 'hero') ownedListForCount = GS.ownedHeroes;
+    else if (poolType === 'pet') ownedListForCount = GS.ownedPets;
+    else if (poolType === 'transform') ownedListForCount = GS.ownedTransforms;
+    const ownData = ownedListForCount?.find(o => o.id === item.id);
+    const dupCount = ownData ? (ownData.count || 1) : 1;
+    const showDup = !isNew && dupCount > 1;
 
     card.innerHTML = `
       <div class="gacha-flip-inner">
@@ -11249,6 +16348,7 @@ function showGachaResults(results, poolType) {
             <div class="gacha-card-top">
               <span class="gacha-card-rarity-label">${RARITY_CN[item.rarity] || item.rarity}</span>
               ${isNew ? '<span class="gacha-new-tag">NEW</span>' : ''}
+              ${showDup ? `<span class="gacha-dup-tag">×${dupCount}</span>` : ''}
             </div>
             <div class="gacha-card-art">
               ${spriteHTML}
@@ -11328,6 +16428,7 @@ let codexMainTab = 'codex'; // codex / collection
 let codexCollectTab = 'cards'; // cards / effects / sets
 let equipComboCatFilter = 'all';
 let equipComboStatFilter = [];
+let codexCollapsed = {}; // 各分類摺疊狀態 key -> bool
 
 // 蒐藏獎勵配置：每達成一定收集數量，獲得屬性加成
 const COLLECTION_REWARDS = {
@@ -11511,65 +16612,109 @@ function renderCodexPage() {
     { key: 'item',      name: '道具' },
     { key: 'monster',   name: '怪物' },
   ];
-  const rarityList = ['all', ...RARITY_ORDER];
 
-  let gridHtml = '';
+  let sectionsHtml = '';
   let totalCount = 0;
   let ownedCount = 0;
+
+  // 通用：渲染一個可摺疊分區
+  function renderCollapsibleSection(sectKey, sectTitle, sectCount, sectOwned, itemsHtml) {
+    const collapsed = !!codexCollapsed[sectKey];
+    const cnt = Math.max(0, parseInt(sectCount, 10) || 0);
+    const own = Math.max(0, Math.min(cnt, parseInt(sectOwned, 10) || 0));
+    const pct = cnt > 0 ? (own / cnt * 100).toFixed(0) : 0;
+    return `
+      <div class="codex-section" data-codex-section="${sectKey}">
+        <div class="codex-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:linear-gradient(135deg, rgba(60,40,20,0.7), rgba(30,20,10,0.5));border:1px solid var(--gold-dark);border-radius:8px;cursor:pointer;margin-bottom:8px;user-select:none">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:var(--gold-bright);font-size:14px;transition:transform 0.2s;display:inline-block;${collapsed ? 'transform:rotate(-90deg)' : ''}">▼</span>
+            <span style="font-size:14px;font-weight:700;color:var(--gold-bright)">${sectTitle}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--parchment-light)">
+            <span style="color:var(--gold)">${own}/${cnt}</span>
+            <div style="width:60px;height:6px;background:rgba(0,0,0,0.4);border-radius:3px;overflow:hidden;border:1px solid var(--gold-dark)">
+              <div style="width:${pct}%;height:100%;background:linear-gradient(90deg, var(--gold-dark), var(--gold-bright))"></div>
+            </div>
+          </div>
+        </div>
+        <div class="codex-section-body" style="display:${collapsed ? 'none' : 'block'};padding:4px 2px 12px">
+          ${itemsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderHeroPetCard(item, owned, type) {
+    const rarity = item.rarity;
+    const rarityInfo = RARITY_CONFIG[rarity];
+    const sprite = type === 'hero'
+      ? (item.sprite ? spriteEmojiHTML(item.sprite, 64) : '')
+      : (item.spriteKey ? spriteEmojiHTML(SPRITE[item.spriteKey], 64) : '');
+    const ownedList = type === 'hero' ? GS.ownedHeroes : GS.ownedPets;
+    const ownData = ownedList.find(o => o.id === item.id);
+    const count = ownData ? (ownData.count || 1) : 0;
+    return `
+      <div class="codex-card rarity-${rarity} ${owned ? '' : 'locked'}" data-id="${item.id}" data-type="${type}">
+        <div class="codex-card-inner">
+          <div class="codex-card-sprite">${owned ? sprite : '<div style="font-size:36px;filter:grayscale(1) brightness(0.4)">❓</div>'}</div>
+          <div class="codex-card-name">${owned ? item.name : '???'}</div>
+        </div>
+        ${owned && count > 1 ? `<div class="codex-card-count">×${count}</div>` : ''}
+        <div class="codex-card-glow"></div>
+      </div>
+    `;
+  }
 
   if (codexTab === 'hero' || codexTab === 'pet') {
     const pool = codexTab === 'hero' ? SUMMON_POOL : PET_POOL;
     const ownedList = codexTab === 'hero' ? GS.ownedHeroes : GS.ownedPets;
     const ownedIds = new Set(ownedList.map(o => o.id));
-    const filtered = codexRarityFilter === 'all' ? pool : pool.filter(i => i.rarity === codexRarityFilter);
     totalCount = pool.length;
     ownedCount = ownedList.length;
-    gridHtml = `<div class="codex-grid">
-      ${filtered.map(item => {
-        const owned = ownedIds.has(item.id);
-        const rarity = item.rarity;
-        const rarityInfo = RARITY_CONFIG[rarity];
-        const sprite = codexTab === 'hero'
-          ? (item.sprite ? spriteEmojiHTML(item.sprite, 72) : '')
-          : (item.spriteKey ? spriteEmojiHTML(SPRITE[item.spriteKey], 72) : '');
-        return `
-          <div class="codex-card rarity-${rarity} ${owned ? '' : 'locked'}" data-id="${item.id}" data-type="${codexTab}">
-            <div class="codex-card-inner">
-              <div class="codex-card-sprite">${owned ? sprite : '<div style="font-size:48px;filter:grayscale(1) brightness(0.4)">❓</div>'}</div>
-              <div class="codex-card-name">${owned ? item.name : '???'}</div>
-              <div class="codex-card-rarity" style="color:${rarityInfo.color}">${rarityInfo.name}</div>
-            </div>
-            <div class="codex-card-glow"></div>
-          </div>
-        `;
-      }).join('')}
-    </div>`;
+
+    // 按品質分組
+    RARITY_ORDER.forEach(rarity => {
+      const items = pool.filter(i => i.rarity === rarity);
+      if (items.length === 0) return;
+      const owned = items.filter(i => ownedIds.has(i.id)).length;
+      const rarityInfo = RARITY_CONFIG[rarity];
+      const sectKey = `${codexTab}_${rarity}`;
+      const cardsHtml = `<div class="codex-grid">
+        ${items.map(item => renderHeroPetCard(item, ownedIds.has(item.id), codexTab)).join('')}
+      </div>`;
+      sectionsHtml += renderCollapsibleSection(sectKey, `${rarityInfo.name}品質`, items.length, owned, cardsHtml);
+    });
   } else if (codexTab === 'transform') {
     const pool = TRANSFORM_POOL;
     const ownedList = GS.ownedTransforms || [];
     const ownedIds = new Set(ownedList.map(o => o.id));
-    const filtered = codexRarityFilter === 'all' ? pool : pool.filter(i => i.rarity === codexRarityFilter);
     totalCount = pool.length;
     ownedCount = ownedList.length;
-    gridHtml = `<div class="codex-grid codex-grid-5">
-      ${filtered.map(item => {
-        const owned = ownedIds.has(item.id);
-        const rarity = item.rarity;
-        const rarityInfo = RARITY_CONFIG[rarity];
-        return `
-          <div class="codex-card rarity-${rarity} ${owned ? '' : 'locked'}" data-id="${item.id}" data-type="transform">
-            <div class="codex-card-inner">
-              <div class="codex-card-sprite" style="padding:4px">
-                <img src="${getTransformIcon(item.spriteKey)}" style="width:100%;height:100%;object-fit:cover;display:block;filter:${owned ? 'none' : 'grayscale(1) brightness(0.3)'};border-radius:4px"/>
+
+    RARITY_ORDER.forEach(rarity => {
+      const items = pool.filter(i => i.rarity === rarity);
+      if (items.length === 0) return;
+      const owned = items.filter(i => ownedIds.has(i.id)).length;
+      const rarityInfo = RARITY_CONFIG[rarity];
+      const sectKey = `transform_${rarity}`;
+      const cardsHtml = `<div class="codex-grid codex-grid-5">
+        ${items.map(item => {
+          const own = ownedIds.has(item.id);
+          return `
+            <div class="codex-card rarity-${rarity} ${own ? '' : 'locked'}" data-id="${item.id}" data-type="transform">
+              <div class="codex-card-inner">
+                <div class="codex-card-sprite" style="padding:4px">
+                  <img src="${getTransformIcon(item.spriteKey)}" style="width:100%;height:100%;object-fit:cover;display:block;filter:${own ? 'none' : 'grayscale(1) brightness(0.3)'};border-radius:4px"/>
+                </div>
+                <div class="codex-card-name">${own ? item.name : '???'}</div>
               </div>
-              <div class="codex-card-name">${owned ? item.name : '???'}</div>
-              <div class="codex-card-rarity" style="color:${owned ? rarityInfo.color : '#555'};font-size:9px">${rarityInfo.name || ''}</div>
+              <div class="codex-card-glow"></div>
             </div>
-            <div class="codex-card-glow"></div>
-          </div>
-        `;
-      }).join('')}
-    </div>`;
+          `;
+        }).join('')}
+      </div>`;
+      sectionsHtml += renderCollapsibleSection(sectKey, `${rarityInfo.name}品質`, items.length, owned, cardsHtml);
+    });
   } else if (codexTab === 'equip') {
     const pool = EQUIP_POOL;
     totalCount = pool.length;
@@ -11580,29 +16725,36 @@ function renderCodexPage() {
       if (eq?.id) equipIds.add(eq.id);
     }
     ownedCount = equipIds.size;
-    const filtered = codexRarityFilter === 'all' ? pool : pool.filter(i => i.rarity === codexRarityFilter);
-    gridHtml = `<div class="codex-grid">
-      ${filtered.map(item => {
-        const owned = equipIds.has(item.id);
-        const rarity = item.rarity;
-        const rarityInfo = RARITY_CONFIG[rarity];
-        const borderColor = rarityInfo?.color || '#999';
-        const typeName = EQUIP_TYPES[item.type]?.name || item.type;
-        const iconUrl = ITEM_ICONS[item.type] || ITEM_ICONS.weapon;
-        return `
-          <div class="codex-card rarity-${rarity} ${owned ? '' : 'locked'}" data-id="${item.id}" data-type="equip">
-            <div class="codex-card-inner">
-              <div class="codex-card-sprite" style="padding:6px">
-                <img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${owned ? 'none' : 'grayscale(1) brightness(0.4)'};border-radius:6px"/>
+
+    // 按裝備部位分組
+    const slotOrder = ['weapon', 'helmet', 'armor', 'glove', 'boots', 'accessory'];
+    const slotNames = { weapon: '武器', helmet: '頭盔', armor: '盔甲', glove: '手套', boots: '靴子', accessory: '飾品' };
+    slotOrder.forEach(slot => {
+      const items = pool.filter(i => i.type === slot);
+      if (items.length === 0) return;
+      const owned = items.filter(i => equipIds.has(i.id)).length;
+      const sectKey = `equip_${slot}`;
+      const cardsHtml = `<div class="codex-grid">
+        ${items.map(item => {
+          const own = equipIds.has(item.id);
+          const rarityInfo = RARITY_CONFIG[item.rarity];
+          const iconUrl = ITEM_ICONS[item.type] || ITEM_ICONS.weapon;
+          return `
+            <div class="codex-card rarity-${item.rarity} ${own ? '' : 'locked'}" data-id="${item.id}" data-type="equip">
+              <div class="codex-card-inner">
+                <div class="codex-card-sprite" style="padding:6px">
+                  <img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${own ? 'none' : 'grayscale(1) brightness(0.4)'};border-radius:6px"/>
+                </div>
+                <div class="codex-card-name">${own ? item.name : '???'}</div>
+                <div class="codex-card-rarity" style="color:${own ? rarityInfo.color : '#555'};font-size:10px">${rarityInfo.name}</div>
               </div>
-              <div class="codex-card-name">${owned ? item.name : '???'}</div>
-              <div class="codex-card-rarity" style="color:${owned ? rarityInfo.color : '#555'}">${typeName}</div>
+              <div class="codex-card-glow"></div>
             </div>
-            <div class="codex-card-glow"></div>
-          </div>
-        `;
-      }).join('')}
-    </div>`;
+          `;
+        }).join('')}
+      </div>`;
+      sectionsHtml += renderCollapsibleSection(sectKey, slotNames[slot] || slot, items.length, owned, cardsHtml);
+    });
   } else if (codexTab === 'item') {
     const items = [
       { id: 'hp1',   name: '小型生命藥水', rarity: 'white',  icon: ITEM_ICONS.hp1 },
@@ -11613,7 +16765,7 @@ function renderCodexPage() {
       { id: 'mp3',   name: '大型魔力藥水', rarity: 'blue',   icon: ITEM_ICONS.mp3 },
       { id: 'spd1',  name: '加速藥水',     rarity: 'blue',   icon: ITEM_ICONS.spd1 },
       { id: 'spd2',  name: '狂暴藥水',     rarity: 'red',    icon: ITEM_ICONS.spd2 },
-      { id: 'move1', name: '行走加速藥水',     rarity: 'green',  icon: ITEM_ICONS.move1 },
+      { id: 'move1', name: '行走加速藥水', rarity: 'green',  icon: ITEM_ICONS.move1 },
       { id: 'mgem',  name: '魔法寶石',     rarity: 'blue',   icon: ITEM_ICONS.mgem },
       { id: 'teleport', name: '傳送卷軸',  rarity: 'green',  icon: ITEM_ICONS.teleport },
       { id: 'enhance',  name: '強化提升券', rarity: 'purple', icon: ITEM_ICONS.enhance_ticket },
@@ -11621,25 +16773,34 @@ function renderCodexPage() {
     ];
     totalCount = items.length;
     const ownedIds = new Set(GS.inventory?.filter(i => i.itemType === 'consumable').map(i => i.id) || []);
-    ownedCount = items.filter(i => ownedIds.has(i.id)).length;
-    gridHtml = `<div class="codex-grid">
-      ${items.map(item => {
-        const owned = ownedIds.has(item.id);
-        const rarityInfo = RARITY_CONFIG[item.rarity];
-        return `
-          <div class="codex-card rarity-${item.rarity} ${owned ? '' : 'locked'}" data-id="${item.id}" data-type="item">
-            <div class="codex-card-inner">
-              <div class="codex-card-sprite" style="padding:6px">
-                <img src="${item.icon}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${owned ? 'none' : 'grayscale(1) brightness(0.4)'};border-radius:6px"/>
+    ownedCount = Math.min(items.length, items.filter(i => ownedIds.has(i.id)).length);
+
+    RARITY_ORDER.forEach(rarity => {
+      const rarityItems = items.filter(i => i.rarity === rarity);
+      if (rarityItems.length === 0) return;
+      const owned = rarityItems.filter(i => ownedIds.has(i.id)).length;
+      const rarityInfo = RARITY_CONFIG[rarity];
+      const sectKey = `item_${rarity}`;
+      const cardsHtml = `<div class="codex-grid">
+        ${rarityItems.map(item => {
+          const own = ownedIds.has(item.id);
+          const rarityInfo2 = RARITY_CONFIG[item.rarity];
+          return `
+            <div class="codex-card rarity-${item.rarity} ${own ? '' : 'locked'}" data-id="${item.id}" data-type="item">
+              <div class="codex-card-inner">
+                <div class="codex-card-sprite" style="padding:6px">
+                  <img src="${item.icon}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${own ? 'none' : 'grayscale(1) brightness(0.4)'};border-radius:6px"/>
+                </div>
+                <div class="codex-card-name">${own ? item.name : '???'}</div>
+                <div class="codex-card-rarity" style="color:${own ? rarityInfo2.color : '#555'};font-size:10px">${rarityInfo2.name}</div>
               </div>
-              <div class="codex-card-name">${owned ? item.name : '???'}</div>
-              <div class="codex-card-rarity" style="color:${owned ? rarityInfo.color : '#555'}">${rarityInfo.name}</div>
+              <div class="codex-card-glow"></div>
             </div>
-            <div class="codex-card-glow"></div>
-          </div>
-        `;
-      }).join('')}
-    </div>`;
+          `;
+        }).join('')}
+      </div>`;
+      sectionsHtml += renderCollapsibleSection(sectKey, `${rarityInfo.name}品質`, rarityItems.length, owned, cardsHtml);
+    });
   } else if (codexTab === 'monster') {
     const monsters = [
       { id: 'goblin',   name: '哥布林',       rarity: 'white',  spriteKey: 'goblin' },
@@ -11658,29 +16819,37 @@ function renderCodexPage() {
     totalCount = monsters.length;
     const killedIds = new Set(GS.killedMonsters || []);
     ownedCount = monsters.filter(m => killedIds.has(m.id)).length;
-    gridHtml = `<div class="codex-grid">
-      ${monsters.map(m => {
-        const owned = killedIds.has(m.id);
-        const rarityInfo = RARITY_CONFIG[m.rarity];
-        const sprite = SPRITE[m.spriteKey];
-        const hasImg = sprite?.useImg;
-        const spriteHtml = owned
-          ? (hasImg
-             ? `<img src="${sprite.idle}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.6))"/>`
-             : `<div style="font-size:40px;color:${sprite?.color || '#ccc'};filter:drop-shadow(0 0 4px ${sprite?.glow || 'rgba(0,0,0,0.5)'})">${sprite?.idle || '👹'}</div>`)
-          : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:44px;color:#444">❓</div>`;
-        return `
-          <div class="codex-card rarity-${m.rarity} ${owned ? '' : 'locked'}" data-id="${m.id}" data-type="monster">
-            <div class="codex-card-inner">
-              <div class="codex-card-sprite" style="padding:4px">${spriteHtml}</div>
-              <div class="codex-card-name">${owned ? m.name : '???'}</div>
-              <div class="codex-card-rarity" style="color:${owned ? rarityInfo.color : '#555'}">${owned ? (m.boss ? 'BOSS' : '怪物') : '未發現'}</div>
+
+    RARITY_ORDER.forEach(rarity => {
+      const mons = monsters.filter(m => m.rarity === rarity);
+      if (mons.length === 0) return;
+      const owned = mons.filter(m => killedIds.has(m.id)).length;
+      const rarityInfo = RARITY_CONFIG[rarity];
+      const sectKey = `monster_${rarity}`;
+      const cardsHtml = `<div class="codex-grid">
+        ${mons.map(m => {
+          const own = killedIds.has(m.id);
+          const sprite = SPRITE[m.spriteKey];
+          const hasImg = sprite?.useImg;
+          const spriteHtml = own
+            ? (hasImg
+               ? `<img src="${sprite.idle}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.6))"/>`
+               : `<div style="font-size:36px;color:${sprite?.color || '#ccc'};filter:drop-shadow(0 0 4px ${sprite?.glow || 'rgba(0,0,0,0.5)'})">${sprite?.idle || '👹'}</div>`)
+            : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:36px;color:#444">❓</div>`;
+          return `
+            <div class="codex-card rarity-${m.rarity} ${own ? '' : 'locked'}" data-id="${m.id}" data-type="monster">
+              <div class="codex-card-inner">
+                <div class="codex-card-sprite" style="padding:4px">${spriteHtml}</div>
+                <div class="codex-card-name">${own ? m.name : '???'}</div>
+                <div class="codex-card-rarity" style="color:${own ? rarityInfo.color : '#555'};font-size:10px">${own ? (m.boss ? 'BOSS' : '怪物') : '未發現'}</div>
+              </div>
+              <div class="codex-card-glow"></div>
             </div>
-            <div class="codex-card-glow"></div>
-          </div>
-        `;
-      }).join('')}
-    </div>`;
+          `;
+        }).join('')}
+      </div>`;
+      sectionsHtml += renderCollapsibleSection(sectKey, `${rarityInfo.name}品質`, mons.length, owned, cardsHtml);
+    });
   }
 
   // 蒐藏獎勵展示
@@ -11728,26 +16897,19 @@ function renderCodexPage() {
       </div>
     </div>
     ${rewardHtml}
-    <div class="codex-rarity-filter">
-      ${rarityList.map(r => `
-        <button class="rarity-filter-btn ${codexRarityFilter === r ? 'active' : ''} rarity-${r}" data-rarity="${r}">
-          ${r === 'all' ? '全部' : RARITY_CONFIG[r].name}
-        </button>
-      `).join('')}
-    </div>
-    ${gridHtml}
+    ${sectionsHtml}
   `;
 }
 
 function renderCollectionPage() {
   // 計算總蒐藏進度
   const cats = [
-    { key: 'hero',      name: '英雄蒐藏', icon: '⚔️' },
-    { key: 'pet',       name: '守護蒐藏', icon: '🐾' },
-    { key: 'transform', name: '變身蒐藏', icon: '✨' },
-    { key: 'equip',     name: '裝備蒐藏', icon: '🛡️' },
-    { key: 'item',      name: '道具蒐藏', icon: '🧪' },
-    { key: 'monster',   name: '怪物圖鑑', icon: '👹' },
+    { key: 'hero',      name: '英雄蒐藏', icon: ITEM_ICONS.weapon },
+    { key: 'pet',       name: '守護蒐藏', icon: ITEM_ICONS.helmet },
+    { key: 'transform', name: '變身蒐藏', icon: ITEM_ICONS.gem },
+    { key: 'equip',     name: '裝備蒐藏', icon: ITEM_ICONS.armor },
+    { key: 'item',      name: '道具蒐藏', icon: ITEM_ICONS.chest },
+    { key: 'monster',   name: '怪物圖鑑', icon: ITEM_ICONS.enhance_stone },
   ];
   const catTotal = { hero: SUMMON_POOL.length, pet: PET_POOL.length, transform: TRANSFORM_POOL.length, equip: EQUIP_POOL.length, item: 13, monster: 12 };
   let totalOwned = 0, totalAll = 0;
@@ -11777,7 +16939,9 @@ function renderCollectionPage() {
         return `
           <div class="collection-category-card" data-col-cat="${c.key}">
             <div class="ccat-header">
-              <div class="ccat-icon">${c.icon}</div>
+              <div class="ccat-icon" style="background:rgba(0,0,0,0.3)">
+                <img src="${c.icon}" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.style.display='none';this.parentNode.style.background='linear-gradient(135deg,#2a1f10,#1a1208)'"/>
+              </div>
               <div class="ccat-info">
                 <div class="ccat-name">${c.name}</div>
                 <div class="ccat-count">${cnt} / ${tot} <span class="ccat-pct">(${pct}%)</span></div>
@@ -12025,7 +17189,7 @@ function renderCollectionPage() {
 
 function showCodexDetail(id, type) {
   let item, owned, spriteHtml = '', stats = {}, skill = {}, rarity = 'white';
-  const nameMap = { atk: '攻擊力', def: '防禦力', hpMax: '生命值', crit: '暴擊率', critDmg: '暴擊傷害', mpMax: '魔力', hit: '命中', dodge: '閃躲', walkSpeedPct: '移動速度%', atkSpeedPct: '攻擊速度%', expPct: '經驗加成%', dropPct: '掉寶率', shield: '護盾值', hpRegen: '生命回復', mpRegen: '魔力回復' };
+  const nameMap = { atk: '攻擊力', def: '防禦力', hpMax: '生命值', crit: '暴擊率', critDmg: '暴擊傷害', mpMax: '魔力', hit: '命中', dodge: '閃躲', walkSpeedPct: '移動速度%', atkSpeedPct: '攻擊速度%', expPct: '經驗加成%', dropPct: '掉寶率', shield: '護盾值', hpRegen: '生命回復', mpRegen: '魔力回復', atkPct: '攻擊力%', defPct: '防禦力%', hpPct: '生命%', critAdd: '暴擊率', critDmgPct: '暴擊傷害%', fireDmgPct: '火屬性傷害%', hpRegenPct: '自然回復%', mpRegenPct: 'MP回復%', skillDmgPct: '技能傷害%', goldPct: '金幣加成%' };
 
   if (type === 'hero') {
     item = SUMMON_POOL.find(i => i.id === id);
@@ -12034,7 +17198,7 @@ function showCodexDetail(id, type) {
     rarity = item.rarity;
     stats = item.stats || {};
     skill = item.skill || {};
-    spriteHtml = owned && item.sprite ? spriteEmojiHTML(item.sprite, 120) : '';
+    spriteHtml = owned && (item.sprite || item.spriteKey) ? spriteEmojiHTML(item.sprite || SPRITE[item.spriteKey], 120) : '';
   } else if (type === 'pet') {
     item = PET_POOL.find(i => i.id === id);
     owned = GS.ownedPets.find(o => o.id === id);
@@ -12237,6 +17401,19 @@ function bindCodexOverlayEvents() {
       bindCodexOverlayEvents();
     });
   });
+  overlay.querySelectorAll('.codex-section-header').forEach(header => {
+    header.addEventListener('click', e => {
+      const section = header.closest('.codex-section');
+      if (!section) return;
+      const key = section.dataset.codexSection;
+      if (!key) return;
+      codexCollapsed[key] = !codexCollapsed[key];
+      const body = section.querySelector('.codex-section-body');
+      const arrow = header.querySelector('span:first-child');
+      if (body) body.style.display = codexCollapsed[key] ? 'none' : 'block';
+      if (arrow) arrow.style.transform = codexCollapsed[key] ? 'rotate(-90deg)' : '';
+    });
+  });
   overlay.querySelectorAll('.rarity-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       codexRarityFilter = btn.dataset.rarity;
@@ -12370,35 +17547,37 @@ function doSynthesizeInOverlay() {
   const nextRarityIdx = RARITY_ORDER.indexOf(synthRarity) + 1;
   if (nextRarityIdx >= RARITY_ORDER.length) return;
   const nextRarity = RARITY_ORDER[nextRarityIdx];
-  const sameRarity = ownedList.filter(o => o.rarity === synthRarity);
-  if (sameRarity.length < 4) { alert('材料不足，需要4張同品質卡'); return; }
+  // 可用材料數 = 該稀有度下所有卡的 (count - 1) 之和（每種至少保留 1 張）
+  const available = getSynthAvailableByRarity(synthRarity, synthTab);
+  const synthCost = 2; // 每次合成消耗 2 張重複卡
+  if (available < synthCost) { alert('材料不足，需要 2 張同品質重複卡（每種卡至少保留 1 張）'); return; }
   const gemCost = synthBoosters * 10;
   if (gemCost > GS.resources.gem) { alert('鑽石不足'); return; }
   GS.resources.gem -= gemCost;
   const baseRate = SYNTH_BASE_RATES[synthRarity + '-' + nextRarity];
   const rate = Math.min(0.99, baseRate * Math.pow(1.2, synthBoosters));
-  // 扣除4張
-  const toRemove = sameRarity.slice(0, 4);
-  toRemove.forEach(item => {
-    const idx = ownedList.findIndex(o => o.id === item.id);
-    if (idx >= 0) ownedList.splice(idx, 1);
-  });
+  console.log(`[合成] START 品質=${synthRarity}→${nextRarity}，可用材料=${available}，消耗=${synthCost}，成功率=${(rate*100).toFixed(1)}%`);
+  // 消耗重複卡（每種至少保留 1 張）
+  const consumed = consumeDuplicateCardsForSynth(synthRarity, synthCost, synthTab);
+  if (!consumed) { alert('材料扣除失敗，請重試'); return; }
   const success = Math.random() < rate;
   let resultItem = null;
   if (success) {
     const candidates = pool.filter(i => i.rarity === nextRarity);
     if (candidates.length > 0) {
       const picked = candidates[Math.floor(Math.random() * candidates.length)];
-      const existing = ownedList.find(o => o.id === picked.id);
-      if (existing) { existing.level = (existing.level || 1) + 1; }
-      else { ownedList.push({ ...picked, level: 1 }); }
-      resultItem = picked;
-      // 蒐藏刷新
+      // 加入收藏（新卡 count=1，重複則 count++）
+      const addResult = addCardToCollection(picked, synthTab);
+      resultItem = addResult.card;
+      console.log(`[合成] SUCCESS 獲得：${picked.name}（${nextRarity}），count=${resultItem.count || 1}`);
     }
+  } else {
+    console.log(`[合成] FAIL 失敗，材料已消耗`);
   }
   synthBoosters = 0;
   updateUI();
   updateSlotDisplay();
+  if (typeof saveGame === 'function') saveGame();
   showSynthResultOverlay(success, resultItem, nextRarity);
 }
 
@@ -12471,6 +17650,10 @@ function activateTransform(tfId) {
   addTransformBuff();
   // 刷新角色外觀
   updatePlayerSprite();
+  // ===== 多人連線：變身後同步 =====
+  if (window.MultiplayerClient && MultiplayerClient.connected) {
+    try { syncMultiplayerProfile(); } catch (e) { /* ignore */ }
+  }
   // 變身爆發特效
   triggerTransformBurst(tf.rarity);
   calcCP();
@@ -12497,6 +17680,43 @@ function refreshPlayerSprite() {
 }
 // 舊函數別名（向後兼容）
 function useTransformScroll(tfId) { return activateTransform(tfId); }
+
+// 變身體驗券：直接啟動變身（不受職業限制、不須擁有該變身）
+function useTransformTicket(tfId) {
+  // 從背包找對應體驗券並消耗1張
+  const ticket = GS.inventory.find(i => i.effect?.useTransformTicket && i.effect.transformId === tfId);
+  if (!ticket || (ticket.count || 1) <= 0) {
+    addLog('system', '體驗券數量不足');
+    return false;
+  }
+  // 找到變身數據（用於名稱、屬性、sprite）
+  const tf = TRANSFORM_POOL.find(t => t.id === tfId);
+  if (!tf) { addLog('system', '變身數據不存在'); return false; }
+  // 套用變身：直接設置 transformId 與結束時間，跳過職業限制
+  GS.player.transformId = tfId;
+  GS.transformEndTime = Date.now() + 4 * 60 * 60 * 1000; // 4小時
+  // 確保 ownedTransforms 中有這張（供圖鑑和UI顯示）
+  if (!GS.ownedTransforms) GS.ownedTransforms = [];
+  const existing = GS.ownedTransforms.find(t => t.id === tfId);
+  if (!existing) {
+    GS.ownedTransforms.push({ id: tf.id, name: tf.name, rarity: tf.rarity, unlocked: true, fromTicket: true });
+  }
+  addLog('system', `使用體驗券，啟動變身【${tf.name}】，持續 4 小時（體驗版，不受職業限制）`);
+  // 消耗體驗券
+  ticket.count = (ticket.count || 1) - 1;
+  if (ticket.count <= 0) {
+    GS.inventory = GS.inventory.filter(i => i.uid !== ticket.uid);
+  }
+  if (window.AudioSystem) AudioSystem.sfxTransform();
+  addTransformBuff();
+  updatePlayerSprite();
+  triggerTransformBurst(tf.rarity);
+  calcCP();
+  updateRankings();
+  updateUI();
+  saveGame();
+  return true;
+}
 
 // 檢查變身是否到期
 // ==================== Buff 系統 ====================
@@ -12586,19 +17806,17 @@ function renderBuffBar() {
     const timeStr = formatBuffTime(remain);
     const title = `${b.name}\n${b.desc}\n剩餘：${formatBuffTimeDetail(remain)}`;
     return `
-      <div class="buff-icon" data-buff-type="${b.type}" title="${title}">
+      <div class="buff-icon buff-icon-large" data-buff-type="${b.type}" title="${title}">
         <img src="${b.icon}" alt="${b.name}"/>
         <span class="buff-icon-time">${timeStr}</span>
       </div>
     `;
   }).join('');
   
-  // 點擊事件
+  // 點擊事件：點擊任意 buff 圖示彈出全部 buff 列表
   el.buffBar.querySelectorAll('.buff-icon').forEach(icon => {
     icon.addEventListener('click', () => {
-      const type = icon.dataset.buffType;
-      const buff = GS.activeBuffs?.find(b => b.type === type);
-      if (buff) showBuffDetail(buff);
+      showAllBuffsWindow();
     });
   });
 }
@@ -12613,12 +17831,68 @@ function formatBuffTimeDetail(ms) {
   return `${sec}秒`;
 }
 
-// buff 詳情彈窗
+// 顯示全部 buff 列表視窗
+function showAllBuffsWindow() {
+  // 若已存在則先關閉
+  const existing = $('all-buffs-modal');
+  if (existing) { existing.remove(); return; }
+
+  const now = Date.now();
+  const buffs = GS.activeBuffs || [];
+  const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', atkSpeedPct: '攻速', walkSpeedPct: '移速', crit: '暴擊', critDmg: '暴傷', expPct: '經驗', dropPct: '掉寶率', dodge: '閃躲', shield: '護盾值', allStatPct: '全屬性', pvpDmgPct: 'PVP傷害', skillDmgPct: '技能傷害' };
+
+  const buffRows = buffs.length === 0
+    ? '<div style="text-align:center;padding:30px 10px;color:var(--parchment-dark);font-size:12px">目前沒有任何增益效果</div>'
+    : buffs.map(b => {
+        const remain = Math.max(0, b.endTime - now);
+        const statsStr = b.stats && Object.keys(b.stats).length > 0
+          ? '<div style="margin-top:4px;color:var(--gold);font-size:11px;line-height:1.5">' + Object.entries(b.stats).map(([k, v]) => {
+              const label = nameMap[k] || k;
+              const val = (typeof v === 'number' && v < 1 && k.includes('Pct')) ? (v * 100).toFixed(0) + '%' : v;
+              return `<span style="margin-right:8px">${label}+${val}</span>`;
+            }).join('') + '</div>'
+          : '';
+        return `
+          <div class="buff-list-row" style="display:flex;gap:10px;padding:10px 8px;border-bottom:1px solid rgba(240,192,64,0.15);align-items:flex-start">
+            <img src="${b.icon}" style="width:36px;height:36px;border-radius:6px;border:2px solid var(--gold-dark);flex-shrink:0" alt=""/>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:700;color:var(--gold-bright)">${b.name}</div>
+              <div style="font-size:11px;color:var(--parchment-light);line-height:1.4;margin-top:2px">${b.desc || ''}</div>
+              ${statsStr}
+              <div style="margin-top:4px;font-size:10px;color:var(--parchment-dark)">剩餘：<span style="color:var(--gold-bright)">${formatBuffTimeDetail(remain)}</span></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  const html = `
+    <div class="modal-overlay" id="all-buffs-modal" style="z-index:500">
+      <div class="modal-content" style="width:320px;max-height:70vh;background:linear-gradient(180deg, #2a1f15, #150d08);border:2px solid var(--gold-dark);border-radius:10px;overflow:hidden;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--gold-dark);background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.6))">
+          <div style="font-size:15px;font-weight:700;color:var(--gold-bright)">增益狀態 (${buffs.length})</div>
+          <button id="all-buffs-close" style="width:24px;height:24px;background:transparent;border:none;color:var(--parchment-dark);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit">×</button>
+        </div>
+        <div style="overflow-y:auto;flex:1;padding:4px 0">
+          ${buffRows}
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const modal = $('all-buffs-modal');
+  if (modal) {
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    const closeBtn = $('all-buffs-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => modal.remove());
+  }
+}
+
+// buff 詳情彈窗（保留給其他地方呼叫）
 function showBuffDetail(buff) {
   const remain = Math.max(0, buff.endTime - Date.now());
   const statsStr = buff.stats && Object.keys(buff.stats).length > 0
     ? '<div style="margin-top:6px;color:var(--gold)">' + Object.entries(buff.stats).map(([k, v]) => {
-        const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', atkSpeedPct: '攻速', walkSpeedPct: '移速', crit: '暴擊', critDmg: '暴傷', expPct: '經驗', dropPct: '掉寶率', dodge: '閃躲', shield: '護盾值' };
+         const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', atkSpeedPct: '攻速', walkSpeedPct: '移速', crit: '暴擊', critDmg: '暴傷', expPct: '經驗', dropPct: '掉寶率', dodge: '閃躲', shield: '護盾值', allStatPct: '全屬性', pvpDmgPct: 'PVP傷害', skillDmgPct: '技能傷害' };
         const label = nameMap[k] || k;
         const val = (typeof v === 'number' && v < 1 && k.includes('Pct')) ? (v * 100).toFixed(0) + '%' : v;
         return `<span style="margin-right:8px">${label}+${val}</span>`;
@@ -12654,7 +17928,7 @@ function addTransformBuff() {
   const remainSec = getTransformRemaining() / 1000;
   if (remainSec <= 0) return;
   const statDesc = Object.entries(tf.stats || {}).map(([k, v]) => {
-    const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', mpMax: '魔力', crit: '暴擊', critDmg: '暴傷', walkSpeedPct: '移速', atkSpeedPct: '攻速', dodge: '閃躲', hit: '命中' };
+    const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', mpMax: '魔力', crit: '暴擊', critDmg: '暴傷', walkSpeedPct: '移速', atkSpeedPct: '攻速', dodge: '閃躲', hit: '命中', allStatPct: '全屬性', pvpDmgPct: 'PVP傷害', skillDmgPct: '技能傷害' };
     return `${nameMap[k] || k}+${v}`;
   }).join(' ');
   addBuff('transform', `變身·${tf.name}`, `變身為【${tf.name}】，獲得強大力量。${statDesc}`, remainSec, tf.stats || {});
@@ -12675,6 +17949,10 @@ function checkTransformExpiry() {
     updatePlayerSprite();
     calcCP();
     updateUI();
+    // ===== 多人連線：變身到期同步 =====
+    if (window.MultiplayerClient && MultiplayerClient.connected) {
+      try { syncMultiplayerProfile(); } catch (e) { /* ignore */ }
+    }
   }
 }
 
@@ -12684,7 +17962,7 @@ const SYNTH_BASE_RATES = {
   'green-blue': 0.30,
   'blue-red': 0.15,
   'red-purple': 0.05,
-  'purple-gold': 0.005,
+  'purple-gold': 0.0005, // 紫合金 0.05%
 };
 
 let synthTab = 'hero'; // hero / pet / transform
@@ -12728,13 +18006,13 @@ function renderSynthPageHTML() {
   const nextRarity = RARITY_ORDER[nextRarityIdx];
   const canSynth = nextRarityIdx < RARITY_ORDER.length;
 
-  // 统计各品質数量（按id计数，重复=多张）
+  // 统计各品質可用材料數（扣掉每種至少保留 1 張）
   const rarityCount = {};
-  RARITY_ORDER.forEach(r => { rarityCount[r] = 0; });
-  ownedList.forEach(o => { rarityCount[o.rarity] = (rarityCount[o.rarity] || 0) + 1; });
+  RARITY_ORDER.forEach(r => { rarityCount[r] = getSynthAvailableByRarity(r, synthTab); });
 
   const matCount = rarityCount[synthRarity] || 0;
-  const canAffordMat = matCount >= 4;
+  const synthCost = 2;
+  const canAffordMat = matCount >= synthCost;
   const canAffordBoosters = synthBoosters * 10 <= GS.resources.gem;
 
   const baseRate = canSynth ? SYNTH_BASE_RATES[synthRarity + '-' + nextRarity] : 0;
@@ -12762,9 +18040,9 @@ function renderSynthPageHTML() {
 
     <div class="synth-main">
       <div class="synth-materials">
-        <div class="synth-mat-title">材料（4張${RARITY_CONFIG[synthRarity].name}）</div>
+        <div class="synth-mat-title">材料（${synthCost}張${RARITY_CONFIG[synthRarity].name}重複卡）</div>
         <div class="synth-mat-slots">
-          ${[0,1,2,3].map(i => {
+          ${[0,1].map(i => {
             const filled = i < matCount;
             return `
               <div class="synth-slot rarity-${synthRarity} ${filled ? 'filled' : 'empty'}">
@@ -12859,9 +18137,10 @@ function doSynthesize() {
   if (nextRarityIdx >= RARITY_ORDER.length) return;
   const nextRarity = RARITY_ORDER[nextRarityIdx];
 
-  // 统计当前品質的数量
-  const sameRarity = ownedList.filter(o => o.rarity === synthRarity);
-  if (sameRarity.length < 4) { alert('材料不足，需要4張同品質卡'); return; }
+  // 可用材料數 = 該稀有度下所有卡的 (count - 1) 之和（每種至少保留 1 張）
+  const available = getSynthAvailableByRarity(synthRarity, synthTab);
+  const synthCost = 2; // 每次合成消耗 2 張重複卡
+  if (available < synthCost) { alert('材料不足，需要 2 張同品質重複卡（每種卡至少保留 1 張）'); return; }
 
   // 扣除強化券鑽石
   const gemCost = synthBoosters * 10;
@@ -12872,12 +18151,9 @@ function doSynthesize() {
   const baseRate = SYNTH_BASE_RATES[synthRarity + '-' + nextRarity];
   const rate = Math.min(0.99, baseRate * Math.pow(1.2, synthBoosters));
 
-  // 扣除4张材料（先删数量最少的id，保证多样性尽量保留，简单起见删前4个）
-  const toRemove = sameRarity.slice(0, 4);
-  toRemove.forEach(item => {
-    const idx = ownedList.findIndex(o => o.id === item.id);
-    if (idx >= 0) ownedList.splice(idx, 1);
-  });
+  // 消耗重複卡（每種至少保留 1 張）
+  const consumed = consumeDuplicateCardsForSynth(synthRarity, synthCost, synthTab);
+  if (!consumed) { alert('材料扣除失敗，請重試'); return; }
 
   // 判断是否成功
   const success = Math.random() < rate;
@@ -12888,14 +18164,9 @@ function doSynthesize() {
     const candidates = pool.filter(i => i.rarity === nextRarity);
     if (candidates.length > 0) {
       const picked = candidates[Math.floor(Math.random() * candidates.length)];
-      // 已经有的就叠level，没有的加进去
-      const existing = ownedList.find(o => o.id === picked.id);
-      if (existing) {
-        existing.level = (existing.level || 1) + 1;
-      } else {
-        ownedList.push({ ...picked, level: 1 });
-      }
-      resultItem = picked;
+      // 加入收藏（新卡 count=1，重複則 count++）
+      const addResult = addCardToCollection(picked, synthTab);
+      resultItem = addResult.card;
     }
   }
 
@@ -12943,9 +18214,10 @@ function equipHero(heroId) {
   });
   const hero = GS.ownedHeroes.find(h => h.id === heroId);
   if (hero) {
-    // 英雄按職業映射到對應8帧職業圖資，品質通過CSS drop-shadow區分
+    // 有 spriteKey 的英雄使用自身 8 帧独立图资；无 spriteKey 的按职业映射
+    const keySprite = hero.spriteKey ? SPRITE[hero.spriteKey] : null;
     const clsId = resolveClassId(hero.classId || 'warrior');
-    const baseSprite = SPRITE[clsId] || SPRITE.warrior;
+    const baseSprite = keySprite || SPRITE[clsId] || SPRITE.warrior;
     const rarity = hero.rarity || 'white';
     const rarityGlow = {
       white: 'rgba(255,255,255,0.3)',
@@ -12970,10 +18242,12 @@ function equipHero(heroId) {
       atk: hero.stats.atk || 10,
       active: true, state: 'idle', facing: 'right',
       attackCooldown: 0, role: hero.role,
+      multiFrame: !!heroSprite.multiFrame,
     };
     summon.targetX = summon.x; summon.targetY = summon.y;
     GS.summons.push(summon);
-    const el = createSummonSprite(summon);
+    // spriteKey 英雄用完整 8 幀結構（lean=false）；職業圖沿用 lean 模式
+    const el = keySprite ? createSummonSpriteFull(summon) : createSummonSprite(summon);
     // 加品质光晕class
     if (el) el.classList.add('hero-unit', 'rarity-' + rarity);
     addLog('system', `${hero.name} 出戰！`);
@@ -12983,8 +18257,36 @@ function equipHero(heroId) {
 
 function equipPet(petId) {
   GS.equippedPetId = petId;
+  // 移除舊的寵物跟隨單位
+  document.querySelectorAll('.world-unit.pet-follower').forEach(el => el.remove());
   const pet = GS.ownedPets.find(p => p.id === petId);
-  if (pet) addLog('system', `守護寵物：${pet.name}`);
+  if (pet) {
+    addLog('system', `守護寵物：${pet.name}`);
+    const petSprite = SPRITE[pet.spriteKey] || { idle: '🐾', color: '#c0a060', glow: '#ffe090' };
+    const rarity = pet.rarity || 'white';
+    const rarityGlow = {
+      white: 'rgba(255,255,255,0.3)',
+      green: 'rgba(100,220,120,0.6)',
+      blue: 'rgba(90,160,255,0.6)',
+      red: 'rgba(255,90,90,0.6)',
+      purple: 'rgba(190,110,255,0.7)',
+      gold: 'rgba(255,210,80,0.8)',
+    };
+    const spriteData = { ...petSprite, glow: rarityGlow[rarity] || rarityGlow.white };
+    const follower = {
+      id: 'pet_' + pet.id, name: pet.name, sprite: spriteData,
+      rarity: rarity, isPetFollower: true, multiFrame: !!petSprite.multiFrame,
+      x: GS.player.x - 20, y: GS.player.y + 8,
+      targetX: 0, targetY: 0,
+      state: 'idle', facing: 'right',
+    };
+    follower.targetX = follower.x; follower.targetY = follower.y;
+    GS.petFollower = follower;
+    const el = createPetFollowerSprite(follower);
+    if (el) el.classList.add('rarity-' + rarity);
+  } else {
+    GS.petFollower = null;
+  }
   updateUI();
   updateSlotDisplay();
 }
@@ -13185,8 +18487,12 @@ function renderEquipTabPanel() {
     const eq = GS.equipment[slot];
     if (eq) {
       const rc = RARITY_CONFIG[eq.rarity] || RARITY_CONFIG.white;
+      const enhanceLv = eq.enhanceLevel || 0;
       return `<div class="equip-slot-card has-item rarity-${eq.rarity}" data-equip-slot="${slot}" style="border-color:${rc.color}">
-        <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${eq.icon || slotIconUrl(slot)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;display:block"/></div>
+        <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center;position:relative">
+          <img src="${eq.icon || slotIconUrl(slot)}" style="width:36px;height:36px;object-fit:contain;border-radius:8px;display:block"/>
+          ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:-4px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:8px;font-weight:800;padding:0 4px;border-radius:4px;line-height:12px">+${enhanceLv}</div>` : ''}
+        </div>
         <div class="equip-slot-name">${eq.name}</div>
         <div class="equip-slot-rarity" style="color:${rc.color}">${rc.name}</div>
       </div>`;
@@ -13243,13 +18549,13 @@ function renderTransformPanel() {
     { key: 'white',  name: '普通',   color: '#cccccc' },
   ];
   const selRarity = GS.transformRarity || 'all';
+  const playerCls = resolveClassId(p.classId);
 
   let displayPool = TRANSFORM_POOL.filter(t => isClassRestrictionMatched(t.classRestriction, playerCls));
   if (selRarity !== 'all') displayPool = displayPool.filter(t => t.rarity === selRarity);
   const rarityOrder = ['gold','purple','red','blue','green','white'];
   displayPool = [...displayPool].sort((a,b) => rarityOrder.indexOf(a.rarity) - rarityOrder.indexOf(b.rarity));
   // 可用變身總數（當前職業 + 通用）
-  const playerCls = resolveClassId(p.classId);
   const availableTotal = TRANSFORM_POOL.filter(t => isClassRestrictionMatched(t.classRestriction, playerCls)).length;
 
   const currentRc = currentTf ? (RARITY_CONFIG[currentTf.rarity] || RARITY_CONFIG.white) : null;
@@ -13316,9 +18622,11 @@ function renderTransformPanel() {
                 atk: '攻擊', def: '防禦', hpMax: 'HP', mpMax: 'MP',
                 crit: '暴擊', critDmg: '暴傷', atkSpeed: '攻速', atkSpeedPct: '攻速',
                 moveSpeed: '移速', moveSpeedPct: '移速', hit: '命中', evasion: '閃躲',
-                hpPct: '生命', mpPct: '魔力', defPct: '防禦', atkPct: '攻擊'
+                hpPct: '生命', mpPct: '魔力', defPct: '防禦', atkPct: '攻擊',
+                walkSpeedPct: '移速', dodge: '閃躲', allStatPct: '全屬性',
+                pvpDmgPct: 'PVP傷害', skillDmgPct: '技能傷害'
               };
-              const pctKeys = ['atkSpeedPct','moveSpeedPct','hpPct','mpPct','defPct','atkPct','crit','critDmg','evasion','hit'];
+              const pctKeys = ['atkSpeedPct','moveSpeedPct','walkSpeedPct','hpPct','mpPct','defPct','atkPct','crit','critDmg','evasion','dodge','hit','allStatPct','pvpDmgPct','skillDmgPct'];
               const suffix = pctKeys.includes(k) ? '%' : '';
               return `${nameMap[k] || k}+${v}${suffix}`;
             }).join(' ');
@@ -13515,18 +18823,18 @@ function renderEquipPanel() {
     const eq = slot === 'ring1' || slot === 'ring2' ? GS.equipment[slot] : GS.equipment[slot];
     const iconUrl = getEquipIcon(slot);
     if (eq && eq.name) {
-      const level = eq.level || 0;
+      const level = eq.enhanceLevel || 0;
       return `
         <div class="equip-slot-item has-item rarity-${eq.rarity}" data-equip-slot="${slot}">
           <div class="equip-slot-level-badge">+${level}</div>
-          <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${eq.icon || iconUrl}" style="width:32px;height:32px;object-fit:cover;border-radius:6px;display:block"/></div>
+          <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${eq.icon || iconUrl}" style="width:32px;height:32px;object-fit:contain;border-radius:8px;display:block"/></div>
           <div class="equip-slot-name">${eq.name}</div>
         </div>
       `;
     }
     return `
       <div class="equip-slot-item" data-equip-slot="${slot}">
-        <div class="equip-slot-icon" style="opacity:0.5;display:flex;align-items:center;justify-content:center"><img src="${iconUrl}" style="width:28px;height:28px;object-fit:cover;border-radius:6px;display:block;filter:grayscale(0.5)"/></div>
+        <div class="equip-slot-icon" style="opacity:0.5;display:flex;align-items:center;justify-content:center"><img src="${iconUrl}" style="width:28px;height:28px;object-fit:contain;border-radius:6px;display:block;filter:grayscale(0.5)"/></div>
         <div class="equip-slot-empty-text">${slotInfo.name}</div>
       </div>
     `;
@@ -13583,9 +18891,11 @@ function renderHeroesPanel() {
           ${displayPool.map(h => {
             const s = h.stats || {};
             const equipped = GS.equippedHeroId === h.id;
-            const rc = RARITY_CONFIG[h.rarity] || RARITY_CONFIG.white;
-            const heroData = SUMMON_POOL.find(x => x.id === h.id) || h;
-            const hClass = heroData.classId || 'warrior';
+             const rc = RARITY_CONFIG[h.rarity] || RARITY_CONFIG.white;
+             const heroData = SUMMON_POOL.find(x => x.id === h.id) || h;
+             const sprObj = h.spriteKey ? SPRITE[h.spriteKey] : (typeof h.sprite === 'string' ? SPRITE[h.sprite] : h.sprite);
+             const sprIdle = sprObj?.idle || '';
+             const hClass = heroData.classId || 'warrior';
             const hRace = heroData.race || 'human';
             const cls = CLASSES[hClass];
             const raceNames = { human: '人类', elf: '精灵', orc: '兽人', undead: '亡灵' };
@@ -13604,7 +18914,7 @@ function renderHeroesPanel() {
               <div class="tf-card rarity-badge rarity-${h.rarity || 'white'} ${equipped ? 'equipped' : ''}" data-hero-id="${h.id}">
                 ${equipped ? '<div class="card-top-tag">已召喚</div>' : ''}
                 <div class="tf-card-icon">
-                  <img src="${SPRITE[h.sprite]?.idle || ''}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'"/>
+                  <img src="${sprIdle}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'"/>
                 </div>
                 <div class="tf-card-name" style="font-size:9px">${h.name}</div>
                 <div style="font-size:8px;color:${rc.color};margin:1px 0">${rc.name}</div>
@@ -13730,7 +19040,7 @@ function renderBagPage() {
     <div class="bag-currency-bar" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:linear-gradient(90deg, rgba(40,28,14,0.8), rgba(25,18,8,0.6));border-bottom:1px solid rgba(240,192,64,0.2);margin-bottom:4px">
       <div style="display:flex;align-items:center;gap:6px;flex:1">
         <div style="width:24px;height:24px;border-radius:50%;border:1px solid #d4a020;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 0 6px rgba(240,192,64,0.4)">
-          <img src="${ITEM_ICONS.gold_coin}" style="width:100%;height:100%;object-fit:cover;display:block"/>
+          <img src="${ITEM_ICONS.gold_coin}" style="width:140%;height:140%;object-fit:cover;display:block;transform:scale(1.1)"/>
         </div>
         <div>
           <div style="font-size:10px;color:var(--parchment-dark);line-height:1">金幣</div>
@@ -13743,7 +19053,7 @@ function renderBagPage() {
           <div style="font-size:14px;font-weight:800;color:#80d4ff;text-shadow:0 1px 2px #000;line-height:1.2">${GS.resources.gem.toLocaleString()}</div>
         </div>
         <div style="width:24px;height:24px;border-radius:50%;border:1px solid #6080d0;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 0 6px rgba(128,160,255,0.4)">
-          <img src="${ITEM_ICONS.gem}" style="width:100%;height:100%;object-fit:cover;display:block"/>
+          <img src="${ITEM_ICONS.gem_bag}" style="width:120%;height:120%;object-fit:cover;display:block;transform:scale(1.05)"/>
         </div>
       </div>
     </div>
@@ -13776,24 +19086,27 @@ function renderBagPage() {
           let iconHtml = '';
           if (isEquip) {
             const iconUrl = getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type);
-            iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:4px"/>`;
+            iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px"/>`;
           } else if (item.itemType === 'consumable') {
             const iconUrl = getItemIconUrl(item);
-            iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:4px"/>`;
+            iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px"/>`;
           } else if (item.itemType === 'material') {
             iconHtml = `<div style="width:22px;height:22px;border-radius:3px;background:linear-gradient(135deg, ${borderColor}88, ${borderColor}33);border:1px solid ${borderColor}66"></div>`;
           } else {
             const iconUrl = getItemIconUrl(item);
-            iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:4px"/>`;
+            iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px"/>`;
           }
           const displayName = item.name && item.name.length > 4 ? item.name.slice(0, 4) : (item.name || '');
+          const enhanceLv = isEquip ? (item.enhanceLevel || 0) : 0;
+          const itemUid = isEquip ? (item.uid || (item.id + '|' + idx)) : (item.id + '|' + item.itemType);
           return `
-            <div class="bag-cell rarity-${item.rarity || 'common'}" data-bag-item-id="${item.id}" data-bag-item-type="${item.itemType}"
+            <div class="bag-cell rarity-${item.rarity || 'common'}" data-bag-item-id="${item.id}" data-bag-item-type="${item.itemType}" data-bag-item-uid="${itemUid}"
                  style="position:relative;aspect-ratio:1;border:2px solid ${borderColor};border-radius:6px;background:linear-gradient(180deg, rgba(30,22,14,0.9), rgba(15,10,6,0.95));display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;box-shadow:inset 0 0 8px ${borderColor}22">
               ${isNew ? '<div style="position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:#ff4040;box-shadow:0 0 4px #ff4040"></div>' : ''}
+              ${enhanceLv > 0 ? `<div style="position:absolute;top:-2px;left:-2px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:9px;font-weight:800;padding:0 4px;border-radius:4px;line-height:14px;z-index:2">+${enhanceLv}</div>` : ''}
               <div style="flex:1;display:flex;align-items:center;justify-content:center;width:80%;height:80%">${iconHtml}</div>
               ${displayName ? `<div style="font-size:8px;color:${rc.color};text-shadow:0 1px 2px #000;padding:1px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:90%;text-align:center">${displayName}</div>` : ''}
-              ${item.count > 1 ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : ''}
+              ${(!isEquip && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : ''}
             </div>`;
         }).join('')
       }
@@ -13837,9 +19150,16 @@ function bindBagPageEvents() {
   // 道具点击显示详情
   page.querySelectorAll('[data-bag-item-id]').forEach(item => {
     item.addEventListener('click', () => {
-      const id = item.dataset.bagItemId;
+      const uid = item.dataset.bagItemUid;
       const type = item.dataset.bagItemType;
-      const invItem = GS.inventory.find(i => i.id === id && i.itemType === type);
+      let invItem;
+      if (type === 'equipment' && uid) {
+        // 裝備按 uid 找原物件（每件獨立）
+        invItem = GS.inventory.find(i => i.itemType === 'equipment' && i.uid === uid);
+      } else {
+        const id = item.dataset.bagItemId;
+        invItem = GS.inventory.find(i => i.id === id && i.itemType === type);
+      }
       if (invItem) showItemDetail(invItem);
     });
   });
@@ -13895,6 +19215,318 @@ function bindBagPageEvents() {
   });
 }
 
+// ==================== 裝備強化系統 ====================
+let enhanceState = {
+  targetItem: null,      // 要強化的裝備（來自背包，未裝備）
+  boostScrollUsed: false, // 是否使用提升卷
+  animating: false,
+};
+
+function openEnhancePage(startItem) {
+  // 初始化強化狀態
+  enhanceState = {
+    targetItem: startItem || null,
+    boostScrollUsed: false,
+    animating: false,
+  };
+  el.pageTitle.textContent = '裝備強化';
+  renderEnhancePage();
+}
+
+function renderEnhancePage() {
+  const item = enhanceState.targetItem;
+  const info = item ? getEnhanceRateTable(item) : null;
+  const curLevel = item ? (item.enhanceLevel || 0) : 0;
+  const nextLevel = curLevel + 1;
+  const canEnhance = item && info && nextLevel <= info.max;
+  const successRate = canEnhance ? calcEnhanceSuccessRate(item, enhanceState.boostScrollUsed) : 0;
+  const isSafe = canEnhance && nextLevel <= info.safe;
+
+  // 強化卷數量
+  const scrollCount = getItemCountInInventory('enhance_scroll');
+  const boostScrollCount = getItemCountInInventory('enhance_boost_scroll');
+
+  // 背包中可強化的裝備（未裝備的）
+  const bagEquips = GS.inventory.filter(i => i.itemType === 'equipment' && getEnhanceRateTable(i));
+
+  const rc = item ? (RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white) : null;
+
+  const renderEquipIcon = (eq) => {
+    const lvl = eq.enhanceLevel || 0;
+    const iconUrl = getEquipIcon(eq.type === 'accessory' ? 'ring1' : eq.type) || ITEM_ICON_MAP.default;
+    return `
+      <div style="width:56px;height:56px;position:relative;border:2px solid ${RARITY_CONFIG[eq.rarity]?.color || '#999'};border-radius:8px;background:linear-gradient(180deg,rgba(30,20,10,0.9),rgba(15,10,5,0.95));display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px ${RARITY_CONFIG[eq.rarity]?.color || '#999'}44">
+        <img src="${iconUrl}" style="width:70%;height:70%;object-fit:contain;display:block"/>
+        ${lvl > 0 ? `<span style="position:absolute;top:-2px;right:-2px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:9px;font-weight:800;padding:0 4px;border-radius:4px;line-height:14px">+${lvl}</span>` : ''}
+      </div>
+    `;
+  };
+
+  const getBonusText = (eq, nextLvl) => {
+    const base = eq.baseStats || eq.stats || {};
+    const bonus = Math.floor(nextLvl * 5); // 每+1=5%
+    if (isWeaponSlot(eq.type)) return `攻擊 +${bonus}%`;
+    if (isArmorSlot(eq.type)) return `防禦 +${bonus}%`;
+    return '';
+  };
+
+  const html = `
+    <div style="padding:10px 0">
+      <!-- 強化台：左卷軸 + 中裝備 + 右提升卷 -->
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:20px 10px;background:linear-gradient(180deg,rgba(60,40,20,0.5),rgba(20,14,8,0.3));border:1px solid var(--gold-dark);border-radius:12px;margin-bottom:12px;position:relative">
+        <div style="position:absolute;top:8px;left:10px;font-size:10px;color:var(--parchment-dark)">強化台</div>
+
+        <!-- 左：強化卷格子 -->
+        <div class="enhance-slot enhance-scroll-slot" style="width:64px;height:64px;border:2px dashed ${scrollCount > 0 ? '#f0c040' : '#555'};border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.3);cursor:pointer;position:relative" data-enhance-scroll>
+          <img src="${ITEM_ICONS.enhance_stone}" style="width:36px;height:36px;object-fit:contain;opacity:${scrollCount > 0 ? 1 : 0.3};border-radius:4px"/>
+          <span style="font-size:9px;color:var(--parchment-dark);margin-top:2px">強化卷</span>
+          <span style="position:absolute;bottom:-2px;right:-2px;background:rgba(0,0,0,0.8);color:var(--gold-bright);font-size:9px;font-weight:700;padding:0 4px;border-radius:4px;border:1px solid var(--gold-dark)">${scrollCount}</span>
+        </div>
+
+        <!-- 箭頭 -->
+        <div style="color:var(--gold-dark);font-size:18px;font-weight:900">→</div>
+
+        <!-- 中：裝備 -->
+        <div class="enhance-target-slot" id="enhance-target-slot" style="width:90px;height:90px;border:2px solid ${item ? (rc?.color || '#999') : '#555'};border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 40%,${item ? (rc?.color || '#999') + '33' : 'transparent'},rgba(20,14,8,0.9) 70%);box-shadow:${item ? '0 0 20px ' + (rc?.color || '#999') + '55' : 'none'};position:relative" data-enhance-target>
+          ${item ? renderEquipIcon(item) : '<span style="font-size:11px;color:var(--parchment-dark)">選擇裝備</span>'}
+          ${item ? `<span style="position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;color:${rc?.color || '#ccc'};font-weight:700;background:rgba(0,0,0,0.8);padding:1px 8px;border-radius:8px;border:1px solid ${rc?.color || '#555'}">${item.name}${curLevel > 0 ? ' +'+curLevel : ''}</span>` : ''}
+        </div>
+
+        <!-- 箭頭 -->
+        <div style="color:var(--gold-dark);font-size:18px;font-weight:900">→</div>
+
+        <!-- 右：機率提升卷格子 -->
+        <div class="enhance-slot enhance-boost-slot ${enhanceState.boostScrollUsed ? 'active' : ''}" style="width:64px;height:64px;border:2px ${enhanceState.boostScrollUsed ? 'solid #b080ff' : (boostScrollCount > 0 ? 'dashed #a060ff' : 'dashed #555')};border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${enhanceState.boostScrollUsed ? 'rgba(160,96,255,0.15)' : 'rgba(0,0,0,0.3)'};cursor:pointer;position:relative" data-enhance-boost>
+          <img src="${ITEM_ICONS.bless_stone}" style="width:36px;height:36px;object-fit:contain;opacity:${boostScrollCount > 0 ? 1 : 0.3};filter:hue-rotate(250deg) saturate(1.5);border-radius:4px"/>
+          <span style="font-size:9px;color:${enhanceState.boostScrollUsed ? '#c0a0ff' : 'var(--parchment-dark)'};margin-top:2px">${enhanceState.boostScrollUsed ? '已使用' : '提升卷'}</span>
+          <span style="position:absolute;bottom:-2px;right:-2px;background:rgba(0,0,0,0.8);color:#c0a0ff;font-size:9px;font-weight:700;padding:0 4px;border-radius:4px;border:1px solid #8060aa">${boostScrollCount}</span>
+        </div>
+      </div>
+
+      <!-- 屬性預覽 -->
+      ${item ? `
+        <div style="padding:10px 12px;background:linear-gradient(135deg,rgba(40,28,16,0.7),rgba(20,14,8,0.5));border:1px solid var(--gold-dark);border-radius:8px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:11px;font-weight:700;color:var(--gold-bright)">強化效果預覽</span>
+            <span style="font-size:9px;color:var(--parchment-dark)">每級 +5% 基礎屬性</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <div style="flex:1;padding:6px 8px;background:rgba(0,0,0,0.3);border-radius:6px;text-align:center">
+              <div style="font-size:9px;color:var(--parchment-dark)">當前 +${curLevel}</div>
+              <div style="font-size:12px;color:var(--parchment-light);font-weight:600;margin-top:2px">${getBonusText(item, curLevel) || '—'}</div>
+            </div>
+            <div style="color:var(--gold-bright);font-size:16px;font-weight:900">→</div>
+            <div style="flex:1;padding:6px 8px;background:${canEnhance ? 'rgba(80,200,100,0.15)' : 'rgba(255,80,80,0.15)'};border:1px solid ${canEnhance ? '#50c878' : '#ff6060'};border-radius:6px;text-align:center">
+              <div style="font-size:9px;color:${canEnhance ? '#80ff90' : '#ff8080'}">${canEnhance ? '強化後 +'+nextLevel : '已達頂級'}</div>
+              <div style="font-size:12px;color:${canEnhance ? '#a0ffb0' : '#ff9090'};font-weight:700;margin-top:2px">${canEnhance ? getBonusText(item, nextLevel) : '最高等級'}</div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- 成功率 & 強化按鈕 -->
+      <div style="padding:12px;background:linear-gradient(135deg,rgba(50,35,15,0.7),rgba(25,15,5,0.5));border:1px solid var(--gold-dark);border-radius:10px;margin-bottom:12px;text-align:center">
+        <div style="margin-bottom:8px">
+          <span style="font-size:10px;color:var(--parchment-dark)">成功率</span>
+          <span style="margin-left:8px;font-size:20px;font-weight:900;color:${isSafe ? '#80ff90' : (successRate >= 0.5 ? '#ffd040' : '#ff7070')};text-shadow:0 1px 3px #000">${(successRate * 100).toFixed(successRate < 0.01 ? 3 : 1)}%</span>
+          ${isSafe ? '<span style="margin-left:6px;font-size:9px;color:#80ff90;font-weight:700;padding:1px 6px;border:1px solid #50c878;border-radius:10px;background:rgba(80,200,120,0.15)">安定</span>' : ''}
+          ${enhanceState.boostScrollUsed ? '<span style="margin-left:6px;font-size:9px;color:#60c0ff;font-weight:700;padding:1px 6px;border:1px solid #6080aa;border-radius:10px;background:rgba(80,160,255,0.15)">提升+10%</span>' : ''}
+        </div>
+        ${!isSafe && canEnhance ? `<div style="font-size:9px;color:#ff8080;margin-bottom:8px">⚠ 超過安定值，失敗等級將歸 0</div>` : ''}
+        <button class="enhance-do-btn" id="enhance-do-btn" style="width:100%;padding:12px;font-size:15px;font-weight:900;background:linear-gradient(180deg,#d4a020,#8a6520);border:2px solid #f0c040;color:#fff;border-radius:8px;cursor:pointer;text-shadow:0 1px 3px rgba(0,0,0,0.8);box-shadow:0 2px 12px rgba(240,192,64,0.4), inset 0 1px 0 rgba(255,220,120,0.4);letter-spacing:2px" ${!canEnhance || scrollCount < 1 ? 'disabled style="opacity:0.4;cursor:not-allowed"' : ''}>
+          ⚒ 開始強化
+        </button>
+        ${!item ? '<div style="font-size:10px;color:var(--parchment-dark);margin-top:6px">請先選擇要強化的裝備</div>' : ''}
+        ${item && scrollCount < 1 ? '<div style="font-size:10px;color:#ff8080;margin-top:6px">缺少強化卷，請至商店購買</div>' : ''}
+      </div>
+
+      <!-- 背包裝備列表 -->
+      <div style="margin-bottom:8px;padding:0 2px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <div style="width:3px;height:12px;background:linear-gradient(180deg,var(--gold-bright),transparent);border-radius:2px"></div>
+          <span style="font-size:12px;font-weight:700;color:var(--gold-bright)">背包裝備</span>
+          <span style="font-size:9px;color:var(--parchment-dark)">（點擊更換強化目標）</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:4px">
+        ${bagEquips.length === 0 ? '<div style="grid-column:1/-1;text-align:center;padding:20px;font-size:11px;color:var(--parchment-dark)">背包中沒有可強化的裝備</div>' : ''}
+        ${bagEquips.map((eq, idx) => {
+          const eqInfo = getEnhanceRateTable(eq);
+          const eqLvl = eq.enhanceLevel || 0;
+          const isMax = eqLvl >= eqInfo.max;
+          const isSelected = enhanceState.targetItem && enhanceState.targetItem === eq;
+          return `
+            <div class="bag-equip-enhance-item ${isSelected ? 'selected' : ''}" data-enhance-bag-item="${idx}" style="padding:6px 4px;border:1.5px solid ${isSelected ? '#ffd040' : (RARITY_CONFIG[eq.rarity]?.color || '#555')};border-radius:8px;background:linear-gradient(180deg, rgba(30,20,10,0.9), rgba(15,10,5,0.95));display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;box-shadow:${isSelected ? '0 0 12px rgba(240,192,64,0.6)' : 'none'};position:relative">
+              ${renderEquipIcon(eq)}
+              <div style="font-size:9px;color:var(--parchment-light);text-align:center;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${eq.name}</div>
+              ${isMax ? '<span style="font-size:8px;color:#ffd040;font-weight:700">MAX</span>' : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <div style="padding-bottom:20px"></div>
+    </div>
+    <!-- 強化結果彈窗 -->
+    <div id="enhance-result-modal" class="enhance-result-modal" style="display:none">
+      <div id="enhance-result-inner" style="background:linear-gradient(180deg,rgba(40,28,18,0.98),rgba(20,14,8,0.98));border:3px solid var(--gold);border-radius:14px;padding:24px;max-width:280px;width:80%;text-align:center;box-shadow:0 0 40px rgba(240,192,64,0.5)">
+      </div>
+    </div>
+  `;
+
+  el.pageContent.innerHTML = html;
+  bindEnhanceEvents();
+  // 返回按鈕：返回背包頁
+  el.backBtn.onclick = () => {
+    el.pageTitle.textContent = '背包';
+    el.pageContent.innerHTML = renderBagPage();
+    bindBagPageEvents();
+    // 還原預設返回行為
+    el.backBtn.onclick = closeSidePage;
+  };
+}
+
+function bindEnhanceEvents() {
+  const bag = GS.inventory.filter(i => i.itemType === 'equipment' && getEnhanceRateTable(i));
+
+  // 點擊背包裝備設為強化目標
+  el.pageContent.querySelectorAll('[data-enhance-bag-item]').forEach(el2 => {
+    el2.addEventListener('click', () => {
+      const idx = Number(el2.dataset.enhanceBagItem);
+      enhanceState.targetItem = bag[idx] || null;
+      renderEnhancePage();
+    });
+  });
+
+  // 點擊強化卷格子：消耗一張強化卷（開始強化時消耗）
+  const scrollSlot = el.pageContent.querySelector('[data-enhance-scroll]');
+  if (scrollSlot) {
+    scrollSlot.addEventListener('click', () => {
+      const cnt = getItemCountInInventory('enhance_scroll');
+      if (cnt > 0) showFloatingText('強化卷 ×' + cnt, '#ffd040');
+      else showFloatingText('缺少強化卷', '#ff7070');
+    });
+  }
+
+  // 點擊提升卷格子：切換是否使用
+  const boostSlot = el.pageContent.querySelector('[data-enhance-boost]');
+  if (boostSlot) {
+    boostSlot.addEventListener('click', () => {
+      const cnt = getItemCountInInventory('enhance_boost_scroll');
+      if (cnt < 1 && !enhanceState.boostScrollUsed) {
+        showFloatingText('缺少提升卷', '#ff7070');
+        return;
+      }
+      enhanceState.boostScrollUsed = !enhanceState.boostScrollUsed;
+      renderEnhancePage();
+    });
+  }
+
+  // 強化按鈕
+  const btn = document.getElementById('enhance-do-btn');
+  if (btn && !btn.disabled) {
+    btn.addEventListener('click', doEnhance);
+  }
+}
+
+function doEnhance() {
+  const item = enhanceState.targetItem;
+  if (!item) return;
+  const info = getEnhanceRateTable(item);
+  if (!info) return;
+  const curLevel = item.enhanceLevel || 0;
+  const nextLevel = curLevel + 1;
+  if (nextLevel > info.max) return;
+
+  // 檢查強化卷數量
+  if (getItemCountInInventory('enhance_scroll') < 1) { alert('強化卷不足'); return; }
+  // 檢查提升卷
+  if (enhanceState.boostScrollUsed && getItemCountInInventory('enhance_boost_scroll') < 1) { alert('提升卷不足'); return; }
+
+  // 【Debug】強化前印出裝備物件與所在位置
+  console.log('[強化Debug] 強化前 item =', item);
+  console.log('[強化Debug] item.uid =', item.uid);
+  const bagIdx = GS.inventory.indexOf(item);
+  let equipSlot = null;
+  for (const slot in (GS.equipment || {})) {
+    if (GS.equipment[slot] === item || (GS.equipment[slot]?.uid && item.uid && GS.equipment[slot].uid === item.uid)) {
+      equipSlot = slot; break;
+    }
+  }
+  console.log('[強化Debug] 背包索引 =', bagIdx, '；穿戴欄位 =', equipSlot);
+
+  // 消耗卷軸
+  removeFromInventory('enhance_scroll', 'consumable', 1);
+  if (enhanceState.boostScrollUsed) {
+    removeFromInventory('enhance_boost_scroll', 'consumable', 1);
+  }
+
+  // 安定值以內100%成功；超過安定值才會失敗，失敗則裝備消失
+  const rate = calcEnhanceSuccessRate(item, enhanceState.boostScrollUsed);
+  let effectiveRate;
+  if (curLevel < info.safe) {
+    effectiveRate = 1;
+  } else {
+    effectiveRate = rate;
+  }
+  const success = Math.random() < effectiveRate;
+
+  // 播放動畫
+  const targetSlot = document.getElementById('enhance-target-slot');
+  if (targetSlot) {
+    targetSlot.style.animation = 'none';
+    targetSlot.offsetHeight; // reflow
+    targetSlot.style.animation = success ? 'enhance-success-flash 0.6s ease-out' : 'enhance-fail-shake 0.4s ease-out';
+  }
+
+  // 套用結果
+  setTimeout(() => {
+    if (success) {
+      // 直接修改原物件（背包或穿戴欄中同一物件引用）
+      item.enhanceLevel = nextLevel;
+      // 同步更新名稱前綴 +N
+      if (!item._baseName) item._baseName = item.name;
+      item.name = `+${nextLevel} ${item._baseName}`;
+      addLog('system', `✨ 【${item.name}】強化成功！`);
+      showEnhanceResult(true, item);
+      console.log('[強化Debug] 強化成功！item.enhanceLevel =', item.enhanceLevel, '；item.name =', item.name);
+      console.log('[強化Debug] 背包中同一物件 =', bagIdx >= 0 ? GS.inventory[bagIdx] : null);
+    } else {
+      // 失敗：超過安定值後裝備直接消失（損毀）
+      addLog('system', `💥 【${item.name}】強化失敗，裝備已損毀！`);
+      // 從背包移除該裝備
+      if (bagIdx >= 0) GS.inventory.splice(bagIdx, 1);
+      // 若已穿戴，也要從裝備欄移除
+      if (equipSlot) {
+        GS.equipment[equipSlot] = null;
+      }
+      enhanceState.targetItem = null;
+      showEnhanceResult(false, { ...item, enhanceLevel: 0 }, '強化失敗！裝備已損毀');
+      console.log('[強化Debug] 強化失敗，裝備已損毀移除');
+    }
+    // 重新計算玩家屬性（若穿戴中）
+    recalcPlayerStats();
+    // 強化完成，刷新UI
+    renderEnhancePage();
+    updateUI();
+  }, 600);
+}
+
+function showEnhanceResult(success, item, msg) {
+  const modal = document.getElementById('enhance-result-modal');
+  const inner = document.getElementById('enhance-result-inner');
+  if (!modal || !inner) return;
+  const lvl = item.enhanceLevel || 0;
+  inner.innerHTML = `
+    <div style="font-size:28px;margin-bottom:8px">${success ? '✨' : '💥'}</div>
+    <div style="font-size:18px;font-weight:900;color:${success ? '#ffd040' : '#ff7070'};margin-bottom:8px;text-shadow:0 2px 6px rgba(0,0,0,0.8)">${success ? '強化成功！' : '強化失敗'}</div>
+    <div style="font-size:14px;color:var(--parchment-light);margin-bottom:4px">${item.name}</div>
+    <div style="font-size:22px;font-weight:900;color:${success ? '#80ff90' : '#ff9090'};margin-bottom:12px;text-shadow:0 1px 3px #000">+${lvl}</div>
+    ${msg ? `<div style="font-size:11px;color:${success ? '#80ff90' : '#ff9090'};margin-bottom:12px">${msg}</div>` : ''}
+    <button onclick="document.getElementById('enhance-result-modal').style.display='none'" style="padding:8px 24px;background:linear-gradient(180deg,#8b6520,#5a3a10);border:1px solid var(--gold);color:var(--gold-bright);border-radius:6px;cursor:pointer;font-weight:700;font-size:13px">確定</button>
+  `;
+  modal.style.display = 'flex';
+}
+
 // ==================== 卡牌合成系统 ====================
 function openSynthesisPage(poolType) {
   // poolType: 'hero' 或 'pet'
@@ -13902,11 +19534,10 @@ function openSynthesisPage(poolType) {
   const owned = poolType === 'hero' ? GS.ownedHeroes : GS.ownedPets;
   const title = poolType === 'hero' ? '英雄合成' : '守護合成';
 
-  // 当前可用于合成的稀有度（至少4张相同稀有度）
+  // 可用合成材料數（重複張數扣除每種保留1張）
   const rarityCounts = {};
-  owned.forEach(card => {
-    if (!rarityCounts[card.rarity]) rarityCounts[card.rarity] = 0;
-    rarityCounts[card.rarity] += 1;
+  RARITY_ORDER.forEach(r => {
+    rarityCounts[r] = getSynthAvailableByRarity(r, poolType);
   });
 
   let html = `
@@ -13967,12 +19598,11 @@ function bindSynthesisEvents(poolType) {
 
 function doSynthesis(rarity, poolType) {
   const pool = poolType === 'hero' ? SUMMON_POOL : PET_POOL;
-  const owned = poolType === 'hero' ? GS.ownedHeroes : GS.ownedPets;
 
-  // 检查数量
-  const sameRarity = owned.filter(c => c.rarity === rarity);
-  if (sameRarity.length < SYNTHESIS_COST) {
-    alert(`${RARITY_CONFIG[rarity].name}卡牌不足${SYNTHESIS_COST}張`);
+  // 檢查可用重複數量
+  const available = getSynthAvailableByRarity(rarity, poolType);
+  if (available < SYNTHESIS_COST) {
+    alert(`${RARITY_CONFIG[rarity].name}可用重複卡不足${SYNTHESIS_COST}張（每種保留1張）`);
     return;
   }
 
@@ -13990,12 +19620,12 @@ function doSynthesis(rarity, poolType) {
   const totalRate = baseRate * (1 + tickets * ENHANCE_TICKET_BOOST);
   const finalRate = Math.min(0.99, totalRate); // 最高99%
 
-  // 消耗卡牌
-  const toRemove = sameRarity.slice(0, SYNTHESIS_COST);
-  toRemove.forEach(card => {
-    const idx = owned.findIndex(o => o.id === card.id);
-    if (idx >= 0) owned.splice(idx, 1);
-  });
+  // 消耗重複卡牌（每種至少保留1張）
+  const consumed = consumeDuplicateCardsForSynth(rarity, SYNTHESIS_COST, poolType);
+  if (!consumed) {
+    alert('材料不足，合成取消');
+    return;
+  }
   // 消耗強化券
   GS.enhanceTickets = (GS.enhanceTickets || 0) - tickets;
 
@@ -14004,8 +19634,8 @@ function doSynthesis(rarity, poolType) {
   const candidates = pool.filter(p => p.rarity === nextRarity);
 
   if (Math.random() < finalRate && candidates.length > 0) {
-    const newCard = { ...candidates[Math.floor(Math.random() * candidates.length)] };
-    owned.push(newCard);
+    const base = candidates[Math.floor(Math.random() * candidates.length)];
+    const { card: newCard } = addCardToCollection(base, poolType);
     const rc = RARITY_CONFIG[nextRarity];
     alert(`🎉 合成成功！\n獲得【${rc.name}】${newCard.name}！\n\n成功率：${(finalRate * 100).toFixed(2)}%`);
   } else {
@@ -14029,9 +19659,17 @@ function buyEnhanceTicket(amount) {
 function showItemDetail(item) {
   const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
   const s = item.baseStats || item.stats || {};
+  const enhanceLv = item.itemType === 'equipment' ? (item.enhanceLevel || 0) : 0;
+  const isWeapon = item.itemType === 'equipment' && isWeaponSlot(item.type);
+  const isArmor = item.itemType === 'equipment' && isArmorSlot(item.type);
   const statsText = Object.entries(s).map(([k, v]) => {
     const names = { atk: '攻擊', def: '防禦', hpMax: '生命', crit: '暴擊率', critDmg: '暴擊傷害' };
-    return `${names[k] || k} +${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
+    let txt = `${names[k] || k} +${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
+    if (enhanceLv > 0 && ((k === 'atk' && isWeapon) || (k === 'def' && isArmor))) {
+      const bonusVal = Math.floor(v * enhanceLv * 0.05);
+      txt = `${names[k] || k} <span style="color:var(--parchment-light)">+${v}</span> <span style="color:#80ff90;font-weight:700">(+${bonusVal} 強化)</span>${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
+    }
+    return txt;
   }).join(' · ');
 
   const isEquipment = item.itemType === 'equipment';
@@ -14040,21 +19678,20 @@ function showItemDetail(item) {
 
   // 取得圖標：優先用 item.icon URL，其次用類型
   let iconHtml = '';
-  if (item.icon && typeof item.icon === 'string' && item.icon.startsWith('/')) {
-    iconHtml = `<img src="${item.icon}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;display:block"/>`;
-  } else if (isEquipment) {
-    iconHtml = `<img src="${getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type)}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;display:block"/>`;
-  } else {
-    iconHtml = `<img src="${ITEM_ICON_MAP.default}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;display:block"/>`;
-  }
+  const iconUrl = getItemIconUrl(item);
+  iconHtml = `<img src="${iconUrl}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>`;
 
   let detailHtml = `
     <div class="item-detail-modal" id="item-detail-modal" style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:200">
       <div class="item-detail-inner" style="background:linear-gradient(180deg, rgba(40,28,18,0.98), rgba(20,14,8,0.98));border:3px solid ${rc.color};border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center;box-shadow:0 0 30px ${rc.glow}">
-        <div style="display:flex;justify-content:center;margin-bottom:10px">${iconHtml}</div>
+        <div style="display:flex;justify-content:center;margin-bottom:10px;position:relative">
+          ${iconHtml}
+          ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:calc(50% - 48px);background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:10px;font-weight:800;padding:0 6px;border-radius:6px;line-height:16px">+${enhanceLv}</div>` : ''}
+        </div>
         <div style="font-size:16px;font-weight:700;color:${rc.color};margin-bottom:4px;text-shadow:0 1px 3px #000">${item.name}</div>
         <div style="font-size:11px;color:${rc.color};margin-bottom:8px;font-weight:600">${rc.name}</div>
         ${statsText ? `<div style="font-size:12px;color:var(--parchment-light);margin-bottom:8px;line-height:1.8">${statsText}</div>` : ''}
+        ${enhanceLv > 0 ? `<div style="font-size:10px;color:#80ff90;margin-bottom:6px">強化等級 +${enhanceLv}（${enhanceLv * 5}% 基礎屬性加成）</div>` : ''}
         ${item.desc ? `<div style="font-size:11px;color:var(--parchment-dark);margin-bottom:8px;font-style:italic">"${item.desc}"</div>` : ''}
         ${item.skill ? `<div style="font-size:11px;color:var(--gold-bright);margin-bottom:8px;background:rgba(240,192,64,0.1);padding:6px;border-radius:4px">技能：${item.skill.name} - ${item.skill.desc}</div>` : ''}
         <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:12px">
@@ -14063,8 +19700,11 @@ function showItemDetail(item) {
           ${isCard ? '類型：卡牌' : ''}
           ${item.count > 1 ? ` · 數量：${item.count}` : ''}
         </div>
-        <div style="display:flex;gap:8px;justify-content:center">
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
           ${isEquipment ? `<button class="shop-item-buy" style="width:auto;padding:6px 16px" id="item-detail-equip-btn">裝備</button>` : ''}
+          ${(item.itemType === 'consumable' || item.effect?.useTransformTicket || item.effect?.bagExpand || item.effect?.hp || item.effect?.mp || item.type === 'enhance_scroll' || item.effect?.enhanceScroll || item.effect?.mysteryChest || item.effect?.revive || item.effect?.expBoost || item.effect?.dropBoost) ? `<button class="shop-item-buy" style="width:auto;padding:6px 16px;background:linear-gradient(180deg,#60a040,#306020);border-color:#80c060;color:#e0ffd0" id="item-detail-use-btn">使用</button>` : ''}
+          ${(isEquipment && getEnhanceRateTable(item)) ? `<button class="shop-item-buy" style="width:auto;padding:6px 16px;background:linear-gradient(180deg,#d4a020,#8a6520);border-color:#f0c040;color:#fff" id="item-detail-enhance-btn">強化</button>` : ''}
+          ${item.type === 'enhance_scroll' || item.effect?.enhanceScroll ? `<button class="shop-item-buy" style="width:auto;padding:6px 16px;background:linear-gradient(180deg,#d4a020,#8a6520);border-color:#f0c040;color:#fff" id="item-detail-enhance-btn">強化</button>` : ''}
           ${isCard ? `<button class="shop-item-buy" style="width:auto;padding:6px 16px;background:linear-gradient(180deg,#a060ff,#6030a0);border-color:#a060ff" id="item-detail-synth-btn">合成</button>` : ''}
           <button class="shop-item-buy" style="width:auto;padding:6px 16px;background:linear-gradient(180deg,#555,#333);border-color:#777" id="item-detail-close-btn" onclick="document.getElementById('item-detail-modal').remove()">關閉</button>
         </div>
@@ -14104,6 +19744,38 @@ function showItemDetail(item) {
     };
   }
 
+  // 強化按鈕
+  const enhanceBtn = document.getElementById('item-detail-enhance-btn');
+  if (enhanceBtn) {
+    enhanceBtn.onclick = () => {
+      document.getElementById('item-detail-modal').remove();
+      // 找一個背包中可強化的裝備作為起始目標
+      const startItem = (item.itemType === 'equipment' && getEnhanceRateTable(item)) ? item : null;
+      openEnhancePage(startItem);
+    };
+  }
+
+  // 使用按鈕（消耗品、體驗券等）
+  const useBtn = document.getElementById('item-detail-use-btn');
+  if (useBtn) {
+    useBtn.onclick = () => {
+      // 變身體驗券：直接啟動變身（不受職業限制）
+      if (item.effect?.useTransformTicket && item.effect.transformId) {
+        useTransformTicket(item.effect.transformId);
+      } else if (item.itemType === 'consumable' && item.id) {
+        useConsumable(item.id);
+      } else if (item.effect?.bagExpand) {
+        useConsumable(item.id);
+      } else {
+        // 嘗試用通用方式
+        if (item.id) useConsumable(item.id);
+      }
+      document.getElementById('item-detail-modal')?.remove();
+      el.pageContent.innerHTML = renderBagPage();
+      bindBagPageEvents();
+    };
+  }
+
   // 点击背景關閉
   document.getElementById('item-detail-modal').addEventListener('click', e => {
     if (e.target.id === 'item-detail-modal') {
@@ -14129,9 +19801,17 @@ function renderGachaPage() {
     transform: { title: '變身召喚',   desc: '獲得強大變身形態，戰力飆升', btn: '查看全部變身' },
   };
   const t = titles[activeTab] || titles.hero;
-  const costSingle = GACHA_COST_SINGLE;
   const costTen    = GACHA_COST_TEN;
   const costBig    = GACHA_COST_BIG;
+  const goldDailyInfo = getGoldGachaDailyInfo();
+  const goldSingleCost = activeTab === 'transform' ? GACHA_GOLD_COST_SINGLE_TRANSFORM : GACHA_GOLD_COST_SINGLE;
+  const goldRemaining = goldDailyInfo.remaining;
+  const goldMax = goldDailyInfo.max;
+  const resetMs = goldDailyInfo.nextReset.getTime() - Date.now();
+  const resetHours = Math.floor(resetMs / 3600000);
+  const resetMins = Math.floor((resetMs % 3600000) / 60000);
+  const resetText = `${resetHours}小時${resetMins}分`;
+  const goldDisabled = goldRemaining <= 0;
   return `
     <div class="gacha-header-banner">
       <div class="gacha-banner-title">${t.title}</div>
@@ -14151,9 +19831,9 @@ function renderGachaPage() {
       <div class="rarity-item gold">神話<br>0.2%</div>
     </div>
     <div class="gacha-buttons">
-      <button class="gacha-btn-main" id="gacha-single">
-        <span>單抽</span>
-        <span class="gacha-cost">💎 ${costSingle}</span>
+      <button class="gacha-btn-main gold-pull ${goldDisabled ? 'disabled' : ''}" id="gacha-single" ${goldDisabled ? 'disabled' : ''}>
+        <span>${goldDisabled ? '今日已額滿' : '金幣抽'}</span>
+        <span class="gacha-cost">💰 ${goldSingleCost.toLocaleString()} · 剩 ${goldRemaining}/${goldMax}</span>
       </button>
       <button class="gacha-btn-main ten-pull" id="gacha-ten">
         <span>十連 <span class="gacha-bonus-tag">+1</span></span>
@@ -14165,8 +19845,14 @@ function renderGachaPage() {
       </button>
     </div>
     <div style="font-size:10px;color:var(--parchment-dark);text-align:center;line-height:1.6;margin-bottom:10px">
+      ${goldDisabled
+        ? `⚠ 今日金幣抽已用完，明日6:00重置<br>`
+        : `今日剩餘金幣抽：${goldRemaining}/${goldMax} 次，下次重置：${resetText}<br>`
+      }
       十連抽必得綠色及以上 · 30+5抽必得稀有及以上<br>
       擁有鑽石：<span style="color:#80d4ff;font-weight:700">💎 ${GS.resources.gem.toLocaleString()}</span>
+      &nbsp;|&nbsp;
+      擁有金幣：<span style="color:#f0c040;font-weight:700">💰 ${GS.resources.gold.toLocaleString()}</span>
     </div>
 
     <!-- 圖鑑網格 -->
@@ -14213,9 +19899,7 @@ function renderShopPage() {
       { id: 'move1', name: '行走加速藥水', desc: '移動速度+20%，持續1小時', price: 200, icon: ITEM_ICONS.move1, currency: 'gold', rarity: 'green', effect: { moveSpeed: 20, duration: 3600 } },
       { id: 'mgem', name: '魔法寶石', desc: '強力技能必備消耗品', price: 1000, icon: ITEM_ICONS.mgem, currency: 'gold', rarity: 'blue', effect: {} },
       { id: 'town_scroll', name: '回城卷軸', desc: '立刻傳送回村莊', price: 500, icon: ITEM_ICONS.teleport, currency: 'gold', rarity: 'green', effect: { teleport: 'town' } },
-      { id: 'enhance_stone_low', name: '初級強化石', desc: '強化裝備+1~+3', price: 5000, icon: ITEM_ICONS.enhance_stone, currency: 'gold', rarity: 'white', effect: { enhance: [1,3] } },
-      { id: 'enhance_stone_mid', name: '中級強化石', desc: '強化裝備+4~+6', price: 50, icon: ITEM_ICONS.bless_stone, currency: 'gem', rarity: 'green', effect: { enhance: [4,6] } },
-      { id: 'enhance_stone_high', name: '高級強化石', desc: '強化裝備+7~+9', price: 200, icon: ITEM_ICONS.crystal_frag, currency: 'gem', rarity: 'blue', effect: { enhance: [7,9] } },
+      { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_stone, currency: 'gold', rarity: 'green', type: 'enhance_scroll', effect: { enhanceScroll: true } },
     ],
     gem: [
       { id: 'exp_potion', name: '經驗藥水', desc: '立刻獲得1000經驗', price: 120, icon: ITEM_ICONS.hp3, currency: 'gem' },
@@ -14227,6 +19911,8 @@ function renderShopPage() {
       { id: 'mystery_chest', name: '神秘寶箱', desc: '隨機開出道具或裝備', price: 100, icon: ITEM_ICONS.chest, currency: 'gem', type: 'consumable', effect: { mysteryChest: true } },
       { id: 'revive_gem', name: '復活卷軸', desc: '死亡後原地復活', price: 50, icon: ITEM_ICONS.revive_scroll, currency: 'gem', type: 'consumable', effect: { revive: true } },
       { id: 'bag_expand', name: '背包擴充卷', desc: '使用後背包容量+1格（最多200格）', price: 100, icon: ITEM_ICONS.quest_scroll, currency: 'gem', type: 'bag_expand' },
+      { id: 'enhance_boost_scroll', name: '強化機率提升卷', desc: '強化時使用，提升10%成功率（最多到90%）', price: ENHANCE_BOOST_SCROLL_PRICE, icon: ITEM_ICONS.bless_stone, currency: 'gem', rarity: 'blue', type: 'enhance_boost_scroll', effect: { enhanceBoost: true } },
+      { id: 'true_death_pack', name: '真•死亡體驗包', desc: '內含6種真死亡金變體驗券各3張（共18張），使用後可體驗對應金變外觀與屬性4小時，不受職業限制。限購1次。', price: 3000, icon: ITEM_ICONS.chest, currency: 'gem', rarity: 'gold', type: 'true_death_pack', limitOnce: true },
     ],
     equip: [
       { id: 'w1', name: '精鋼劍', desc: '攻擊+15', price: 5000, icon: ITEM_ICONS.weapon, rarity: 'rare', slot: 'weapon', currency: 'gold', stats: { atk: 15 } },
@@ -14238,7 +19924,7 @@ function renderShopPage() {
     { key: 'gem', name: '鑽石商店' },
   ];
   const items = shopItems[activeTab] || [];
-  const renderIcon = (url) => `<img src="${url}" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt=""/><div class="item-icon-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:24px;color:#c0a060">◆</div>`;
+  const renderIcon = (url) => `<img src="${url}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt=""/><div class="item-icon-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:24px;color:#c0a060">◆</div>`;
   
   // 取得當前選擇數量（預設1）
   if (!GS.shopQty) GS.shopQty = {};
@@ -14251,8 +19937,11 @@ function renderShopPage() {
       ${items.map(item => {
         const qty = GS.shopQty?.[item.id] || 1;
         const totalPrice = item.price * qty;
-        const currencyIcon = item.currency === 'gem' ? ITEM_ICONS.gem : ITEM_ICONS.gold_coin;
+        const currencyIcon = item.currency === 'gem' ? ITEM_ICONS.gem_bag : ITEM_ICONS.gold_coin;
         const currencyColor = item.currency === 'gem' ? '#c0a0ff' : '#f0c040';
+        const isLimitedBought = item.limitOnce && (
+          (item.id === 'true_death_pack' && GS.boughtTrueDeathPack)
+        );
         return `
           <div class="shop-item-row" data-shop-item="${item.id}" data-tab="${activeTab}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:linear-gradient(90deg, rgba(40,28,16,0.85), rgba(25,18,10,0.7));border:1px solid rgba(240,192,64,0.25);border-radius:8px;box-shadow:inset 0 0 20px rgba(0,0,0,0.3)">
             <!-- 左側：商品圖標 -->
@@ -14278,11 +19967,15 @@ function renderShopPage() {
                 <button class="shop-qty-btn max" data-shop-qty="max:${item.id}" style="padding:0 10px;height:28px;background:linear-gradient(180deg, rgba(100,70,30,0.9), rgba(60,40,15,0.95));border:none;color:var(--gold-bright);font-size:12px;cursor:pointer;font-weight:700;letter-spacing:1px">MAX</button>
               </div>
               <!-- 購買按鈕 -->
-              <button class="shop-item-buy" data-buy-id="${item.id}" data-buy-tab="${activeTab}" data-buy-qty="${qty}" style="padding:8px 14px;font-size:13px;font-weight:700;background:linear-gradient(180deg, #8b6520, #5a3a10);border:1px solid var(--gold);color:var(--gold-bright);border-radius:6px;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.8);box-shadow:0 2px 8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,220,120,0.3);white-space:nowrap;min-width:100px;display:flex;align-items:center;justify-content:center;gap:4px">
-                <span style="width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center"><img src="${currencyIcon}" style="width:100%;height:100%;object-fit:contain;display:block"/></span>
-                <span>${totalPrice.toLocaleString()}</span>
-              </button>
-            </div>
+              ${isLimitedBought
+                ? `<button class="shop-item-buy" disabled style="padding:8px 14px;font-size:13px;font-weight:700;background:linear-gradient(180deg,#444,#222);border:1px solid #666;color:#999;border-radius:6px;cursor:not-allowed;text-shadow:0 1px 2px rgba(0,0,0,0.8);box-shadow:0 2px 8px rgba(0,0,0,0.5);white-space:nowrap;min-width:100px;display:flex;align-items:center;justify-content:center;gap:4px;opacity:0.7">
+                    <span>已購買</span>
+                  </button>`
+                : `<button class="shop-item-buy" data-buy-id="${item.id}" data-buy-tab="${activeTab}" data-buy-qty="${qty}" style="padding:8px 14px;font-size:13px;font-weight:700;background:linear-gradient(180deg, #8b6520, #5a3a10);border:1px solid var(--gold);color:var(--gold-bright);border-radius:6px;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.8);box-shadow:0 2px 8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,220,120,0.3);white-space:nowrap;min-width:100px;display:flex;align-items:center;justify-content:center;gap:4px">
+                    <span style="width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center"><img src="${currencyIcon}" style="width:100%;height:100%;object-fit:contain;display:block"/></span>
+                    <span>${totalPrice.toLocaleString()}</span>
+                  </button>`}
+             </div>
           </div>
         `;
       }).join('')}
@@ -14496,12 +20189,14 @@ function bindPageEvents(page) {
     const singleBtn = el.pageContent.querySelector('#gacha-single');
     if (singleBtn) singleBtn.addEventListener('click', () => {
       let results, poolType;
+      const dailyInfo = getGoldGachaDailyInfo();
+      if (dailyInfo.remaining <= 0) { alert('今日金幣抽卡次數已用完，明日6:00重置'); return; }
       if (GS.gachaPageTab === 'transform') {
-        results = doTransformGacha('single');
+        results = doTransformGacha('goldSingle');
         poolType = 'transform';
       } else {
         const pool = GS.gachaPageTab === 'hero' ? SUMMON_POOL : PET_POOL;
-        results = doGacha(pool, 1, 'single');
+        results = doGacha(pool, 1, 'goldSingle');
         poolType = GS.gachaPageTab;
       }
       if (results.length) showGachaResults(results, poolType);
@@ -14592,6 +20287,7 @@ function bindPageEvents(page) {
               { id: 'mgem', price: 1000 }, { id: 'town_scroll', price: 500 },
               { id: 'enhance_stone_low', price: 5000 }, { id: 'enhance_stone_mid', price: 50, currency: 'gem' },
               { id: 'enhance_stone_high', price: 200, currency: 'gem' },
+              { id: 'enhance_scroll', price: ENHANCE_SCROLL_PRICE },
             ],
             gem: [
               { id: 'exp_potion', price: 120, currency: 'gem' },
@@ -14603,6 +20299,7 @@ function bindPageEvents(page) {
               { id: 'mystery_chest', price: 100, currency: 'gem' },
               { id: 'revive_gem', price: 50, currency: 'gem' },
               { id: 'bag_expand', price: 100, currency: 'gem' },
+              { id: 'enhance_boost_scroll', price: ENHANCE_BOOST_SCROLL_PRICE, currency: 'gem' },
             ],
             equip: [
               { id: 'w1', price: 5000 },
@@ -14723,6 +20420,7 @@ function bindTransformCardEvents() {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       GS.transformRarity = btn.dataset.tfFilter;
+      GS.heroPageTab = 'transform';
       el.pageContent.innerHTML = renderHeroPage();
       bindPageEvents('hero');
     });
@@ -14766,8 +20464,9 @@ function bindTransformCardEvents() {
       if (!tf) return;
       const rc = RARITY_CONFIG[tf.rarity] || RARITY_CONFIG.white;
       const statText = Object.entries(tf.stats || {}).map(([k, v]) => {
-        const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', crit: '暴擊率', critDmg: '暴擊傷害', mpMax: '魔力' };
-        return `${nameMap[k] || k} +${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
+        const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', crit: '暴擊率', critDmg: '暴擊傷害', mpMax: '魔力', walkSpeedPct: '移速', atkSpeedPct: '攻速', dodge: '閃躲', hit: '命中', allStatPct: '全屬性', pvpDmgPct: 'PVP傷害', skillDmgPct: '技能傷害' };
+        const pctKeys = ['crit','critDmg','walkSpeedPct','atkSpeedPct','allStatPct','pvpDmgPct','skillDmgPct','dodge','hit'];
+        return `${nameMap[k] || k} +${v}${pctKeys.includes(k) ? '%' : ''}`;
       }).join(' · ');
       const owned = !!GS.ownedTransforms.find(x => x.id === tid);
       const equipped = GS.player.transformId === tid;
@@ -14910,42 +20609,102 @@ function handleShopBuy(id, tab, qty = 1) {
         addLog('shop', `購買復活卷軸 ×${qty}`);
       });
     } else if (id === 'bag_expand') {
-      buyGemItem(100 * qty, () => {
-        const curMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
-        const canAdd = Math.min(qty, BAG_MAX_SLOTS - curMax);
-        if (canAdd <= 0) { alert('背包已達最大容量'); return; }
+      const curMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
+      const canAdd = Math.min(qty, BAG_MAX_SLOTS - curMax);
+      if (canAdd <= 0) { alert('背包已達最大容量'); return; }
+      buyGemItem(100 * canAdd, () => {
         GS.bagMaxSlots = curMax + canAdd;
         addLog('shop', `購買背包擴充卷 ×${canAdd}，容量 ${curMax} → ${curMax + canAdd}`);
         showFloatingText(`背包+${canAdd}!`, '#c0a0ff');
+      });
+    } else if (id === 'enhance_boost_scroll') {
+      buyGemItem(ENHANCE_BOOST_SCROLL_PRICE * qty, () => {
+        addToInventory({ id: 'enhance_boost_scroll', name: '強化機率提升卷', type: 'enhance_boost_scroll', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.bless_stone, count: qty, effect: { enhanceBoost: true } }, qty);
+        addLog('shop', `購買強化機率提升卷 ×${qty}`);
+      });
+    } else if (id === 'true_death_pack') {
+      // 限購1次檢查
+      if (GS.boughtTrueDeathPack) { alert('此商品僅限購買1次'); return; }
+      buyGemItem(3000, () => {
+        GS.boughtTrueDeathPack = true;
+        const tickets = [
+          { id: 'ticket_death_knight', name: '真死亡騎士體驗券', tfId: 't_true_death_knight' },
+          { id: 'ticket_death_mage', name: '真死亡法師體驗券', tfId: 't_true_death_mage' },
+          { id: 'ticket_death_archer', name: '真死亡弓箭手體驗券', tfId: 't_true_death_archer' },
+          { id: 'ticket_death_assassin', name: '真死亡刺客體驗券', tfId: 't_true_death_assassin' },
+          { id: 'ticket_death_warlock', name: '真死亡術士體驗券', tfId: 't_true_death_sorcerer' },
+          { id: 'ticket_death_holy', name: '真墮落聖執者體驗券', tfId: 't_true_fallen_paladin' },
+        ];
+        tickets.forEach(t => {
+          addToInventory({
+            id: t.id,
+            name: t.name,
+            type: 'transform_ticket',
+            itemType: 'consumable',
+            rarity: 'gold',
+            icon: ITEM_ICONS.quest_scroll,
+            count: 3,
+            bound: true,
+            soulbound: true,
+            effect: { useTransformTicket: true, transformId: t.tfId },
+            desc: '使用後變身為' + t.name.replace('體驗券', '') + '，持續4小時，不受職業限制',
+          }, 3);
+        });
+        addLog('shop', '購買【真•死亡體驗包】，獲得6種體驗券各3張（共18張）');
+        if (typeof saveGame === 'function') saveGame();
       });
     }
   } else if (tab === 'consumable') {
     const itemDefs = {
       hp1:  { id: 'hp1',   name: '小型生命藥水', rarity: 'white', price: 50,   effect: { hp: 50 } },
       hp2:  { id: 'hp2',   name: '中型生命藥水', rarity: 'green', price: 200,  effect: { hp: 200 } },
+      hp4:  { id: 'hp4',   name: '體力藥水',     rarity: 'blue',  price: 500,  effect: { hp: 500 } },
       mp1:  { id: 'mp1',   name: '小型魔力藥水', rarity: 'white', price: 75,   effect: { mp: 30 } },
       mp2:  { id: 'mp2',   name: '中型魔力藥水', rarity: 'green', price: 250,  effect: { mp: 100 } },
+      mp4:  { id: 'mp4',   name: '高級魔力藥水', rarity: 'blue',  price: 800,  effect: { mp: 200 } },
       spd1: { id: 'spd1',  name: '加速藥水',     rarity: 'blue',  price: 400,  effect: { atkSpeed: 20, moveSpeed: 20, duration: 1800 } },
       spd2: { id: 'spd2',  name: '狂暴藥水',     rarity: 'red',   price: 800,  effect: { atkSpeed: 30, moveSpeed: 30, duration: 1800 } },
-      move1:{ id: 'move1', name: '行走加速藥水',     rarity: 'green', price: 200,  effect: { moveSpeed: 20, duration: 120 } },
+      move1:{ id: 'move1', name: '行走加速藥水', rarity: 'green', price: 200,  effect: { moveSpeed: 20, duration: 3600 } },
       mgem: { id: 'mgem',  name: '魔法寶石',     rarity: 'blue',  price: 1000, effect: {} },
+      town_scroll: { id: 'town_scroll', name: '回城卷軸', rarity: 'green', price: 500, effect: { teleport: 'town' } },
+      enhance_scroll: { id: 'enhance_scroll', name: '裝備強化卷', rarity: 'green', price: ENHANCE_SCROLL_PRICE, effect: { enhanceScroll: true } },
     };
     const def = itemDefs[id];
-    if (!def) return;
+    if (!def) { addLog('system', '未知商品'); return; }
     const totalPrice = def.price * qty;
     if (GS.resources.gold < totalPrice) { alert('金幣不足'); return; }
+    // 檢查背包容量
+    const curBagCount = GS.inventory.length;
+    const bagMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
+    if (curBagCount >= bagMax && !addToInventory({ id: def.id, type: 'consumable', itemType: 'consumable' }, 0, true)) {
+      // addToInventory 第三參數為 checkOnly，先測試能不能放
+    }
+    const added = addToInventory({
+      id: def.id, name: def.name, type: 'consumable', itemType: 'consumable',
+      rarity: def.rarity,
+      icon: (
+        def.id === 'hp1' ? ITEM_ICONS.hp1 :
+        def.id === 'hp2' ? (ITEM_ICONS.hp2 || ITEM_ICONS.hp1) :
+        def.id === 'hp4' ? (ITEM_ICONS.hp3 || ITEM_ICONS.hp2 || ITEM_ICONS.hp1) :
+        def.id === 'mp1' ? ITEM_ICONS.mp1 :
+        def.id === 'mp2' ? (ITEM_ICONS.mp2 || ITEM_ICONS.mp1) :
+        def.id === 'mp4' ? (ITEM_ICONS.mp3 || ITEM_ICONS.mp2 || ITEM_ICONS.mp1) :
+        def.id === 'spd1' ? ITEM_ICONS.spd1 :
+        def.id === 'spd2' ? ITEM_ICONS.spd2 :
+        def.id === 'move1' ? ITEM_ICONS.move1 :
+        def.id === 'mgem' ? ITEM_ICONS.mgem :
+        def.id === 'town_scroll' ? (ITEM_ICONS.teleport || ITEM_ICONS.hp1) :
+        def.id === 'enhance_scroll' ? ITEM_ICONS.enhance_stone :
+        ITEM_ICONS.hp1
+      ),
+      count: qty, effect: def.effect || {},
+    }, qty);
+    if (!added) {
+      alert('背包已滿，無法購買');
+      return;
+    }
     GS.resources.gold -= totalPrice;
     collectTax(totalPrice, 0);
-    const itemIcon = {
-      hp1: ITEM_ICONS.hp1, hp2: ITEM_ICONS.hp2 || ITEM_ICONS.hp1,
-      mp1: ITEM_ICONS.mp1, mp2: ITEM_ICONS.mp2 || ITEM_ICONS.mp1,
-      spd1: ITEM_ICONS.spd1, spd2: ITEM_ICONS.spd2, move1: ITEM_ICONS.move1,
-      mgem: ITEM_ICONS.mgem, tscroll: ITEM_ICONS.tscroll,
-    }[id] || ITEM_ICONS.hp1;
-    addToInventory({
-      id: def.id, name: def.name, type: 'consumable', itemType: 'consumable',
-      rarity: def.rarity, icon: itemIcon, count: qty, effect: def.effect || {},
-    }, qty);
     // 自動放入快捷欄空槽（如果尚未裝備過同類道具）
     const alreadyOnBar = GS.quickBar.some(s => s && s.type === 'item' && s.itemId === def.id);
     if (!alreadyOnBar) {
@@ -14956,7 +20715,32 @@ function handleShopBuy(id, tab, qty = 1) {
     }
     addLog('shop', `購買了【${def.name}】 ×${qty}`);
   } else if (tab === 'equip') {
-    addLog('system', '裝備購買成功！');
+    // 裝備商店：真實購買邏輯
+    const equipDefs = {
+      w1: { id: 'w1', name: '精鋼劍', desc: '攻擊+15', price: 5000, rarity: 'rare', slot: 'weapon', stats: { atk: 15 } },
+    };
+    const def = equipDefs[id];
+    if (!def) { addLog('system', '未知裝備'); return; }
+    if (GS.resources.gold < def.price) { alert('金幣不足'); return; }
+    const bagMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
+    if (GS.inventory.length >= bagMax) { alert('背包已滿'); return; }
+    const equipItem = {
+      id: def.id,
+      name: def.name,
+      type: 'equipment',
+      itemType: 'equipment',
+      slot: def.slot,
+      rarity: def.rarity,
+      icon: ITEM_ICONS.weapon || ITEM_ICONS.sword || '',
+      stats: def.stats || {},
+      enhanceLevel: 0,
+      bound: false,
+    };
+    const added = addToInventory(equipItem, 1);
+    if (!added) { alert('背包已滿'); return; }
+    GS.resources.gold -= def.price;
+    collectTax(def.price, 0);
+    addLog('shop', `購買了【${def.name}】`);
   }
   updateUI();
 }
@@ -14976,6 +20760,537 @@ function openSideMenu() {
 function closeSideMenu() {
   el.sideMenu.classList.remove('open');
   el.sideMenuOverlay.classList.remove('open');
+}
+
+// ========== 下載工具函式（行動裝置相容） ==========
+// 裝置偵測
+function isMobileDevice() {
+  const ua = navigator.userAgent || '';
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile/i.test(ua) ||
+         (navigator.platform && /iPad|iPhone|iPod/.test(navigator.platform));
+}
+function isIOSDevice() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua) ||
+         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+// 動態載入 JSZip（確保一定可用）
+function loadJSZip() {
+  return new Promise(function(resolve, reject) {
+    if (typeof JSZip !== 'undefined') { resolve(JSZip); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload = function() {
+      if (typeof JSZip !== 'undefined') resolve(JSZip);
+      else reject(new Error('JSZip 載入後仍未定義'));
+    };
+    s.onerror = function() { reject(new Error('JSZip 載入失敗')); };
+    document.head.appendChild(s);
+  });
+}
+
+// 顯示下載完成彈窗（多重保險：Blob URL + 新分頁 + data URI）
+function showDownloadModal(blob, filename, fileSizeMB) {
+  // 先移除舊彈窗
+  const old = document.getElementById('download-modal');
+  if (old) old.remove();
+
+  const isMobile = isMobileDevice();
+  const isIOS = isIOSDevice();
+  const blobUrl = URL.createObjectURL(blob);
+
+  // 產生 data: URI 備援（僅檔案小於 2MB 時才產，避免記憶體爆炸）
+  let dataUri = '';
+  if (blob.size < 2 * 1024 * 1024) {
+    const reader = new FileReader();
+    reader.onload = function() { dataUri = reader.result; };
+    reader.readAsDataURL(blob);
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'download-modal';
+  modal.className = 'download-modal-overlay';
+  modal.innerHTML = `
+    <div class="download-modal-box">
+      <div class="download-modal-icon">⬇️</div>
+      <div class="download-modal-title">下載已準備完成</div>
+      <div class="download-modal-sub">${filename} · 約 ${fileSizeMB} MB</div>
+      <button class="download-modal-btn" id="download-modal-btn">點此下載</button>
+      <div class="download-modal-tip">
+        ${isMobile
+          ? (isIOS
+              ? '⬇ iOS 使用者：若按鈕沒反應，請「長按按鈕 → 下載連結檔案」，或點擊分享 → 儲存到檔案'
+              : '⬇ 手機使用者：若按鈕沒反應，請長按按鈕選擇「下載連結」')
+          : '如果下載沒有自動開始，請點擊上方按鈕'}
+      </div>
+      <button class="download-modal-close" id="download-modal-close">關閉</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // 多重保險：同時觸發三種下載方式
+  function triggerDownload() {
+    // 方法1：a[download] click
+    try {
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { document.body.removeChild(a); }, 500);
+    } catch(e) { console.warn('下載方法A失敗:', e); }
+
+    // 方法2：iOS 用 window.open 新分頁
+    if (isIOS) {
+      try {
+        window.open(blobUrl, '_blank');
+      } catch(e) { console.warn('下載方法B失敗:', e); }
+    }
+
+    // 方法3：data URI 備援（較小檔案）
+    if (dataUri && isMobile) {
+      setTimeout(function() {
+        try {
+          const a2 = document.createElement('a');
+          a2.href = dataUri;
+          a2.download = filename;
+          a2.style.display = 'none';
+          document.body.appendChild(a2);
+          a2.click();
+          setTimeout(function() { document.body.removeChild(a2); }, 500);
+        } catch(e) { console.warn('下載方法C失敗:', e); }
+      }, 600);
+    }
+  }
+
+  // 綁定按鈕
+  const btn = modal.querySelector('#download-modal-btn');
+  if (btn) btn.addEventListener('click', triggerDownload);
+
+  // 關閉按鈕
+  const closeBtn = modal.querySelector('#download-modal-close');
+  if (closeBtn) closeBtn.addEventListener('click', function() {
+    modal.remove();
+    setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 2000);
+  });
+
+  // 點擊背景關閉
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      modal.remove();
+      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 2000);
+    }
+  });
+
+  // 自動觸發一次下載（電腦版自動下載，行動版也先嘗試）
+  setTimeout(triggerDownload, 300);
+
+  return blobUrl;
+}
+
+// ========== 匯出遊戲 ==========
+function showExportToast(message, type) {
+  let toast = document.getElementById('export-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'export-toast';
+    toast.className = 'export-toast';
+    document.body.appendChild(toast);
+  }
+  toast.classList.remove('success');
+  if (type === 'success') toast.classList.add('success');
+  if (type === 'loading') {
+    toast.innerHTML = '<div class="spinner"></div><span>' + message + '</span>';
+  } else {
+    toast.innerHTML = '<span>' + message + '</span>';
+  }
+  toast.classList.add('show');
+}
+function hideExportToast() {
+  const toast = document.getElementById('export-toast');
+  if (toast) toast.classList.remove('show');
+}
+function exportGameFile() {
+  closeSideMenu();
+  const btn = $('export-game-btn');
+  if (btn) { btn.classList.add('exporting'); btn.querySelector('span').textContent = '打包中...'; }
+  showExportToast('正在打包遊戲...', 'loading');
+  // 使用 setTimeout 讓 UI 先更新
+  setTimeout(function() {
+    try {
+      // 先保存當前進度
+      if (typeof saveGame === 'function') saveGame();
+      // 取得完整 HTML 內容
+      const doctype = '<!DOCTYPE html>';
+      const html = document.documentElement.outerHTML;
+      const fullHtml = doctype + '\n' + html;
+      // 建立 Blob
+      const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+      const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
+      console.log('[匯出遊戲] 檔案大小:', sizeMB, 'MB');
+      hideExportToast();
+      // 使用下載彈窗（多重保險）
+      showDownloadModal(blob, '暗黑天堂MMORPG.html', sizeMB);
+    } catch (e) {
+      console.error('匯出失敗:', e);
+      showExportToast('匯出失敗：' + e.message, 'error');
+      setTimeout(hideExportToast, 3000);
+    } finally {
+      if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '匯出遊戲'; }
+    }
+  }, 100);
+}
+
+// ========== 下載原始碼 ZIP ==========
+// 靜態 source.zip 路徑（放在專案根目錄，行動裝置優先使用這個固定連結）
+// 加上版本參數強制瀏覽器重新下載，避免吃到舊版快取
+const STATIC_SOURCE_ZIP_URL = 'source.zip?v=v2.0.2';
+
+function downloadSourceZip() {
+  closeSideMenu();
+  const btn = $('download-src-btn');
+  if (btn) { btn.classList.add('exporting'); btn.querySelector('span').textContent = '打包中...'; }
+  showExportToast('正在準備下載...', 'loading');
+
+  const isMobile = isMobileDevice();
+  const isIOS = isIOSDevice();
+  const staticUrl = STATIC_SOURCE_ZIP_URL;
+
+  // 行動裝置：優先用靜態 source.zip，避免 JSZip + Blob 在 iOS Safari 被擋
+  if (isMobile) {
+    console.log('[下載原始碼] 偵測到行動裝置，使用靜態 source.zip 路徑');
+    setTimeout(function() {
+      hideExportToast();
+      if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '下載原始碼ZIP'; }
+      showMobileDownloadModal(staticUrl, '君主之刃v2.0.2_全棧原始碼.zip');
+    }, 300);
+    return;
+  }
+
+  // 桌面版：嘗試 JSZip 動態打包（確保內容最新）
+  setTimeout(function() {
+    loadJSZip().then(function() {
+      console.log('[下載原始碼] JSZip 已就緒');
+    }).catch(function(err) {
+      console.warn('[下載原始碼] JSZip 載入失敗，改用靜態下載:', err);
+    });
+
+      loadJSZip().then(function() {
+      const filesToFetch = [
+        // 前端核心
+        { path: 'index.html', zipPath: 'index.html', isHtml: true },
+        { path: 'styles.css', zipPath: 'styles.css' },
+        { path: 'auth.css', zipPath: 'auth.css' },
+        { path: 'game.js', zipPath: 'game.js' },
+        { path: 'auth.js', zipPath: 'auth.js' },
+        { path: 'lang.js', zipPath: 'lang.js' },
+        { path: 'transform.js', zipPath: 'transform.js' },
+        { path: 'audio.js', zipPath: 'audio.js' },
+        { path: 'audio-manager.js', zipPath: 'audio-manager.js' },
+        { path: 'iso-map.js', zipPath: 'iso-map.js' },
+        { path: 'sprite_object.js', zipPath: 'sprite_object.js' },
+        { path: 'multiplayer.js', zipPath: 'multiplayer.js' },
+        { path: 'bug-report.js', zipPath: 'bug-report.js' },
+        // 後端伺服器
+        { path: 'server/server.cjs', zipPath: 'server/server.cjs' },
+        // data 目錄範例（初始空結構）
+        { path: 'data/accounts.json', zipPath: 'data/accounts.json' },
+        { path: 'data/bug-reports.json', zipPath: 'data/bug-reports.json' },
+      ];
+
+      const readmeMd = `# 君主之刃 v2.0.2 · 正式營運全棧版
+
+## 遊戲名稱
+君主之刃（LINEAGE OF SWORDS）v2.0.2
+
+## 技術架構
+- **前端**：HTML5 + CSS3 + Vanilla JavaScript（無框架），Canvas 2D 渲染
+- **後端**：Node.js 原生 http 模組 + Socket.IO v4（輕量、無外部資料庫）
+- **資料庫**：JSON 檔案持久化（data/ 目錄）
+- **部署**：DigitalOcean App Platform / 任何 Node 環境 / 純靜態 CDN
+
+## 檔案結構
+\`\`\`
+sword-lineage-v2/
+├── index.html          # HTML 本體
+├── styles.css          # 遊戲樣式
+├── auth.css            # 帳號系統樣式
+├── game.js             # 遊戲主邏輯
+├── auth.js             # 帳號 / 登入 / 註冊 / 伺服器選擇 / GM 面板
+├── lang.js             # 語系檔
+├── iso-map.js          # 等距地圖系統
+├── sprite_object.js    # 精靈 / 物件系統
+├── audio.js            # 音訊基礎模組
+├── audio-manager.js    # 音訊管理員
+├── transform.js        # 變換工具函式
+├── multiplayer.js      # 多人連線用戶端（Socket.IO）
+├── bug-report.js       # Bug 回報與開發者後台
+├── package.json        # 專案設定（含 start 與 socket.io 依賴）
+├── server/
+│   └── server.cjs      # 後端主伺服器（靜態服務 + 帳號 API + Socket.IO）
+└── data/
+    ├── accounts.json   # 帳號資料（自動建立）
+    └── bug-reports.json # Bug 回報（自動建立）
+\`\`\`
+
+## 快速啟動（本機）
+
+### 方式一：全棧模式（推薦，可多人連線）
+
+1. 安裝 Node.js 18+
+2. 進入專案目錄：
+   \`\`\`bash
+   npm install
+   npm start
+   \`\`\`
+3. 瀏覽器開啟 http://localhost:3000
+4. 註冊帳號 → 選伺服器 → 創角 → 開始遊戲
+5. 兩支手機連同一個 IP/網址、登入不同帳號 → 進入同一世界（多人連線）
+
+### 方式二：純靜態模式（單機離線）
+
+1. 用任何靜態檔案伺服器託管根目錄：
+   \`\`\`bash
+   npx serve .
+   # 或 VS Code Live Server
+   \`\`\`
+2. 瀏覽器開啟 → 點「離線模式進入」
+3. 資料存 localStorage，單機遊玩無需後端
+
+## 部署到 DigitalOcean App Platform
+
+1. 把整個專案 push 到 GitHub
+2. App Platform 新建 Web Service，選你的 repo
+3. 設定：
+   - **Build Command**: \`npm install\`
+   - **Run Command**: \`npm start\`
+   - **HTTP Port**: 讓 App Platform 自動注入（程式已支援 \`process.env.PORT\`）
+4. 環境變數（選擇性）：
+   - \`NODE_ENV=production\`
+   - \`DEV_PASSWORD=你的密碼\`（開發者後台密碼，預設 owner2026）
+5. Persistent Volume（建議，永久保存帳號資料）：
+   - Mount Path: \`/app/data\`（視 App Platform 實際 root 調整，以 server.cjs 上層的 data/ 為準）
+   - Size: 1 GB 就夠
+
+## 環境變數
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| PORT | 3000 | HTTP 監聽埠號 |
+| DEV_PASSWORD | owner2026 | 開發者後台密碼 |
+| NODE_ENV | - | 設 production 可啟用最佳化 |
+
+## 多人連線機制
+- 前端自動連 \`window.location.origin\`（同源 Socket.IO）
+- 同網址、同伺服器、同地圖的玩家會在同一個房間（room）
+- 移動 / 聊天 / 戰鬥事件即時廣播
+- Socket.IO 未安裝時自動退回單機模式，不影響遊戲
+
+## 開發者後台 / 下載原始碼
+- **首頁密技**：連點版號或 Logo 7 次 → 輸入密碼 owner2026 → 下載完整原始碼 ZIP
+- **遊戲內密技**：設定頁底部連點版本號 7 次 → 同樣密碼 → 進入開發者後台
+- **GM 帳號**：帳號 \`19811013\` / 密碼 \`19811013\`（連續雙擊頂部狀態欄 3 次喚出 GM 面板）
+
+## 離線模式說明
+- 當後端不可用時，登入/註冊頁會自動 fallback 到離線模式
+- 資料存在瀏覽器 localStorage，重新整理不丟失
+- 離線模式下也能體驗完整遊戲內容，只差沒有多人連線
+
+## 二次開發
+- 前端遊戲邏輯：\`game.js\`
+- 後端伺服器：\`server/server.cjs\`
+- 帳號系統：\`auth.js\` + \`server/server.cjs\` 中的 /api/auth/* 路由
+- 多人連線：\`multiplayer.js\`（客戶端） + \`server/server.cjs\` 中的 Socket.IO 事件
+`;
+
+      const assetsReadme = `此資料夾用於放置離線圖檔。
+
+請將下載的圖片 ZIP 解壓縮到這裡，
+並於遊戲設定中開啟「離線模式」，
+遊戲就會從本機 assets/ 資料夾載入圖片。
+
+線上模式（預設）：圖片從 CDN 載入，不需此資料夾。
+`;
+
+      // 用 fetch 並行讀取所有原始檔
+      const fetchPromises = filesToFetch.map(function(f) {
+        return fetch(f.path, { cache: 'no-store' })
+          .then(function(res) {
+            if (!res.ok) throw new Error(f.path + ' 載入失敗 (' + res.status + ')');
+            return res.text().then(function(text) {
+              f.content = text;
+              f.success = true;
+              f.size = text.length;
+              console.log('[下載原始碼] ✓ 讀取成功:', f.path, '大小:', (text.length / 1024).toFixed(2), 'KB');
+              return f;
+            });
+          })
+          .catch(function(err) {
+            console.error('[下載原始碼] ✗ 載入失敗:', f.path, err);
+            f.content = '// 載入失敗：' + err.message + '\n';
+            f.success = false;
+            f.size = 0;
+            return f;
+          });
+      });
+
+      Promise.all(fetchPromises).then(function(results) {
+        // 列印總結
+        const successCount = results.filter(function(f) { return f.success; }).length;
+        const totalSize = results.reduce(function(sum, f) { return sum + f.size; }, 0);
+        console.log('[下載原始碼] 總結:', successCount + '/' + results.length + ' 檔成功，總大小:', (totalSize / 1024).toFixed(2), 'KB');
+
+        const zip = new JSZip();
+        const rootFolder = zip.folder('sword-lineage-v2.0.2');
+
+        // 生成 ZIP
+        showExportToast('正在壓縮檔案...', 'loading');
+        return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }, function(meta) {
+          const pct = Math.round(meta.percent);
+          if (pct % 10 === 0) {
+            showExportToast('正在壓縮檔案... ' + pct + '%', 'loading');
+          }
+        });
+      }).then(function(blob) {
+        hideExportToast();
+        const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
+        console.log('[下載原始碼] ZIP 生成完成，大小:', sizeMB, 'MB');
+        // 使用下載彈窗（多重保險，相容行動裝置）
+        showDownloadModal(blob, '君主之刃v2.0.2_全棧原始碼.zip', sizeMB);
+      }).catch(function(err) {
+        console.error('[下載原始碼] 打包失敗，改用靜態下載:', err);
+        // 失敗備援：直接開啟靜態 source.zip
+        hideExportToast();
+        try {
+          window.open(staticUrl, '_blank');
+        } catch(e) {
+          location.href = staticUrl;
+        }
+      }).finally(function() {
+        if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '下載原始碼ZIP'; }
+      });
+    }).catch(function(err) {
+      console.error('[下載原始碼] JSZip 載入失敗，改用靜態下載:', err);
+      hideExportToast();
+      if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '下載原始碼ZIP'; }
+      try {
+        window.open(staticUrl, '_blank');
+      } catch(e) {
+        location.href = staticUrl;
+      }
+    });
+  }, 100);
+}
+
+// 暴露給開發者後台呼叫（bug-report.js）
+if (!window.downloadSourceZip) {
+  window.downloadSourceZip = downloadSourceZip;
+}
+
+// 行動裝置專用的下載彈窗（基於靜態 URL，多重備援）
+function showMobileDownloadModal(url, filename) {
+  const old = document.getElementById('mobile-download-modal');
+  if (old) old.remove();
+
+  const isIOS = isIOSDevice();
+  const fullUrl = new URL(url, location.href).href;
+
+  const modal = document.createElement('div');
+  modal.id = 'mobile-download-modal';
+  modal.className = 'download-modal-overlay';
+  modal.innerHTML = `
+    <div class="download-modal-box">
+      <div class="download-modal-icon">⬇️</div>
+      <div class="download-modal-title">下載已準備完成</div>
+      <div class="download-modal-sub">${filename}</div>
+      <button class="download-modal-btn" id="mob-dl-btn">點此下載</button>
+      <div class="download-modal-tip">
+        ${isIOS
+          ? 'iOS 使用者請「長按下方連結 → 下載連結檔案」，或用分享 → 儲存到檔案'
+          : '手機使用者請長按下方連結選擇「下載連結」'}
+      </div>
+      <div class="download-url-box" id="mob-dl-url-box">
+        <a href="${fullUrl}" download="${filename}" target="_blank" rel="noopener">${fullUrl}</a>
+      </div>
+      <button class="download-modal-copy" id="mob-dl-copy">複製連結</button>
+      <button class="download-modal-close" id="mob-dl-close">關閉</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // 主要下載按鈕：嘗試 navigator.share → a.click → window.open
+  const dlBtn = modal.querySelector('#mob-dl-btn');
+  dlBtn.addEventListener('click', function() {
+    // 方法1：navigator.share（如果瀏覽器支援）
+    if (navigator.share && navigator.canShare) {
+      fetch(fullUrl).then(function(r) { return r.blob(); }).then(function(blob) {
+        const file = new File([blob], filename, { type: blob.type || 'application/zip' });
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: filename,
+            text: '暗黑天堂MMORPG 原始碼'
+          }).catch(function(e) {
+            console.warn('navigator.share 失敗:', e);
+            fallbackOpen();
+          });
+        } else {
+          fallbackOpen();
+        }
+      }).catch(function() { fallbackOpen(); });
+    } else {
+      fallbackOpen();
+    }
+
+    function fallbackOpen() {
+      // 方法2：a[download] click
+      try {
+        const a = document.createElement('a');
+        a.href = fullUrl;
+        a.download = filename;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() { document.body.removeChild(a); }, 500);
+      } catch(e) {
+        // 方法3：window.open
+        try {
+          window.open(fullUrl, '_blank');
+        } catch(e2) {
+          location.href = fullUrl;
+        }
+      }
+    }
+  });
+
+  // 複製連結
+  const copyBtn = modal.querySelector('#mob-dl-copy');
+  copyBtn.addEventListener('click', function() {
+    const ta = document.createElement('textarea');
+    ta.value = fullUrl;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      copyBtn.textContent = '已複製 ✓';
+      setTimeout(function() { copyBtn.textContent = '複製連結'; }, 2000);
+    } catch(e) {
+      copyBtn.textContent = '複製失敗，請手動複製';
+    }
+    document.body.removeChild(ta);
+  });
+
+  // 關閉
+  const closeBtn = modal.querySelector('#mob-dl-close');
+  closeBtn.addEventListener('click', function() { modal.remove(); });
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) modal.remove();
+  });
 }
 
 function openMenuPage(page) {
@@ -15219,6 +21534,10 @@ function bindMenuPageEvents(page) {
         const n = NATIONS.find(nn => nn.id === nid);
         addLog('system', `加入了 ${n.name}`);
         updatePlayerBadge();
+        // ===== 多人連線：加入國家同步 =====
+        if (window.MultiplayerClient && MultiplayerClient.connected) {
+          try { syncMultiplayerProfile(); } catch (e) { /* ignore */ }
+        }
         el.pageContent.innerHTML = renderMenuPage('nation');
         bindMenuPageEvents('nation');
       });
@@ -15236,6 +21555,10 @@ function bindMenuPageEvents(page) {
       window._nationCitizens = null;
       addLog('system', '已退出國家');
       updatePlayerBadge();
+      // ===== 多人連線：退出國家同步 =====
+      if (window.MultiplayerClient && MultiplayerClient.connected) {
+        try { syncMultiplayerProfile(); } catch (e) { /* ignore */ }
+      }
       updateUI();
       el.pageContent.innerHTML = renderMenuPage('nation');
       bindMenuPageEvents('nation');
@@ -15903,8 +22226,206 @@ let castleSiegeGate = null;
 let castleSiegeTowers = [];
 let castleSiegeLord = null;
 let castleSiegeScepter = null;
+let castleSiegeLastDestroyedTower = null;
+let siegeWorldRef = null;          // 攻城世界容器 DOM
+let siegeWorldLayers = {};         // 攻城世界內部子層
+let savedPlayerParent = null;      // 玩家精靈原本父層（退出時還原）
+let siegeCamX = 0, siegeCamY = 0;   // 攻城世界相機偏移
+let savedEffectLayer = null;         // 保存原本的特效層（攻城戰替換用）
+let savedDamageLayer = null;         // 保存原本的傷害層
+
+// ========== 攻城戰陣營判斷 ==========
+// 取得目前守城方軍團 ID（城主軍團）
+function getSiegeDefenderGuildId() {
+  if (!castleSiegeCastle) return null;
+  return castleSiegeCastle.ownerGuildId || null;
+}
+
+// 判斷玩家是否為守城方（屬於城主軍團）
+function isPlayerSiegeDefender() {
+  if (!castleSiegeActive) return false;
+  const defenderId = getSiegeDefenderGuildId();
+  if (!defenderId) return false; // 無城主時，所有人都是攻城方
+  const myId = GS.legionId || GS.guildId || null;
+  return !!myId && myId === defenderId;
+}
+
+// 判斷一個 AI 玩家是否為守城方
+function isAiSiegeDefender(ai) {
+  if (!castleSiegeActive || !ai) return false;
+  const defenderId = getSiegeDefenderGuildId();
+  if (!defenderId) return false;
+  const aiGuildId = ai.guildId || ai.legionId || null;
+  return !!aiGuildId && aiGuildId === defenderId;
+}
+
+// 玩家是否可攻擊某個目標（怪物/NPC/建築/AI玩家）
+function canPlayerAttackTarget(target) {
+  if (!target) return false;
+  if (!castleSiegeActive) return true; // 非攻城戰正常攻擊
+  const isDefender = isPlayerSiegeDefender();
+  // 守城方：不能攻擊自己的城門、守護塔、守軍NPC；可以攻擊攻城方玩家和NPC
+  if (isDefender) {
+    if (target.isSiegeStructure) return false; // 守城方不能打自己的建築
+    if (target.isSiegeDefender) return false;  // 守城方不能打自己的守軍
+    if (target.type === 'scepter') return false; // 守城方不能打權杖
+    // 守城方可以攻擊攻城方AI玩家
+    if (target && target.uid && target.uid.startsWith && target.uid.startsWith('ai_')) {
+      return !isAiSiegeDefender(target);
+    }
+    return true; // 其他怪物都可以打
+  }
+  // 攻城方：可以攻擊城門、守護塔、守軍NPC、守城方玩家、其他攻城方玩家
+  // 注意：攻城方之間也可以互相攻擊（PVP）
+  return true;
+}
+
+// 守軍NPC是否可攻擊玩家（守城方不打守城方）
+function canDefenderAttackPlayer() {
+  if (!castleSiegeActive) return true;
+  // 守城NPC只攻擊攻城方玩家
+  return !isPlayerSiegeDefender();
+}
+
+// ========== 攻城戰佈局（單張完整地圖 2048×2048） ==========
+// 城門位置（南牆中央，隱形點擊區域）
+const SIEGE_GATE_POS = { x: 1024, y: 1000 };
+const SIEGE_GATE_SIZE = { w: 180, h: 180 };
+
+// 玩家出生點（城外南方）
+const SIEGE_PLAYER_SPAWN = { x: 1024, y: 1800 };
+
+// 守護塔位置（城堡庭院中央，細長石柱，隱形點擊區域80×100）
+const SIEGE_TOWER_POS = { x: 1024, y: 500 };
+const SIEGE_TOWER_SIZE = { w: 80, h: 100 };
+const SIEGE_TOWER_HP_MAX = 10000;
+// 守護塔碰撞區域（塔本身）
+const SIEGE_TOWER_RECT = { x: 984, y: 450, w: 80, h: 100 };
+// 權杖位置（塔正下方，玩家走到塔前就能看到）
+const SIEGE_SCEPTER_POS = { x: 1024, y: 600 };
+const SIEGE_SCEPTER_SIZE = { w: 100, h: 100 };
+const SIEGE_SCEPTER_PICKUP_Y = 680;
+
+// 城主位置（主堡前方）
+const SIEGE_LORD_POS = { x: 1024, y: 450 };
+
+// ========== 攻城戰 7 張地圖（依城門+守護塔+權杖狀態切換） ==========
+// 城門階段（0-2）：完好城門 / 半毀城門 / 全毀城門
+// 守護塔階段（3-6）：完好塔+頂端權杖 / 塔受損 / 塔全毀+地上有權杖 / 塔全毀+無權杖
+const SIEGE_MAP_IMAGES = [
+  assetUrl('s0h03lZoid'), // 0：完好城門
+  assetUrl('aFoKB6Ketl'), // 1：半毀城門
+  assetUrl('ftpva0x59j'), // 2：全毀城門
+  assetUrl('2U3AgH3L3w'), // 3：城門開+完好塔+權杖
+  assetUrl('1YPfWK8cKg'), // 4：城門開+塔受損
+  assetUrl('BczarboQ3l'), // 5：城門開+塔全毀+地上有權杖
+  assetUrl('W4ASp6KEF5'), // 6：城門開+塔全毀+無權杖（已拾取）
+];
+let currentSiegeMapFrame = -1;
+
+// 根據目前階段與HP計算應顯示的地圖幀索引（0-6）
+function getSiegeMapFrameIndex() {
+  const gate = castleSiegeGate;
+  const tower = castleSiegeTowers && castleSiegeTowers[0];
+  // 城門還活著 → 城門階段（看不到塔）
+  if (gate && gate.hp > 0) {
+    const pct = gate.hp / gate.hpMax;
+    if (pct > 0.60) return 0; // 完好
+    if (pct > 0.30) return 1; // 半毀
+    return 2;                  // 全毀
+  }
+  // 城門已破、守護塔活著 → 守護塔階段
+  if (tower && tower.hp > 0) {
+    const pct = tower.hp / tower.hpMax;
+    if (pct > 0.70) return 3; // 完好塔+塔頂權杖
+    if (pct > 0.40) return 4; // 塔受損
+    return 5;                  // 塔重損（仍有地上權杖圖，保持一致）
+  }
+  // 守護塔也被破壞 → 視權杖是否存在
+  if (castleSiegePhase === 'scepter' && castleSiegeScepter) {
+    return 5; // 權杖在地
+  }
+  return 6;   // 權杖已被拾取（塔毀+無權杖）
+}
+
+// 根據目前狀態切換攻城背景圖（有變化才切換，避免閃爍）
+function updateSiegeMapByPhase(reason) {
+  const frame = getSiegeMapFrameIndex();
+  if (frame === currentSiegeMapFrame) return;
+  currentSiegeMapFrame = frame;
+  const url = SIEGE_MAP_IMAGES[frame];
+  if (sceneBg) {
+  safeBackgroundUrl(sceneBg, url);
+  }
+  const phaseText = frame < 3 ? 'gate' : (frame < 5 ? 'tower' : (frame === 5 ? 'scepter' : 'scepter_picked'));
+  console.log('[Siege] 地圖切換 幀=' + frame + ' 階段=' + phaseText + ' 原因=' + (reason || '狀態變化') + ' URL=' + url);
+}
+
+// ========== 攻城戰碰撞區域（世界座標 2048） ==========
+// 注意：所有矩形以「完整包覆 + 邊緣重疊」原則配置，確保沒有任何像素縫隙
+// 玩家碰撞半徑 18px，因此矩形必須延伸到玩家中心也無法鑽入的程度
+const SIEGE_COLLISION_RECTS = [
+  // 南城牆左側（延伸到西牆內側，消除西南角縫隙；右端延伸入城門下方，與城門矩形重疊）
+  { id: 'south_wall_left',  x: 150,  y: 900, w: 810, h: 150 },
+  // 南城牆右側（延伸到東牆內側，消除東南角縫隙；左端延伸入城門下方，與城門矩形重疊）
+  { id: 'south_wall_right', x: 1110, y: 900, w: 790, h: 150 },
+  // 北城牆（兩端延伸超出東西城牆外側，消除西北角與東北角縫隙）
+  { id: 'north_wall', x: 100,  y: 200, w: 1850, h: 100 },
+  // 左城牆（向上延伸蓋住北牆、向下延伸蓋住南牆，全程無縫）
+  { id: 'west_wall',  x: 150,  y: 200, w: 120, h: 850 },
+  // 右城牆（向上延伸蓋住北牆、向下延伸蓋住南牆，全程無縫）
+  { id: 'east_wall',  x: 1780, y: 200, w: 120, h: 850 },
+];
+
+// 城門碰撞矩形（破壞後開放）
+// 位於南城牆中央洞口，與左右城牆矩形重疊確保無縫；城門血量歸零時跳過此矩形
+const SIEGE_GATE_RECT = { x: 920, y: 900, w: 210, h: 150 };
+
+// 玩家碰撞半徑
+const SIEGE_PLAYER_RADIUS = 18;
+
+function checkSiegeWallCollision(px, py) {
+  if (!castleSiegeActive || !castleSiegeCastle) return false;
+  const r = SIEGE_PLAYER_RADIUS;
+
+  // 檢查所有固定碰撞矩形
+  for (const rect of SIEGE_COLLISION_RECTS) {
+    if (px + r > rect.x && px - r < rect.x + rect.w &&
+        py + r > rect.y && py - r < rect.y + rect.h) {
+      return rect.id;
+    }
+  }
+
+  // 檢查城門（只有未破壞時才阻擋）
+  const gateBroken = castleSiegeGate && castleSiegeGate.hp <= 0;
+  if (!gateBroken) {
+    const g = SIEGE_GATE_RECT;
+    if (px + r > g.x && px - r < g.x + g.w &&
+        py + r > g.y && py - r < g.y + g.h) {
+      return 'gate';
+    }
+  }
+
+  // 檢查活著的守護塔碰撞
+  if (castleSiegeTowers && castleSiegeTowers.length > 0) {
+    for (const t of castleSiegeTowers) {
+      if (t.hp <= 0) continue;
+      const tr = SIEGE_TOWER_RECT;
+      if (px + r > tr.x && px - r < tr.x + tr.w &&
+          py + r > tr.y && py - r < tr.y + tr.h) {
+        return 'tower';
+      }
+    }
+  }
+
+  return false;
+}
 
 // 在城堡地圖上启动攻城战（生成城门、守護塔、守军、权杖）
+// 攻城戰使用與普通地圖完全相同的渲染系統：
+//   - 背景圖為 2048×2048 完整攻城地圖，直接由 sceneBg 顯示（camera 系統控制縮放與平移）
+//   - 玩家保持在 worldLayer 中
+//   - 建築（城門/塔/城主/權杖）放在 npcLayer，坐標直接使用世界座標
 function startCastleSiegeOnMap(castle) {
   castleSiegeActive = true;
   castleSiegeCastle = castle;
@@ -15918,40 +22439,55 @@ function startCastleSiegeOnMap(castle) {
   castleSiegeTowers = [];
   castleSiegeLord = null;
   castleSiegeScepter = null;
+  castleSiegeLastDestroyedTower = null;
   GS._siegeDefenderCount = 0;
 
-  addLog('siege', `⚔️ 攻城戰開始！目標：${castle.name}`);
-  addLog('siege', `⏱️ 限时 20 分鐘，擊破城門 → 摧毁守護塔 → 奪取权杖`);
-  addLog('siege', `🛡 擊敗守城衛兵後即可攻擊城門`);
+  addLog('siege', `攻城戰開始！目標：${castle.name}`);
+  addLog('siege', `限時 20 分鐘，擊破城門 → 摧毀守護塔 → 擊敗城主 → 奪取權杖`);
+  addLog('siege', `擊敗守城衛兵後即可攻擊城門`);
 
-  // 绑定撤退按钮
-  const retreatBtn = document.getElementById('siege-retreat-btn');
-  if (retreatBtn) {
-    retreatBtn.onclick = () => {
-      if (confirm('確定撤退？撤退後攻城戰將結束，城堡歸防守方所有。')) {
-        endCastleSiege('defeat');
-        // 傳送回安全區
-        const safeMaps = Object.keys(SAFE_MAPS);
-        if (safeMaps.length > 0) loadMap(safeMaps[0]);
-      }
-    };
-  }
+  // ===== 除錯資訊 =====
+  const mapBg = getAllMaps()[GS.currentMap]?.bg || '';
+  console.log('[Siege] 地圖背景URL:', mapBg);
+  console.log('[Siege] 玩家出生位置:', SIEGE_PLAYER_SPAWN);
+  console.log('[Siege] 城門位置:', SIEGE_GATE_POS, '尺寸:', SIEGE_GATE_SIZE);
+  console.log('[Siege] 守護塔位置:', SIEGE_TOWER_POS);
+  console.log('[Siege] 城主位置:', SIEGE_LORD_POS);
+  console.log('[Siege] 碰撞區域:', SIEGE_COLLISION_RECTS);
+  console.log('[Siege] 城門碰撞:', SIEGE_GATE_RECT);
 
-  // 生成守城NPC（城門內外都有）
+  // 玩家初始位置：城外南方石板路起點（世界座標）
+  GS.player.x = SIEGE_PLAYER_SPAWN.x;
+  GS.player.y = SIEGE_PLAYER_SPAWN.y;
+  GS.player.targetX = GS.player.x;
+  GS.player.targetY = GS.player.y;
+
+  // 設置攻城地圖的默認縮放：顯示玩家與前方戰場，能看到部分城堡
+  const vw = worldW || 800;
+  const vh = worldH || 600;
+  // 以玩家位置為中心，縮放到能看到前方戰場
+  const defaultZoom = Math.min(vw / 900, vh / 700);
+  CAMERA.targetZoom = Math.max(CAMERA.zoomMin || 0.3, Math.min(CAMERA.zoomMax || 2, defaultZoom));
+  CAMERA.zoom = CAMERA.targetZoom; // 立即應用，避免縮放動畫
+
+  // 相機立即定位到玩家
+  CAMERA.x = GS.player.x - vw / 2 / CAMERA.zoom;
+  CAMERA.y = GS.player.y - vh / 2 / CAMERA.zoom;
+  applyCameraTransform();
+
+  console.log('[Siege] 攻城戰啟動，玩家位置:', GS.player.x, GS.player.y, '默認縮放:', CAMERA.zoom);
+
+  // 生成守城NPC（城門內外）
   spawnSiegeDefenders(castle);
 
-  // 生成围墙视觉（左右两侧 + 后方 + 城门两侧）
-  renderSiegeWalls();
-
-  // 生成城门（作为"特殊怪物"，大血量）
-  const gateY = CAMERA.worldHeight * 0.32 - 40; // 城门底部与围墙底部对齐
+  // 生成城门（作為"特殊怪物"，大血量）— 南牆中央城門位置
   const gate = createSiegeStructure({
     id: 'siege_gate',
     name: '城門',
     type: 'gate',
-    x: CAMERA.worldWidth / 2,
-    y: gateY,
-    hpMax: 10000,
+    x: SIEGE_GATE_POS.x,
+    y: SIEGE_GATE_POS.y,
+    hpMax: 5000,
     atk: 0,
     def: 20 + castle.level * 2,
     level: castle.level * 5,
@@ -15959,6 +22495,13 @@ function startCastleSiegeOnMap(castle) {
   castleSiegeGate = gate;
   GS.monsters.push(gate);
   renderMonsterUnit(gate);
+
+  // 初始地圖背景：第1張（城門完好）
+  currentSiegeMapFrame = -1; // 重置，讓 updateSiegeMapByPhase 強制刷新
+  updateSiegeMapByPhase();
+  console.log('[Siege] 初始背景圖 URL:', SIEGE_MAP_IMAGES[0]);
+  console.log('[Siege] 城門 HP:', gate.hp, '/', gate.hpMax);
+  console.log('[Siege] 城門狀態: 完好 (HP > 60%)');
 
   // 启动倒计时
   if (castleSiegeTimer) clearInterval(castleSiegeTimer);
@@ -15974,51 +22517,258 @@ function startCastleSiegeOnMap(castle) {
   updateSiegeHUD();
 }
 
-// 拾取權杖：只有軍團長能拾取，拾取後城堡易主並重新計時
+// 點擊權杖：玩家移動到權杖旁邊（1024, 600），到達後自動拾取
+function handleScepterClick() {
+  if (!castleSiegeActive || castleSiegePhase !== 'scepter') return;
+  if (!castleSiegeScepter) return;
+  console.log('[Siege] Scepter clicked');
+
+  // 陣營檢查：守城方不能拾取權杖
+  if (isPlayerSiegeDefender()) {
+    addLog('system', '這是我方陣營的權杖，無法拾取。');
+    return;
+  }
+
+  const myLegion = GS.legionId ? AI_GUILDS.find(g => g.id === GS.legionId) : null;
+  const isLeader = myLegion && GS.guild && GS.guild.role === 'leader';
+  const isKing = GS.nation && getNationKingInfo(GS.nation)?.name === GS.player.name;
+
+  if (!isLeader && !isKing) {
+    addLog('system', '❌ 僅軍團長或國王可拾取權杖！');
+    return;
+  }
+
+  // 設定目標：權杖下方 y=680
+  const targetY = SIEGE_SCEPTER_PICKUP_Y;
+  GS.player.targetX = SIEGE_SCEPTER_POS.x;
+  GS.player.targetY = targetY;
+  GS.player.state = 'walking';
+  GS.player.facing = 'up';
+  addLog('system', '正在移動向權杖...');
+}
+
+// 拾取權杖：只有攻城方的軍團長/國王能拾取，拾取後城堡易主、攻守互換、時間重置、城門與守護塔重建
 function handlePickupScepter() {
   if (!castleSiegeActive || castleSiegePhase !== 'scepter') return;
+  if (!castleSiegeScepter) return;
+
+  // 陣營檢查：守城方不能拾取權杖
+  if (isPlayerSiegeDefender()) {
+    console.log('[Scepter] 拾取失敗：玩家為守城方，不能拾取權杖。玩家軍團=' + (GS.legionId || GS.guildId || '無') + ' 城主軍團=' + getSiegeDefenderGuildId());
+    return;
+  }
+
   const myLegion = GS.legionId ? AI_GUILDS.find(g => g.id === GS.legionId) : null;
   const isLeader = myLegion && GS.guild && GS.guild.role === 'leader';
   const isKing = GS.nation && getNationKingInfo(GS.nation)?.name === GS.player.name;
 
   if (!isLeader && !isKing) {
     addLog('siege', '❌ 僅軍團長或國王可拾取權杖！');
+    console.log('[Scepter] 拾取失敗：玩家不是軍團長或國王。role=' + (GS.guild?.role || '無'));
     return;
   }
 
-  // 易主：更新城堡所屬
+  // 防重入
+  if (handlePickupScepter._picking) return;
+  handlePickupScepter._picking = true;
+
+  const playerName = GS.player.name;
+  const legionName = GS.guild?.name || (myLegion?.name) || '自由玩家';
+  const oldDefenderId = getSiegeDefenderGuildId();
+  const newDefenderId = GS.legionId || GS.guildId || 'player_guild';
+  console.log('[Scepter] 權杖被拾取！玩家=' + playerName + ' 軍團=' + legionName + ' 陣營=攻城方 舊城主=' + oldDefenderId + ' 新城主=' + newDefenderId);
+
   const castle = castleSiegeCastle;
+
+  // 先切換到「塔全毀+無權杖」地圖（短暫顯示）
+  castleSiegeScepter = null;
+  updateSiegeMapByPhase('權杖被拾取，暫顯無權杖地圖');
+
+  // 全服公告
+  addLog('siege', `🏆 ${legionName}的${playerName}奪取了權杖！成為新城主！`);
+  addLog('system', `🏰 【${castle?.name || '城堡'}】易主！新城主：${legionName}，全體傳送中...`);
+  showSiegeBroadcast(`${legionName} 佔領了城堡！全體傳送中...`);
+
+  // 顯示 3 秒倒數傳送畫面
+  showSiegeTeleportCountdown(3, legionName, () => {
+    // 倒數結束：執行攻守互換與傳送
+    executeSiegeSwapAndTeleport(castle, newDefenderId, oldDefenderId, legionName);
+  });
+}
+
+// 顯示攻城戰倒數傳送畫面
+function showSiegeBroadcast(msg) {
+  let bar = document.getElementById('siege-broadcast-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'siege-broadcast-bar';
+    bar.className = 'siege-broadcast-bar';
+    document.body.appendChild(bar);
+  }
+  bar.textContent = msg;
+  bar.classList.add('show');
+  clearTimeout(showSiegeBroadcast._t);
+  showSiegeBroadcast._t = setTimeout(() => { bar.classList.remove('show'); }, 2800);
+}
+
+function showSiegeTeleportCountdown(seconds, legionName, onComplete) {
+  let overlay = document.getElementById('siege-teleport-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'siege-teleport-overlay';
+    overlay.className = 'siege-teleport-overlay';
+    overlay.innerHTML = `
+      <div class="siege-teleport-inner">
+        <div class="siege-teleport-title">城堡易主</div>
+        <div class="siege-teleport-legion"></div>
+        <div class="siege-teleport-countdown">3</div>
+        <div class="siege-teleport-tip">全體傳送中...</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+  const legionEl = overlay.querySelector('.siege-teleport-legion');
+  if (legionEl) legionEl.textContent = legionName + ' 成為新城主';
+  const cdEl = overlay.querySelector('.siege-teleport-countdown');
+  if (cdEl) cdEl.textContent = String(seconds);
+  overlay.classList.add('show');
+
+  let remaining = seconds;
+  const tick = () => {
+    remaining -= 1;
+    if (remaining > 0) {
+      if (cdEl) cdEl.textContent = String(remaining);
+      setTimeout(tick, 1000);
+    } else {
+      overlay.classList.remove('show');
+      setTimeout(() => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }, 400);
+      onComplete && onComplete();
+    }
+  };
+  setTimeout(tick, 1000);
+}
+
+// 執行攻守互換與玩家傳送
+function executeSiegeSwapAndTeleport(castle, newDefenderId, oldDefenderId, legionName) {
+  // 先更新城堡所屬（易主）
   if (castle) {
-    castle.ownerGuildId = GS.legionId || GS.guildId || 'player_guild';
+    castle.ownerGuildId = newDefenderId;
     castle.ownerName = GS.guild?.name || GS.player.name;
     castle.ownerNation = GS.nation;
     castle.owner = 'player';
   }
 
-  addLog('siege', `👑 權杖已被【${GS.guild?.name || GS.player.name}】拾取！`);
-  addLog('system', `🏰 【${castle?.name || '城堡'}】易主！新城主：${GS.guild?.name || GS.player.name}`);
-
-  // 清除守城NPC並重新生成守軍（新守方）
+  // 清除守城NPC與攻城建築（重建前清空）
   GS.monsters = GS.monsters.filter(m => !m.isSiegeDefender && !m.isSiegeStructure);
   document.querySelectorAll('.siege-defender').forEach(el => el.remove());
+  document.querySelectorAll('.siege-structure').forEach(el => el.remove());
+  if (unitAnimState && unitAnimState.size > 0) {
+    const toDelete = [];
+    unitAnimState.forEach((_, key) => {
+      if (typeof key === 'string' && (key.startsWith('defender_') || key.startsWith('siege_') || key.startsWith('scepter') || key.startsWith('tower_'))) {
+        toDelete.push(key);
+      }
+    });
+    toDelete.forEach(k => unitAnimState.delete(k));
+  }
+  // 清理特效層
+  if (effectLayer) {
+    effectLayer.innerHTML = '';
+    _effectCount = 0;
+  }
+  // 重置陣列/引用
+  castleSiegeGate = null;
+  castleSiegeTowers = [];
+  castleSiegeLord = null;
+  castleSiegeScepter = null;
+  currentSiegeMapFrame = -1;
+
+  // 重建城門（完好狀態，HP滿）
+  const newGate = createSiegeStructure({
+    id: 'gate',
+    name: '城門',
+    type: 'gate',
+    x: SIEGE_GATE_POS.x,
+    y: SIEGE_GATE_POS.y,
+    hpMax: 5000 + (castle?.level || 1) * 1000,
+    atk: 0,
+    def: 20 + (castle?.level || 1) * 3,
+    level: (castle?.level || 1) * 5,
+  });
+  castleSiegeGate = newGate;
+  GS.monsters.push(newGate);
+  renderSiegeStructureVisual(newGate);
+
+  // 重建守護塔（完好狀態，HP滿）
+  const newTower = createSiegeStructure({
+    id: 'tower_0',
+    name: '守護塔',
+    type: 'tower',
+    x: SIEGE_TOWER_POS.x,
+    y: SIEGE_TOWER_POS.y,
+    hpMax: SIEGE_TOWER_HP_MAX,
+    atk: 50 + (castle?.level || 1) * 5,
+    def: 10 + (castle?.level || 1),
+    level: (castle?.level || 1) * 5 + 5,
+  });
+  castleSiegeTowers.push(newTower);
+  GS.monsters.push(newTower);
+  renderSiegeStructureVisual(newTower);
+
+  // 切換回城門完好地圖
+  castleSiegePhase = 'gate';
+  updateSiegeMapByPhase('攻守互換完成，重建城門與塔');
 
   // 重新生成守方守城NPC
   spawnSiegeDefenders(castle);
 
-  // 易主後重新計時 20 分鐘（防守方守衛）
+  // 重置計時器 20 分鐘
   castleSiegeTimeLeft = SIEGE_DURATION;
-  castleSiegePhase = 'defending';
   if (GS.siegeWar) {
     GS.siegeWar.endTime = Date.now() + SIEGE_DURATION * 1000;
-    GS.siegeWar.phase = 'defending';
+    GS.siegeWar.phase = 'gate';
     GS.siegeWar.defender = GS.guild?.name || GS.player.name;
   }
-  addLog('siege', `🛡 進入防守階段！新守方需堅守 20 分鐘`);
 
-  // 清理權杖
-  if (castleSiegeScepter?.el) castleSiegeScepter.el.remove();
-  castleSiegeScepter = null;
+  // 判斷玩家陣營：新城主軍團 = 守城方，其他 = 攻城方
+  const playerIsNewDefender = (GS.legionId || GS.guildId || '') === newDefenderId ||
+    (GS.guild && GS.guild.role && (GS.legionId === newDefenderId));
 
+  console.log('[Siege] 玩家陣營判定：新守方=' + newDefenderId + ' 玩家軍團=' + (GS.legionId || GS.guildId || '無') + ' 是新守方=' + playerIsNewDefender);
+
+  if (playerIsNewDefender) {
+    // 守城方：直接傳送到城門內側 (1024, 850)
+    GS.player.x = 1024;
+    GS.player.y = 850;
+    GS.player.targetX = 1024;
+    GS.player.targetY = 850;
+    GS.player.state = 'idle';
+    GS.player.facing = 'down';
+    if (typeof positionUnit === 'function') {
+      const unit = worldLayer?.querySelector?.('.world-unit.hero');
+      if (unit) positionUnit(unit, GS.player.x, GS.player.y);
+    }
+    addLog('siege', `🛡 你們成為守城方！已傳送至城門內側進行防守。`);
+    setTimeout(() => { handlePickupScepter._picking = false; }, 500);
+  } else {
+    // 攻城方：先回村莊，停留 2 秒後自動重新進入攻城戰
+    addLog('siege', `⚔ 你們為攻城方！正在傳送至村莊...`);
+    const castleId = castle?.id || 'gludio';
+    // 切換到村莊地圖（會自動 cleanupCastleSiege）
+    loadMap('village');
+    // 2 秒後自動重新進入攻城戰場
+    setTimeout(() => {
+      if (window.enterSiegeBattle) {
+        window.enterSiegeBattle(castleId);
+      }
+      addLog('siege', `⚔ 已重新進入攻城戰場，在城外集結！`);
+      setTimeout(() => { handlePickupScepter._picking = false; }, 500);
+    }, 2000);
+  }
+
+  GS.targetMonsterUid = null;
   updateSiegeHUD();
 }
 
@@ -16059,14 +22809,36 @@ function renderMonsterUnit(m) {
   // 普通怪物由spawnMonsters处理，这里留空兼容
 }
 
-// 攻城建築圖資（暗黑中世紀風格）
+// 攻城建築圖資（已捨棄城門疊加圖；城門狀態由背景圖切換呈現）
 const SIEGE_ASSETS = {
-  gate: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhtmz4icw_ve_miaoda',
-  tower: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhpm4bqju_ve_miaoda',
-  scepter: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhmx5xqeu_ve_miaoda',
+  gate: {
+    // 保留空結構避免引用錯誤；實際城門狀態由 SIEGE_MAP_IMAGES 切換背景圖呈現
+  },
 };
 
-// 攻城建筑视觉（城门/塔/权杖）
+// 預載入 7 張攻城地圖
+const _siegeMapPreloaded = [];
+function preloadSiegeMaps() {
+  SIEGE_MAP_IMAGES.forEach((url, i) => {
+    const img = new Image();
+    img.onerror = function () {
+      if (this.dataset.fb) return;
+      this.dataset.fb = '1';
+      const cdnId = _extractCdnId(this.src);
+      if (cdnId && !this.src.startsWith(CDN_BASE)) {
+        this.src = CDN_BASE + cdnId;
+      }
+    };
+    img.src = url;
+    _siegeMapPreloaded[i] = img;
+  });
+}
+preloadSiegeMaps();
+
+// 攻城建筑视觉
+// 城門：CSS繪製木門 + HP條 + 點擊區域（拱型木紋門）
+// 守護塔：隱形點擊區域 + HP條（背景圖已有塔的外觀）
+// 權杖：CSS繪製金色發光菱形
 function renderSiegeStructureVisual(m) {
   const elDiv = document.createElement('div');
   elDiv.className = 'world-unit siege-structure';
@@ -16074,61 +22846,122 @@ function renderSiegeStructureVisual(m) {
 
   let content = '';
   if (m.type === 'gate') {
-    elDiv.style.cssText = `position:absolute;left:${m.x - 80}px;top:${m.y - 60}px;width:160px;height:120px;pointer-events:auto;cursor:pointer;z-index:15;`;
+    const w = SIEGE_GATE_SIZE.w, h = SIEGE_GATE_SIZE.h;
+    // 完全透明的點擊區域，高於背景且高於一般UI層，確保能被點擊
+    elDiv.style.cssText = `position:absolute;left:${m.x}px;top:${m.y}px;width:${w}px;height:${h}px;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;z-index:50;background:transparent;`;
+    elDiv.dataset.structureType = 'gate';
+    // HP條顯示在點擊區域上方（世界y:910，城門上方）
+    const gateHpTop = (910 - (m.y - h/2)); // 相對於點擊區頂部的偏移
     content = `
-      <div style="width:100%;height:100%;position:relative;">
-        <img src="${SIEGE_ASSETS.gate}" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:8px;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.8));"/>
+      <div style="position:absolute;top:${gateHpTop}px;left:10%;right:10%;height:14px;background:rgba(0,0,0,0.85);border:1px solid #666;border-radius:7px;box-shadow:0 2px 8px rgba(0,0,0,0.8);pointer-events:none;">
+        <div class="unit-hp-fill" style="height:100%;background:linear-gradient(90deg,#ff4040,#ff8040);border-radius:6px;width:100%;transition:width 0.3s;"></div>
       </div>
-      <div style="position:absolute;bottom:-18px;left:15%;right:15%;height:10px;background:rgba(0,0,0,0.8);border:1px solid #555;border-radius:5px;">
-        <div class="unit-hp-fill" style="height:100%;background:linear-gradient(90deg,#ff4040,#ff8040);border-radius:4px;width:100%;transition:width 0.3s;"></div>
-      </div>
-      <div style="position:absolute;bottom:-34px;left:0;right:0;text-align:center;color:#fff;font-size:11px;font-weight:700;text-shadow:1px 1px 3px #000, 0 0 4px #000;">${m.name} Lv.${m.level}</div>`;
+      <div style="position:absolute;top:${gateHpTop - 26}px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:700;text-shadow:1px 1px 3px #000, 0 0 4px #000;letter-spacing:1px;pointer-events:none;">${m.name} Lv.${m.level}</div>`;
   } else if (m.type === 'tower') {
-    elDiv.style.cssText = `position:absolute;left:${m.x - 50}px;top:${m.y - 70}px;width:100px;height:140px;pointer-events:auto;cursor:pointer;z-index:15;`;
+    const w = SIEGE_TOWER_SIZE.w, h = SIEGE_TOWER_SIZE.h;
+    // 守護塔：完全透明的點擊區域 + HP條（外觀由背景圖呈現）
+    const gateAlive = castleSiegeGate && castleSiegeGate.hp > 0;
+    elDiv.style.cssText = `position:absolute;left:${m.x}px;top:${m.y}px;width:${w}px;height:${h}px;transform:translate(-50%,-50%);pointer-events:${gateAlive ? 'none' : 'auto'};cursor:crosshair;z-index:50;background:transparent;opacity:${gateAlive ? '0' : '1'};`;
+    elDiv.dataset.structureType = 'tower';
+    // HP條顯示在塔點擊區域上方（世界y:440）
+    const towerHpTop = (440 - (m.y - h/2));
     content = `
-      <div style="width:100%;height:100%;position:relative;">
-        <img src="${SIEGE_ASSETS.tower}" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 4px 10px rgba(0,0,0,0.8));"/>
+      <div class="tower-hpbar" style="position:absolute;top:${towerHpTop}px;left:10%;right:10%;height:14px;background:rgba(0,0,0,0.85);border:1px solid #666;border-radius:7px;box-shadow:0 2px 8px rgba(0,0,0,0.8);pointer-events:none;">
+        <div class="unit-hp-fill" style="height:100%;background:linear-gradient(90deg,#ff4040,#ff8040);border-radius:6px;width:100%;transition:width 0.3s;"></div>
       </div>
-      <div style="position:absolute;bottom:-6px;left:15%;right:15%;height:8px;background:rgba(0,0,0,0.8);border:1px solid #555;border-radius:4px;">
-        <div class="unit-hp-fill" style="height:100%;background:linear-gradient(90deg,#ff4040,#ff8040);border-radius:3px;width:100%;transition:width 0.3s;"></div>
-      </div>
-      <div style="position:absolute;bottom:-22px;left:0;right:0;text-align:center;color:#fff;font-size:10px;font-weight:700;text-shadow:1px 1px 3px #000;">${m.name}</div>`;
+      <div class="tower-namelabel" style="position:absolute;top:${towerHpTop - 26}px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:700;text-shadow:1px 1px 3px #000, 0 0 4px #000;letter-spacing:1px;pointer-events:none;">${m.name} Lv.${m.level}</div>`;
   } else if (m.type === 'scepter') {
-    elDiv.style.cssText = `position:absolute;left:${m.x - 30}px;top:${m.y - 30}px;width:60px;height:60px;pointer-events:auto;cursor:pointer;z-index:20;`;
+    const w = SIEGE_SCEPTER_SIZE.w, h = SIEGE_SCEPTER_SIZE.h;
+    // 權杖：透明拾取區域（100×100px） + 金色發光動畫提示
+    elDiv.style.cssText = `position:absolute;left:${m.x - w/2}px;top:${m.y - h/2}px;width:${w}px;height:${h}px;pointer-events:auto;cursor:pointer;z-index:25;`;
     content = `
-      <div style="width:100%;height:100%;animation:scepter-glow 1.5s ease-in-out infinite alternate;">
-        <img src="${SIEGE_ASSETS.scepter}" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 0 10px #ffd040) drop-shadow(0 0 20px rgba(255,208,64,0.5));"/>
-      </div>
-      <div style="position:absolute;top:-18px;left:0;right:0;text-align:center;color:#ffd040;font-size:10px;font-weight:800;text-shadow:0 0 6px #ffd040, 1px 1px 2px #000;animation:scepter-glow 1.5s ease-in-out infinite alternate;">權杖</div>`;
+      <div style="position:absolute;top:10%;left:15%;right:15%;bottom:10%;border-radius:50%;background:radial-gradient(circle, rgba(255,220,80,0.55), rgba(255,180,30,0.15) 60%, transparent 100%);box-shadow:0 0 24px rgba(255,200,50,0.8), 0 0 48px rgba(255,160,20,0.4);animation:scepter-pulse 1.6s ease-in-out infinite alternate;pointer-events:none;"></div>
+      <div style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:50%;background:radial-gradient(circle, rgba(255,255,200,0.4), transparent 70%);animation:scepter-pulse 1.6s ease-in-out infinite alternate-reverse;pointer-events:none;"></div>
+      <div style="position:absolute;top:-30px;left:0;right:0;text-align:center;color:#ffd040;font-size:13px;font-weight:800;text-shadow:0 0 6px #ffd040, 1px 1px 2px #000;animation:scepter-pulse 1.5s ease-in-out infinite alternate;">黃金權杖</div>`;
     elDiv.addEventListener('click', () => {
+      console.log('[Siege] Scepter clicked');
       if (castleSiegePhase === 'scepter') {
-        handlePickupScepter();
+        handleScepterClick();
       }
     });
   } else if (m.type === 'lord') {
-    elDiv.style.cssText = `position:absolute;left:${m.x - 40}px;top:${m.y - 60}px;width:80px;height:120px;pointer-events:none;`;
+    const w = 160, h = 80;
+    elDiv.style.cssText = `position:absolute;left:${m.x - w/2}px;top:${m.y - h/2}px;width:${w}px;height:${h}px;pointer-events:auto;cursor:crosshair;z-index:16;`;
     content = `
-      <div style="width:100%;height:100%;position:relative;">
-        <img src="${SIEGE_ASSETS.tower}" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 4px 10px rgba(0,0,0,0.8)) hue-rotate(-15deg) brightness(1.1);"/>
-        <div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);width:24px;height:24px;background:radial-gradient(circle,#ffd040,#a06010);border-radius:50%;border:2px solid #8b6520;box-shadow:0 0 8px #ffd040;"></div>
+      <div style="width:100%;height:100%;"></div>
+      <div style="position:absolute;top:0;left:10%;right:10%;height:12px;background:rgba(0,0,0,0.85);border:1px solid #aa6600;border-radius:6px;">
+        <div class="unit-hp-fill" style="height:100%;background:linear-gradient(90deg,#ffaa00,#ffdd60);border-radius:5px;width:100%;transition:width 0.3s;"></div>
       </div>
-      <div style="position:absolute;bottom:-6px;left:10%;right:10%;height:8px;background:rgba(0,0,0,0.8);border:1px solid #555;border-radius:4px;">
-        <div class="unit-hp-fill" style="height:100%;background:linear-gradient(90deg,#ff4040,#ff8040);border-radius:3px;width:100%;transition:width 0.3s;"></div>
-      </div>
-      <div style="position:absolute;bottom:-22px;left:0;right:0;text-align:center;color:#ffd040;font-size:10px;font-weight:800;text-shadow:1px 1px 3px #000;">${m.name}</div>`;
+      <div style="position:absolute;top:-22px;left:0;right:0;text-align:center;color:#ffd700;font-size:13px;font-weight:800;text-shadow:1px 1px 2px #000,0 0 6px #ff8800;">${m.name} Lv.${m.level}</div>`;
   }
   elDiv.innerHTML = content;
-  worldLayer.appendChild(elDiv);
+  // 放入 npcLayer（與普通怪物同一層，由相機系統統一變換）
+  if (el.npcLayer) {
+    el.npcLayer.appendChild(elDiv);
+  } else {
+    worldLayer.appendChild(elDiv);
+  }
   m.el = elDiv;
   // 攻城建筑点击：选中为攻击目标（权杖除外，有单独拾取处理）
   elDiv.addEventListener('click', e => {
     e.stopPropagation();
+    e.preventDefault();
     if (m.type === 'scepter') return;
+    if (m.type === 'gate') console.log('[Siege] Gate clicked at position: x=' + m.x + ' y=' + m.y);
+    if (m.type === 'tower') {
+      const gateAlive = castleSiegeGate && castleSiegeGate.hp > 0;
+      console.log('[Siege] Tower clicked at position: x=' + m.x + ' y=' + m.y + ' gate destroyed=' + !gateAlive);
+      if (gateAlive) return; // 城門未破時守護塔不可點擊
+      // 陣營檢查：守城方不能攻擊自己的建築
+      if (isPlayerSiegeDefender()) {
+        addLog('system', '這是我方陣營的建築，無法攻擊。');
+        console.log('[Siege] 守城方點擊守護塔，取消攻擊。');
+        return;
+      }
+    }
+    if (m.type === 'gate') {
+      // 守城方不能攻擊城門
+      if (isPlayerSiegeDefender()) {
+        addLog('system', '這是我方陣營的建築，無法攻擊。');
+        console.log('[Siege] 守城方點擊城門，取消攻擊。');
+        return;
+      }
+    }
     if (castleSiegeActive) {
       onMonsterClick(m);
     }
   });
   return elDiv;
+}
+
+// 攻城战建筑定位与状态更新
+function positionSiegeStructure(elDiv, x, y, type) {
+  if (type === 'gate') {
+    // 城門使用 transform: translate(-50%, -50%) 置中於座標點
+    elDiv.style.left = x + 'px';
+    elDiv.style.top = y + 'px';
+    // HP = 0 時隱藏點擊區與HP條（背景圖已切換到第4張）
+    const hpFill = elDiv.querySelector('.unit-hp-fill');
+    const hpPct = hpFill ? parseFloat(hpFill.style.width) || 0 : 100;
+    if (hpPct <= 0) {
+      elDiv.style.pointerEvents = 'none';
+      elDiv.style.opacity = '0';
+    }
+  } else if (type === 'tower') {
+    // 守護塔使用 transform: translate(-50%, -50%) 置中
+    elDiv.style.left = x + 'px';
+    elDiv.style.top = y + 'px';
+    // HP=0 時關閉點擊並灰階（圖片層處理）
+    const hpFill = elDiv.querySelector('.unit-hp-fill');
+    const hpPct = hpFill ? parseFloat(hpFill.style.width) || 0 : 100;
+    if (hpPct <= 0) {
+      elDiv.style.pointerEvents = 'none';
+    } else {
+      elDiv.style.pointerEvents = 'auto';
+    }
+  }
+  // z-index按y深度排序
+  elDiv.style.zIndex = Math.floor(14 + y / 8);
 }
 
 // 更新攻城战HUD
@@ -16152,80 +22985,15 @@ function updateSiegeHUD() {
   hud.style.display = 'flex';
   const m = Math.floor(castleSiegeTimeLeft / 60);
   const s = castleSiegeTimeLeft % 60;
-  const phaseText = { gate: '第一階段：擊破城門', tower: '第二階段：摧毀守護塔', scepter: '第三階段：奪取權杖', defending: '防守階段：守護城堡', victory: '勝利！' }[castleSiegePhase] || '';
+  const phaseText = { gate: '第一階段：擊破城門', tower: '第二階段：摧毀守護塔', scepter: '第三階段：奪取權杖', victory: '勝利！' }[castleSiegePhase] || '';
   if (titleEl) titleEl.textContent = `${castleSiegeCastle?.name || ''} 攻城戰 ${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   if (phaseEl) phaseEl.textContent = phaseText;
 }
 
-// 攻城战围墙视觉渲染（暗黑中世纪石墙风格）
+// 攻城战围墙视觉渲染（暗黑中世纪石墙风格）— 僅作為視覺補強，背景圖已有城牆
 function renderSiegeWalls() {
-  const W = CAMERA.worldWidth;
-  const H = CAMERA.worldHeight;
-  const castleLeft = W * 0.15;
-  const castleRight = W * 0.85;
-  const castleTop = H * 0.02;
-  const castleBottom = H * 0.32;
-  const wallThickness = 20;
-  const gateX = W / 2;
-  const gateWidth = 120;
-
-  const wallStyle = (w, h, left, top, rotate = 0) => `
-    position:absolute;left:${left}px;top:${top}px;width:${w}px;height:${h}px;z-index:5;pointer-events:none;
-    background: linear-gradient(180deg, #3a3028 0%, #2a2018 50%, #1a1410 100%);
-    border: 2px solid #4a3c30;
-    border-radius: 4px;
-    box-shadow: inset 0 2px 4px rgba(255,255,255,0.1), inset 0 -4px 8px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.8);
-  `;
-
-  // 左墙
-  const leftWall = document.createElement('div');
-  leftWall.className = 'siege-wall siege-wall-left';
-  leftWall.style.cssText = wallStyle(wallThickness, castleBottom - castleTop, castleLeft, castleTop);
-  // 城垛效果
-  leftWall.innerHTML = '<div style="position:absolute;right:-4px;top:8px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div><div style="position:absolute;right:-4px;top:28px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div><div style="position:absolute;right:-4px;top:48px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div><div style="position:absolute;right:-4px;top:68px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div>';
-  worldLayer.appendChild(leftWall);
-
-  // 右墙
-  const rightWall = document.createElement('div');
-  rightWall.className = 'siege-wall siege-wall-right';
-  rightWall.style.cssText = wallStyle(wallThickness, castleBottom - castleTop, castleRight - wallThickness, castleTop);
-  rightWall.innerHTML = '<div style="position:absolute;left:-4px;top:8px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div><div style="position:absolute;left:-4px;top:28px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div><div style="position:absolute;left:-4px;top:48px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div><div style="position:absolute;left:-4px;top:68px;width:8px;height:12px;background:#4a3c30;border-radius:2px;"></div>';
-  worldLayer.appendChild(rightWall);
-
-  // 后墙
-  const backWall = document.createElement('div');
-  backWall.className = 'siege-wall siege-wall-back';
-  backWall.style.cssText = wallStyle(castleRight - castleLeft, wallThickness, castleLeft, castleTop);
-  worldLayer.appendChild(backWall);
-
-  // 城门左侧墙
-  const frontLeft = document.createElement('div');
-  frontLeft.className = 'siege-wall siege-wall-front-left';
-  frontLeft.style.cssText = wallStyle(gateX - gateWidth / 2 - castleLeft, wallThickness, castleLeft, castleBottom);
-  worldLayer.appendChild(frontLeft);
-
-  // 城门右侧墙
-  const frontRight = document.createElement('div');
-  frontRight.className = 'siege-wall siege-wall-front-right';
-  frontRight.style.cssText = wallStyle(castleRight - (gateX + gateWidth / 2), wallThickness, gateX + gateWidth / 2, castleBottom);
-  worldLayer.appendChild(frontRight);
-
-  // 城门柱子（两侧装饰柱）
-  const pillarStyle = (left, top) => `
-    position:absolute;left:${left}px;top:${top}px;width:28px;height:50px;z-index:6;pointer-events:none;
-    background: linear-gradient(180deg, #4a3c30 0%, #3a2c20 50%, #2a1c10 100%);
-    border: 2px solid #5a4c3c;
-    border-radius: 4px 4px 2px 2px;
-    box-shadow: inset 0 2px 4px rgba(255,255,255,0.15), 0 4px 10px rgba(0,0,0,0.8);
-  `;
-  const leftPillar = document.createElement('div');
-  leftPillar.className = 'siege-wall-pillar siege-wall-pillar-left';
-  leftPillar.style.cssText = pillarStyle(gateX - gateWidth / 2 - 14, castleBottom - 30);
-  worldLayer.appendChild(leftPillar);
-  const rightPillar = document.createElement('div');
-  rightPillar.className = 'siege-wall-pillar siege-wall-pillar-right';
-  rightPillar.style.cssText = pillarStyle(gateX + gateWidth / 2 - 14, castleBottom - 30);
-  worldLayer.appendChild(rightPillar);
+  // 新方案以背景圖為主，不額外繪製圍牆 DOM
+  // 保留空函數避免報錯
 }
 
 // 移除攻城战围墙视觉
@@ -16239,67 +23007,48 @@ function handleSiegeUnitDeath(m) {
   // 城门被击破 → 生成守護塔 + 守军
   if (m.type === 'gate') {
     castleSiegePhase = 'tower';
-    addLog('siege', '🏰 城門被擊破！守護塔和守卫出現了！');
-    // 生成2座守護塔
-    const castle = castleSiegeCastle;
-    for (let i = 0; i < 2; i++) {
-      const tower = createSiegeStructure({
-        id: 'tower_' + i,
-        name: '守護塔',
-        type: 'tower',
-        x: CAMERA.worldWidth / 2 + (i === 0 ? -150 : 150),
-        y: CAMERA.worldHeight * 0.2,
-        hpMax: 5000,
-        atk: 50 + castle.level * 5,
-        def: 10 + castle.level,
-        level: castle.level * 5 + 5,
-      });
-      castleSiegeTowers.push(tower);
-      GS.monsters.push(tower);
-      renderSiegeStructureVisual(tower);
+    addLog('siege', '🏰 城門已被擊破！守護塔和守衛出現了！');
+    // 播放城門破壞音效
+    if (window.AudioSystem && AudioSystem.playSfx) AudioSystem.playSfx('gatebreak');
+    // 大爆炸/破碎特效
+    if (typeof spawnEffect === 'function') {
+      spawnEffect('fire', m.x, m.y, { isCrit: true, scale: 2 });
     }
+    // 生成單座守護塔（城堡正中央，主堡前方）
+    const castle = castleSiegeCastle;
+    const tower = createSiegeStructure({
+      id: 'tower_0',
+      name: '守護塔',
+      type: 'tower',
+      x: SIEGE_TOWER_POS.x,
+      y: SIEGE_TOWER_POS.y,
+      hpMax: SIEGE_TOWER_HP_MAX,
+      atk: 50 + castle.level * 5,
+      def: 10 + castle.level,
+      level: castle.level * 5 + 5,
+    });
+    castleSiegeTowers.push(tower);
+    GS.monsters.push(tower);
+    renderSiegeStructureVisual(tower);
+    updateSiegeMapByPhase('城門破壞，進入守護塔階段');
+    console.log('[Siege] 守護塔生成 位置:', tower.x, tower.y, ' HP:', tower.hpMax);
     // 生成守军（普通怪物守卫）
     spawnSiegeDefenders(castle);
     updateSiegeHUD();
     return true;
   }
-  // 守護塔被摧毁 → 检查是否所有塔都没了
+  // 守護塔被摧毁 → 掉落黃金權杖
   if (m.type === 'tower') {
-    const alive = castleSiegeTowers.filter(t => t.hp > 0);
-    if (alive.length === 0) {
-      castleSiegePhase = 'scepter';
-      addLog('siege', '🗼 所有守護塔被摧毁！城主和权杖出現了！');
-      // 生成城主和权杖
-      const castle = castleSiegeCastle;
-      const lord = createSiegeStructure({
-        id: 'castle_lord',
-        name: '城主',
-        type: 'lord',
-        x: CAMERA.worldWidth / 2,
-        y: CAMERA.worldHeight * 0.15,
-        hpMax: 3000 + castle.level * 800,
-        atk: 100 + castle.level * 10,
-        def: 20 + castle.level * 3,
-        level: castle.level * 5 + 10,
-      });
-      castleSiegeLord = lord;
-      GS.monsters.push(lord);
-      renderSiegeStructureVisual(lord);
-      // 权杖（可拾取，击败城主后出现）
-      updateSiegeHUD();
-    }
-    return true;
-  }
-  // 城主被击败 → 生成权杖
-  if (m.type === 'lord') {
-    addLog('siege', '👑 城主被擊败！奪取权杖即可占领城堡！');
-    const castle = castleSiegeCastle;
+    console.log('[Siege] Tower destroyed! Scepter dropped at x=' + SIEGE_SCEPTER_POS.x + ' y=' + SIEGE_SCEPTER_POS.y);
+    addLog('siege', '🗼 守護塔已被摧毀！黃金權杖掉落！');
+    castleSiegePhase = 'scepter';
+    updateSiegeMapByPhase('守護塔被破壞，權杖掉落');
     const scepter = createSiegeStructure({
       id: 'scepter',
-      name: '权杖',
+      name: '黃金權杖',
       type: 'scepter',
-      x: CAMERA.worldWidth / 2,
-      y: CAMERA.worldHeight * 0.12,
+      x: SIEGE_SCEPTER_POS.x,
+      y: SIEGE_SCEPTER_POS.y,
       hpMax: 500,
       atk: 0,
       def: 0,
@@ -16308,9 +23057,10 @@ function handleSiegeUnitDeath(m) {
     castleSiegeScepter = scepter;
     GS.monsters.push(scepter);
     renderSiegeStructureVisual(scepter);
+    updateSiegeHUD();
     return true;
   }
-  // 权杖被夺取 → 胜利
+  // 权杖被夺取 → 胜利（舊邏輯保留，實際走 handlePickupScepter 攻守互換）
   if (m.type === 'scepter') {
     endCastleSiege('victory');
     return true;
@@ -16322,11 +23072,11 @@ function handleSiegeUnitDeath(m) {
 function spawnSiegeDefenders(castle) {
   // 三種守軍類型：守衛（近戰）、弓箭手（遠程）、法師（魔法）
   const defenderTypes = [
-    { type: 'guard_sword',  name: '城堡守衛',  sprite: 'guardian', role: 'melee',  ratio: 0.5 },
-    { type: 'guard_archer', name: '城堡弓箭手', sprite: 'archer',   role: 'ranged', ratio: 0.3 },
-    { type: 'guard_mage',   name: '城堡法師',  sprite: 'mage',     role: 'magic',  ratio: 0.2 },
+    { type: 'guard_sword',  name: '城堡守衛',  sprite: 'bandit',       role: 'melee',  ratio: 0.5 },
+    { type: 'guard_archer', name: '城堡弓箭手', sprite: 'archer',      role: 'ranged', ratio: 0.3 },
+    { type: 'guard_mage',   name: '城堡法師',  sprite: 'darkmage',    role: 'magic',  ratio: 0.2 },
   ];
-  const totalCount = 4 + castle.level * 2; // 根據城堡等級
+  const totalCount = 8 + castle.level * 2; // 根據城堡等級（8-10+隻城外+6-8隻城內）
 
   for (let i = 0; i < totalCount; i++) {
     // 按比例隨機選擇類型
@@ -16338,10 +23088,19 @@ function spawnSiegeDefenders(castle) {
       if (r < cum) { dType = dt; break; }
     }
 
-    // 守軍分佈在城門內外
-    const inFrontOfGate = Math.random() < 0.4; // 40% 在城門外
-    const baseX = CAMERA.worldWidth / 2;
-    const baseY = inFrontOfGate ? CAMERA.worldHeight * 0.4 : CAMERA.worldHeight * 0.22;
+    // 守軍分佈：城外（石板路沿線 y:1300-1700）+ 城內（庭院 y:400-700）
+    const zone = Math.random();
+    let baseX, baseY;
+    if (zone < 0.5) {
+      // 城外：石板路沿線（世界 y:1300-1700），道路兩側
+      const side = Math.random() < 0.5 ? -1 : 1;
+      baseX = 1024 + side * (80 + Math.random() * 180);
+      baseY = 1300 + Math.random() * 400;
+    } else {
+      // 城內：城堡庭院內（世界 y:400-700）
+      baseX = 500 + Math.random() * 1048;
+      baseY = 400 + Math.random() * 300;
+    }
 
     const guard = {
       uid: 'defender_' + i + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -16349,9 +23108,10 @@ function spawnSiegeDefenders(castle) {
       type: 'siege_defender',
       defenderType: dType.type,
       spriteKey: dType.sprite,
+      sprite: SPRITE[dType.sprite] || SPRITE.warrior,
       role: dType.role,
-      x: baseX + (Math.random() - 0.5) * 350,
-      y: baseY + (Math.random() - 0.5) * 100,
+      x: baseX,
+      y: baseY,
       hp: 200 + castle.level * 80,
       hpMax: 200 + castle.level * 80,
       atk: 20 + castle.level * 5,
@@ -16365,7 +23125,7 @@ function spawnSiegeDefenders(castle) {
       respawnTime: 30, // 30秒復活
       speed: dType.role === 'melee' ? 55 : 40,
       isSiegeDefender: true,
-      behavior: 'aggressive',
+      behavior: 'aggro', // 主動攻擊玩家
       active: true,
       facing: 'left',
       hitTimer: 0,
@@ -16373,6 +23133,10 @@ function spawnSiegeDefenders(castle) {
       targetUid: null,
       homeX: 0,
       homeY: 0,
+      wanderTimer: 2 + Math.random() * 2,
+      wanderRadius: 80,
+      attackInterval: dType.role === 'magic' ? 2.0 : (dType.role === 'ranged' ? 1.6 : 1.2),
+      _firstUpdate: true,
     };
     guard.homeX = guard.x;
     guard.homeY = guard.y;
@@ -16384,30 +23148,60 @@ function spawnSiegeDefenders(castle) {
   console.log(`[Siege] 生成 ${totalCount} 名守城NPC`);
 }
 
-// 渲染守城NPC精靈
+// 渲染守城NPC精靈（使用8幀多幀精靈圖，與普通怪物一致）
 function renderSiegeDefenderSprite(guard) {
-  const elDiv = document.createElement('div');
-  elDiv.className = 'world-unit enemy siege-defender';
-  elDiv.dataset.id = guard.uid;
-  elDiv.style.cssText = `position:absolute;left:${guard.x - 20}px;top:${guard.y - 45}px;width:40px;height:50px;z-index:10;`;
+  const sp = guard.sprite || SPRITE[guard.spriteKey] || SPRITE.warrior;
+  const isMultiFrame = !!(sp.multiFrame);
 
-  // 根據職業使用對應精靈
-  const sp = SPRITE[guard.spriteKey] || SPRITE.warrior;
-  const emojiChar = guard.role === 'melee' ? '⚔' : (guard.role === 'ranged' ? '🏹' : '🔮');
-  const colorClass = guard.role === 'melee' ? '#c04040' : (guard.role === 'ranged' ? '#40c060' : '#8060ff');
+  const elDiv = document.createElement('div');
+  elDiv.className = `world-unit enemy siege-defender idle ${isMultiFrame ? 'enemy-multiframe' : ''}`;
+  elDiv.dataset.id = guard.uid;
+  elDiv.style.cssText = `position:absolute;left:${guard.x - 25}px;top:${guard.y - 56}px;width:50px;height:56px;z-index:10;`;
+
+  // 构建8帧精灵HTML（与普通多帧怪物一致的结构）
+  const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8)) hue-rotate(-10deg) saturate(1.2)';
+  const idleSrc = sp.idle || '';
+  const walkSrc = sp.walk || sp.idle || '';
+  const walk2Src = sp.walk2 || sp.walk || sp.idle || '';
+  const walk3Src = sp.walk3 || sp.walk || sp.idle || '';
+  const walk4Src = sp.walk4 || sp.walk || sp.idle || '';
+  const attackSrc = sp.attack || sp.idle || '';
+  const attack2Src = sp.attack2 || sp.attack || sp.idle || '';
+  const hitSrc = sp.hit || sp.idle || '';
+  const onErrorHide = "if(!this.dataset.err){this.dataset.err='1';this.classList.add('frame-error')}" ;
 
   elDiv.innerHTML = `
-    <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
-      <div style="font-size:28px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.8));color:${colorClass}">${emojiChar}</div>
-    </div>
-    <div class="unit-info" style="position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);width:44px;">
-      <div class="unit-hp" style="width:100%;height:4px;background:rgba(0,0,0,0.7);border:1px solid #333;border-radius:2px;">
+    <div class="unit-info" style="position:absolute;top:-18px;left:50%;transform:translateX(-50%);width:48px;">
+      <div class="unit-hp-bar" style="width:100%;height:4px;background:rgba(0,0,0,0.7);border:1px solid #333;border-radius:2px;">
         <div class="unit-hp-fill" style="width:100%;height:100%;background:linear-gradient(90deg,#ff4040,#ff8040);border-radius:1px;"></div>
       </div>
       <div class="unit-name" style="font-size:8px;color:#fff;text-align:center;text-shadow:1px 1px 2px #000;margin-top:1px;white-space:nowrap;">${guard.name} Lv.${guard.level}</div>
-    </div>`;
-  worldLayer.appendChild(elDiv);
+    </div>
+    <div class="unit-sprite-wrap sprite-multi-frame sprite-cover-mode" style="width:50px;height:56px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
+      <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${walk2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${walk3Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${walk4Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${attackSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${attack2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <img class="unit-sprite-img sprite-frame-hit" src="${hitSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+      <div class="unit-sprite-tomb" style="display:none">🪦</div>
+      <div class="slash-effect"></div>
+      <div class="dust-particles"></div>
+    </div>
+    <div class="unit-shadow"></div>`;
+
+  // 放入攻城世界的 npc 層
+  // 守城NPC 放在 npcLayer 中
+  if (el.npcLayer) {
+    el.npcLayer.appendChild(elDiv);
+  } else {
+    worldLayer.appendChild(elDiv);
+  }
   guard.el = elDiv;
+  // 初始化动画状态
+  if (isMultiFrame) initUnitAnimState(guard.uid);
   // 守軍點擊：選中為攻擊目標
   elDiv.addEventListener('click', e => {
     e.stopPropagation();
@@ -16418,80 +23212,55 @@ function renderSiegeDefenderSprite(guard) {
 }
 
 // 结束攻城战
-// 攻城战围墙碰撞检测
-// 围墙形成U形包围城堡区域：左右两侧墙 + 后方墙，前方（南侧）留城门
-function checkSiegeWallCollision(px, py) {
-  if (!castleSiegeActive || !castleSiegeCastle) return false;
-  const W = CAMERA.worldWidth;
-  const H = CAMERA.worldHeight;
-  // 围墙范围：城堡区域在地图上半部分
-  const castleLeft = W * 0.15;
-  const castleRight = W * 0.85;
-  const castleTop = H * 0.02;
-  const castleBottom = H * 0.32; // 城门位置
-  const wallThickness = 20;
-  const playerRadius = 18;
-
-  // 城门位置和宽度（只有未被破坏时才阻挡）
-  const gateX = W / 2;
-  const gateWidth = 120;
-  const gateBroken = castleSiegeGate && castleSiegeGate.hp <= 0;
-
-  // 左墙：castleLeft 处，从 top 到 castleBottom
-  if (px > castleLeft - playerRadius && px < castleLeft + wallThickness + playerRadius &&
-      py > castleTop && py < castleBottom + playerRadius) {
-    return 'left_wall';
-  }
-  // 右墙：castleRight 处
-  if (px > castleRight - wallThickness - playerRadius && px < castleRight + playerRadius &&
-      py > castleTop && py < castleBottom + playerRadius) {
-    return 'right_wall';
-  }
-  // 后墙：castleTop 处，从 castleLeft 到 castleRight
-  if (py > castleTop - playerRadius && py < castleTop + wallThickness + playerRadius &&
-      px > castleLeft && px < castleRight) {
-    return 'back_wall';
-  }
-  // 前方墙（城门所在）：castleBottom 处
-  if (py > castleBottom - playerRadius && py < castleBottom + wallThickness + playerRadius &&
-      px > castleLeft && px < castleRight) {
-    // 检查是否在城门范围内
-    if (!gateBroken && px > gateX - gateWidth / 2 && px < gateX + gateWidth / 2) {
-      return 'gate';
-    }
-    // 城门两侧的墙仍然阻挡（除非城门破了，城门破了整段都不挡）
-    if (gateBroken) return false;
-    // 城门两侧墙
-    if (px < gateX - gateWidth / 2 || px > gateX + gateWidth / 2) {
-      return 'front_wall';
-    }
-  }
-  return false;
-}
+// （碰撞檢測與常量已移至 startCastleSiegeOnMap 上方統一定義）
 
 // 攻城战每帧tick（倒计时HUD由setInterval驱动，此处留作扩展）
 function updateCastleSiegeTick(dt) {
   if (!castleSiegeActive) return;
-  // 检查玩家死亡
-  if (GS.player.hp <= 0) endCastleSiege('defeat');
+  // 權杖階段：檢查玩家是否靠近權杖，靠近則自動拾取
+  if (castleSiegePhase === 'scepter' && castleSiegeScepter) {
+    const p = GS.player;
+    const dx = p.x - castleSiegeScepter.x;
+    const dy = p.y - castleSiegeScepter.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 80) {
+      console.log('[Siege] Scepter touched by: ' + (p.name || '玩家'));
+      handlePickupScepter();
+    }
+  }
 }
 
 function endCastleSiege(result) {
   if (castleSiegeTimer) { clearInterval(castleSiegeTimer); castleSiegeTimer = null; }
 
+  const isDefenderSide = isPlayerSiegeDefender();
+  const playerOwnsCastle = castleSiegeCastle && castleSiegeCastle.ownerNation === GS.nation &&
+    (castleSiegeCastle.ownerGuildId === (GS.legionId || GS.guildId));
+
+  // 判斷玩家端的勝負語義
+  // result='victory' 從「當前攻城方」視角 = 成功佔領（攻守互換後的攻方就是新佔領者）
+  // result='defeat' 從「當前攻城方」視角 = 失敗；對守城方來說就是守住了
+  let playerResult = result;
+  if (result === 'defeat' && isDefenderSide) {
+    // 守城方視角：時間耗盡 = 守城成功
+    playerResult = 'defend_victory';
+  }
+
   if (result === 'victory') {
-    addLog('siege', '🎉 攻城戰胜利！占领了城堡！');
+    addLog('siege', '攻城戰胜利！占领了城堡！');
     if (castleSiegeCastle && GS.guild) {
       castleSiegeCastle.owner = 'player';
       castleSiegeCastle.ownerGuildId = GS.legionId || GS.guildId || GS.guild.id;
       castleSiegeCastle.ownerName = GS.guild.name;
       castleSiegeCastle.ownerNation = GS.nation;
       GS.castleTreasuries[castleSiegeCastle.id] = 0;
-      addLog('system', `🏰 公會【${GS.guild.name}】占领了【${castleSiegeCastle.name}】！`);
+      addLog('system', `公會【${GS.guild.name}】占领了【${castleSiegeCastle.name}】！`);
       console.log('[Siege] 攻城战胜利，城堡归属更新:', castleSiegeCastle);
     }
+  } else if (playerResult === 'defend_victory') {
+    addLog('siege', '守城成功！城堡守住了！');
   } else {
-    addLog('siege', '💔 攻城戰失敗，時間耗尽。');
+    addLog('siege', '攻城戰失敗，時間耗尽。');
   }
 
   // 清理攻城战状态
@@ -16499,31 +23268,47 @@ function endCastleSiege(result) {
     GS.siegeWar.status = result === 'victory' ? 'victory' : 'defeat';
     GS.siegeWar.endTime = Date.now();
   }
-  castleSiegeActive = false;
-  castleSiegePhase = 'idle';
-  castleSiegeCastle = null;
-  castleSiegeGate = null;
-  castleSiegeTowers = [];
-  castleSiegeLord = null;
-  castleSiegeScepter = null;
 
-  // 隐藏HUD
-  const hud = document.getElementById('siege-hud');
-  if (hud) hud.style.display = 'none';
+  // 弹窗显示结果（先弹窗，再由cleanup处理状态重置）
+  showSiegeResult(playerResult);
 
-  // 移除围墙视觉
-  removeSiegeWalls();
+  // 统一清理（移除 siege-world、还原层、隐藏HUD 等）
+  cleanupCastleSiege();
 
-  // 弹窗显示结果
-  showSiegeResult(result);
+  // 結算後自動將玩家送回村莊（避免被卡在攻城地圖）
+  setTimeout(function() {
+    if (GS.currentMap && getAllMaps()[GS.currentMap]?.type === 'castle_siege') {
+      loadMap('village');
+      addLog('system', '攻城戰結束，已返回古魯丁村莊。');
+    }
+  }, 3000);
 }
 
 function showSiegeResult(result) {
   if (!el.siegeResultModal) return;
-  el.siegeResultTitle.textContent = result === 'victory' ? '🎉 攻城胜利！' : '💔 攻城失敗';
-  el.siegeResultDesc.textContent = result === 'victory'
-    ? `成功占领 ${castleSiegeCastle?.name || '城堡'}！每日可领取税收。`
-    : `時間耗尽，未能占领 ${castleSiegeCastle?.name || '城堡'}。`;
+  const castleName = castleSiegeCastle?.name || '城堡';
+  const nationName = GS.nation ? (NATIONS.find(n => n.id === GS.nation)?.name || '') : '';
+  const guildName = GS.guild?.name || (castleSiegeCastle?.ownerName || '');
+
+  if (result === 'victory') {
+    el.siegeResultTitle.textContent = '攻城勝利！';
+    el.siegeResultDesc.textContent = nationName
+      ? `${nationName}・${guildName} 成功占領 ${castleName}！每日可領取稅收。`
+      : `成功占領 ${castleName}！每日可領取稅收。`;
+  } else if (result === 'defend_victory') {
+    el.siegeResultTitle.textContent = '守城勝利！';
+    // 守城方是原佔領者，顯示原佔領方守住了城堡
+    const ownerNation = castleSiegeCastle?.ownerNation
+      ? (NATIONS.find(n => n.id === castleSiegeCastle.ownerNation)?.name || '')
+      : nationName;
+    const ownerGuild = castleSiegeCastle?.ownerName || guildName;
+    el.siegeResultDesc.textContent = ownerNation
+      ? `${ownerNation}・${ownerGuild} 成功守衛 ${castleName}！擊退了所有來犯者。`
+      : `成功守衛 ${castleName}！擊退了所有來犯者。`;
+  } else {
+    el.siegeResultTitle.textContent = '攻城失敗';
+    el.siegeResultDesc.textContent = `時間耗盡，未能占領 ${castleName}。`;
+  }
   el.siegeResultModal.classList.add('open');
 }
 
@@ -16538,9 +23323,19 @@ function cleanupCastleSiege() {
   castleSiegeTowers = [];
   castleSiegeLord = null;
   castleSiegeScepter = null;
+  castleSiegeLastDestroyedTower = null;
   if (el.siegeHudTitle) el.siegeHudTitle.textContent = '';
   if (el.siegeHudPhase) el.siegeHudPhase.textContent = '';
-  // 攻城战怪物在loadMap清空时会被一起清理
+
+  // 玩家始終在 worldLayer，無需移動
+  // 攻城建築和守軍的 DOM 會在 loadMap 切換地圖時被清理
+
+  // 背景圖由 loadMap 重置，無需手動恢復
+
+  // 恢復視口 overflow
+  if (el.scene) el.scene.style.overflow = '';
+
+  // 關閉攻城 HUD
   const hud = document.getElementById('siege-hud');
   if (hud) hud.style.display = 'none';
 }
@@ -16592,7 +23387,7 @@ function updateTargetDisplay() {
 }
 
 function updateCamera() {
-  // 镜头跟随玩家
+  // 鏡頭跟隨玩家
   const c = CAMERA;
   const p = GS.player;
 
@@ -16661,13 +23456,40 @@ function updateMinimap() {
 
   ctx.clearRect(0, 0, w, h);
 
-  // 背景
+  // 地圖物件
   const map = getAllMaps()[GS.currentMap];
-  const bgColor = map?.type === 'safe' ? '#2a4a2a' : (map?.type === 'castle_siege' ? '#3a2418' : '#4a3a2a');
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, w, h);
+  const mapType = map?.type || 'battle';
 
-  // 地圖边界
+  // 地形漸層背景（依地圖類型呈現不同地貌感）
+  if (mapType === 'safe') {
+    // 安全區：翠綠草地 + 略深的建築區塊
+    const grd = ctx.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#3a5a32');
+    grd.addColorStop(1, '#2a4a2a');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, w, h);
+    // 中央廣場（淺色圓）
+    ctx.fillStyle = 'rgba(180,160,100,0.25)';
+    ctx.beginPath();
+    ctx.arc(w * 0.5, h * 0.55, Math.min(w, h) * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (mapType === 'castle_siege') {
+    // 攻城戰：土黃色大地 + 城牆矩形
+    const grd = ctx.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#5a3e22');
+    grd.addColorStop(1, '#3a2418');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, w, h);
+  } else {
+    // 戰鬥區：枯黃/褐色大地 + 隨機紋理感
+    const grd = ctx.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#4a3a2a');
+    grd.addColorStop(1, '#3a2a1a');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // 地圖邊界
   ctx.strokeStyle = 'rgba(240,192,64,0.5)';
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
@@ -16677,6 +23499,70 @@ function updateMinimap() {
   const worldH_ = Math.max(worldH, CAMERA.worldHeight);
   const sx = w / worldW_;
   const sy = h / worldH_;
+
+  // 攻城戰：繪製城牆與城門示意
+  if (mapType === 'castle_siege' && castleSiegeActive) {
+    // 城牆（對應 SIEGE_COLLISION_RECTS）
+    ctx.fillStyle = 'rgba(140,110,70,0.7)';
+    ctx.strokeStyle = 'rgba(200,170,100,0.9)';
+    ctx.lineWidth = 1;
+    const wallRects = SIEGE_COLLISION_RECTS || [];
+    wallRects.forEach(r => {
+      ctx.fillRect(r.x * sx, r.y * sy, r.w * sx, r.h * sy);
+      ctx.strokeRect(r.x * sx, r.y * sy, r.w * sx, r.h * sy);
+    });
+    // 城門
+    if (SIEGE_GATE_RECT) {
+      const gateBroken = castleSiegeGate && castleSiegeGate.hp <= 0;
+      ctx.fillStyle = gateBroken ? 'rgba(60,40,20,0.4)' : 'rgba(180,120,40,0.85)';
+      ctx.strokeStyle = gateBroken ? 'rgba(100,70,30,0.6)' : 'rgba(255,200,80,1)';
+      ctx.fillRect(SIEGE_GATE_RECT.x * sx, SIEGE_GATE_RECT.y * sy,
+        SIEGE_GATE_RECT.w * sx, SIEGE_GATE_RECT.h * sy);
+      ctx.strokeRect(SIEGE_GATE_RECT.x * sx, SIEGE_GATE_RECT.y * sy,
+        SIEGE_GATE_RECT.w * sx, SIEGE_GATE_RECT.h * sy);
+      // 城門血量條
+      if (castleSiegeGate && castleSiegeGate.hpMax) {
+        const ghp = Math.max(0, castleSiegeGate.hp) / castleSiegeGate.hpMax;
+        const gx = SIEGE_GATE_RECT.x * sx;
+        const gy = SIEGE_GATE_RECT.y * sy - 4;
+        const gw = SIEGE_GATE_RECT.w * sx;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(gx, gy, gw, 3);
+        ctx.fillStyle = gateBroken ? '#666' : '#ff4040';
+        ctx.fillRect(gx, gy, gw * ghp, 3);
+      }
+    }
+    // 守護塔
+    if (SIEGE_TOWER_RECT && castleSiegeTowers) {
+      castleSiegeTowers.forEach(t => {
+        if (t.hp <= 0) return;
+        ctx.fillStyle = 'rgba(160,130,80,0.9)';
+        ctx.strokeStyle = 'rgba(220,190,110,1)';
+        ctx.fillRect(SIEGE_TOWER_RECT.x * sx, SIEGE_TOWER_RECT.y * sy,
+          SIEGE_TOWER_RECT.w * sx, SIEGE_TOWER_RECT.h * sy);
+        ctx.strokeRect(SIEGE_TOWER_RECT.x * sx, SIEGE_TOWER_RECT.y * sy,
+          SIEGE_TOWER_RECT.w * sx, SIEGE_TOWER_RECT.h * sy);
+      });
+    }
+    // 權杖位置
+    if (castleSiegeScepter && !castleSiegeScepter.taken) {
+      ctx.fillStyle = '#ffd700';
+      ctx.strokeStyle = '#fff8c0';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(castleSiegeScepter.x * sx, castleSiegeScepter.y * sy, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // 畫 NPC
+  if (map?.npcs) {
+    map.npcs.forEach(npc => {
+      ctx.fillStyle = '#80d4ff';
+      ctx.fillRect(npc.x * sx - 1.5, npc.y * sy - 1.5, 3, 3);
+    });
+  }
 
   // 画怪物点
   GS.monsters.forEach(m => {
@@ -16705,34 +23591,54 @@ function updateMinimap() {
   });
 
   // Boss重生倒计时（如果Boss在冷卻中）
-  const mapObj = getAllMaps()[GS.currentMap];
-  if (mapObj?.boss) {
-    const bs = bossState[GS.currentMap];
+  const bossSlots = [];
+  if (map?.boss) bossSlots.push({ slot: 'boss', data: map.boss });
+  if (map?.worldBoss) bossSlots.push({ slot: 'worldBoss', data: map.worldBoss });
+  for (const bsInfo of bossSlots) {
+    const bs = bossState[GS.currentMap + ':' + bsInfo.slot];
     if (bs && !bs.spawned && bs.respawnAt > Date.now()) {
       const remain = Math.ceil((bs.respawnAt - Date.now()) / 1000);
       const mins = Math.floor(remain / 60);
       const secs = remain % 60;
-      const bx = mapObj.boss.x * sx;
-      const by = mapObj.boss.y * sy;
-      ctx.fillStyle = 'rgba(255,100,100,0.4)';
-      ctx.strokeStyle = 'rgba(255,100,100,0.6)';
+      const bx = bsInfo.data.x * sx;
+      const by = bsInfo.data.y * sy;
+      const isWorld = bsInfo.slot === 'worldBoss';
+      ctx.fillStyle = isWorld ? 'rgba(255,50,100,0.5)' : 'rgba(255,100,100,0.4)';
+      ctx.strokeStyle = isWorld ? 'rgba(255,80,120,0.7)' : 'rgba(255,100,100,0.6)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(bx, by, 4, 0, Math.PI * 2);
+      ctx.arc(bx, by, isWorld ? 5 : 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#ff8080';
+      ctx.fillStyle = isWorld ? '#ff6080' : '#ff8080';
       ctx.font = '8px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(`${mins}:${secs < 10 ? '0' : ''}${secs}`, bx, by - 6);
     }
   }
 
-  // 画 NPC
-  if (map?.npcs) {
-    map.npcs.forEach(npc => {
-      ctx.fillStyle = '#80d4ff';
-      ctx.fillRect(npc.x * sx - 1.5, npc.y * sy - 1.5, 3, 3);
+  // 遠端玩家（多人連線）
+  if (window.MultiplayerClient && MultiplayerClient.connected && MultiplayerClient.players) {
+    for (const pid in MultiplayerClient.players) {
+      const rp = MultiplayerClient.players[pid];
+      if (!rp || rp.hp <= 0) continue;
+      ctx.fillStyle = '#80a0ff';
+      ctx.beginPath();
+      ctx.arc(rp.x * sx, rp.y * sy, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // AI 玩家（本國淺藍，敵國紅）
+  if (GS.aiPlayers) {
+    GS.aiPlayers.forEach(ai => {
+      if (ai.hp <= 0 || ai.state === 'dead') return;
+      if (ai.mapId && ai.mapId !== GS.currentMap) return;
+      const friendly = !ai.nation || ai.nation === GS.nation;
+      ctx.fillStyle = friendly ? '#60c0ff' : '#ff5050';
+      ctx.beginPath();
+      ctx.arc(ai.x * sx, ai.y * sy, 2, 0, Math.PI * 2);
+      ctx.fill();
     });
   }
 
@@ -16740,9 +23646,12 @@ function updateMinimap() {
   const p = GS.player;
   const px = p.x * sx, py = p.y * sy;
   ctx.fillStyle = '#60ff80';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(px, py, 3, 0, Math.PI * 2);
+  ctx.arc(px, py, 3.5, 0, Math.PI * 2);
   ctx.fill();
+  ctx.stroke();
   // 朝向指示
   ctx.strokeStyle = '#60ff80';
   ctx.lineWidth = 1.5;
@@ -16751,6 +23660,17 @@ function updateMinimap() {
   ctx.moveTo(px, py);
   ctx.lineTo(px + dirX, py);
   ctx.stroke();
+
+  // 當前視野框（顯示攝影機涵蓋範圍）
+  const vx = CAMERA.x * sx;
+  const vy = CAMERA.y * sy;
+  const vw = (worldW / (CAMERA.zoom || 1)) * sx;
+  const vh = (worldH / (CAMERA.zoom || 1)) * sy;
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 2]);
+  ctx.strokeRect(vx, vy, vw, vh);
+  ctx.setLineDash([]);
 
   // 画召喚英雄
   GS.summons.forEach(s => {
@@ -16777,6 +23697,11 @@ function gameLoop(ts) {
     try { updateGlobalAIGrowth(dt); } catch (e) { console.error('updateGlobalAIGrowth error:', e); }
     try { checkMonsterRespawn(dt); } catch (e) { console.error('checkMonsterRespawn error:', e); }
     try { updateSummons(dt); } catch (e) { console.error('updateSummons error:', e); }
+    try { updatePetFollower(dt); } catch (e) { console.error('updatePetFollower error:', e); }
+    // 多人連線：遠端玩家位置內插與渲染
+    if (window.MultiplayerClient && MultiplayerClient.connected) {
+      try { MultiplayerClient.tick(dt); } catch (e) { console.error('multiplayer tick error:', e); }
+    }
     try { renderPlayer(); } catch (e) { console.error('renderPlayer error:', e); }
 
     // 攻城战更新（城堡地圖内进行）
@@ -16785,7 +23710,11 @@ function gameLoop(ts) {
     }
 
     if (GS.player.hp > 0 && GS.player.hp < getTotalHpMax() && GS.player.state === 'idle') {
-      GS.player.hp = Math.min(getTotalHpMax(), GS.player.hp + getTotalHpMax() * 0.005 * dt);
+      let regenRate = 0.005;
+      const hero = GS.ownedHeroes?.find(h => h.id === GS.equippedHeroId);
+      const heroData = hero ? (SUMMON_POOL.find(s => s.id === hero.id) || hero) : null;
+      if (heroData?.stats?.hpRegenPct) regenRate += heroData.stats.hpRegenPct / 100 / 10; // hpRegenPct 为每10秒最大生命回复百分比
+      GS.player.hp = Math.min(getTotalHpMax(), GS.player.hp + getTotalHpMax() * regenRate * dt);
     }
 
     // Boss重生检查
@@ -16796,9 +23725,13 @@ function gameLoop(ts) {
 
     // 每週稅收結算檢查
     try { settleWeeklyTax(); } catch (e) { /* ignore */ }
+
+    // 交易所AI補貨檢查
+    try { tickAuctionRefill(dt * 1000); } catch (e) { /* ignore */ }
   }
 
   try { updateSpriteFrames(dt); } catch (e) { console.error('updateSpriteFrames error:', e); }
+  try { updateNPCAnimFrames(dt); } catch (e) { console.error('updateNPCAnimFrames error:', e); }
   try { updateDustParticles(dt); } catch (e) { console.error('updateDustParticles error:', e); }
   try { checkTransformExpiry && checkTransformExpiry(); } catch(e) {}
   try { tickBuffs && tickBuffs(); } catch(e) {}
@@ -16827,6 +23760,7 @@ function onSceneClick(e) {
   const rect = e.currentTarget.getBoundingClientRect();
   const screenX = e.clientX - rect.left;
   const screenY = e.clientY - rect.top;
+
   const worldX = screenX / CAMERA.zoom + CAMERA.x;
   const worldY = screenY / CAMERA.zoom + CAMERA.y;
   
@@ -16850,6 +23784,15 @@ function onSceneClick(e) {
 }
 
 function showClickEffect(wx, wy) {
+  const fx = document.createElement('div');
+  fx.style.cssText = `position:absolute;left:${wx-15}px;top:${wy-15}px;width:30px;height:30px;border:2px solid rgba(255,220,120,0.9);border-radius:50%;box-shadow:0 0 10px rgba(255,200,80,0.8);pointer-events:none;z-index:100;animation:click-ripple 0.6s ease-out forwards`;
+  effectLayer.appendChild(fx);
+  setTimeout(() => fx.remove(), 600);
+}
+
+// 攻城世界點擊特效（放在全局 effect 層，由相機系統變換）
+function showSiegeClickEffect(wx, wy) {
+  if (!effectLayer) return;
   const fx = document.createElement('div');
   fx.style.cssText = `position:absolute;left:${wx-15}px;top:${wy-15}px;width:30px;height:30px;border:2px solid rgba(255,220,120,0.9);border-radius:50%;box-shadow:0 0 10px rgba(255,200,80,0.8);pointer-events:none;z-index:100;animation:click-ripple 0.6s ease-out forwards`;
   effectLayer.appendChild(fx);
@@ -16885,6 +23828,11 @@ function bindEvents() {
         || e.target.closest('.world-unit') || e.target.closest('.npc-unit')
         || e.target.closest('.skill-bar') || e.target.closest('.minimap')
         || e.target.closest('.zoom-controls')) return;
+    // 攻城戰時走通用邏輯（與普通地圖相同的相機系統）
+    if (castleSiegeActive) {
+      onSceneClick(e);
+      return;
+    }
     const rect = el.scene.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
@@ -16983,8 +23931,11 @@ function bindEvents() {
     });
   }
 
-  // 地圖
-  el.mapBtn.addEventListener('click', openMapModal);
+  // 地圖：點擊小地圖開啟地圖選單（頂部地圖名僅顯示）
+  const minimapEl = $('minimap');
+  if (minimapEl) minimapEl.addEventListener('click', openMapModal);
+  const siegeMinimapEl = $('siege-minimap');
+  if (siegeMinimapEl) siegeMinimapEl.addEventListener('click', openMapModal);
   el.mapClose.addEventListener('click', closeMapModal);
   el.mapModal.addEventListener('click', e => { if (e.target === el.mapModal) closeMapModal(); });
 
@@ -17031,6 +23982,10 @@ function bindEvents() {
     }
     // 渲染自動道具欄位
     renderAutoItemsGrid();
+    // 同步多人連線輸入框
+    if (window.MultiplayerClient && el.mpServerInput) {
+      el.mpServerInput.value = MultiplayerClient.getSavedServerUrl() || '';
+    }
     el.settingsPanel.classList.add('open');
   });
   // 侧边選單設定按钮
@@ -17064,6 +24019,10 @@ function bindEvents() {
     }
     // 渲染自動道具欄位
     renderAutoItemsGrid();
+    // 同步多人連線輸入框
+    if (window.MultiplayerClient && el.mpServerInput) {
+      el.mpServerInput.value = MultiplayerClient.getSavedServerUrl() || '';
+    }
     el.settingsPanel.classList.add('open');
   });
   // 圖鑑
@@ -17072,6 +24031,43 @@ function bindEvents() {
   // 合成
   const synthBtn = $('menu-synth-btn');
   if (synthBtn) synthBtn.addEventListener('click', openSynthPage);
+  // 交易所
+  const auctionMenuBtn = $('menu-auction-btn');
+  if (auctionMenuBtn) auctionMenuBtn.addEventListener('click', () => { closeSideMenu(); openAuctionHouse(); });
+  // 匯出遊戲按鈕
+  const exportBtn = $('export-game-btn');
+  if (exportBtn) exportBtn.addEventListener('click', exportGameFile);
+  // 下載原始碼 ZIP 按鈕
+  const downloadSrcBtn = $('download-src-btn');
+  if (downloadSrcBtn) downloadSrcBtn.addEventListener('click', downloadSourceZip);
+  // 原始碼固定連結複製鈕
+  const sourceUrlCopy = $('source-url-copy');
+  const sourceZipLink = $('source-zip-link');
+  if (sourceZipLink) {
+    const fullUrl = new URL('source.zip', location.href).href;
+    sourceZipLink.href = fullUrl;
+    sourceZipLink.textContent = fullUrl;
+  }
+  if (sourceUrlCopy) {
+    sourceUrlCopy.addEventListener('click', function() {
+      const fullUrl = new URL('source.zip', location.href).href;
+      const ta = document.createElement('textarea');
+      ta.value = fullUrl;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        sourceUrlCopy.textContent = '已複製 ✓';
+        setTimeout(function() { sourceUrlCopy.textContent = '複製'; }, 2000);
+      } catch(e) {
+        sourceUrlCopy.textContent = '失敗';
+        setTimeout(function() { sourceUrlCopy.textContent = '複製'; }, 2000);
+      }
+      document.body.removeChild(ta);
+    });
+  }
   el.settingsPanel.addEventListener('click', e => {
     if (e.target === el.settingsPanel) el.settingsPanel.classList.remove('open');
   });
@@ -17079,6 +24075,18 @@ function bindEvents() {
   const settingsCloseBtn = $('settings-close-btn');
   if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', () => {
     el.settingsPanel.classList.remove('open');
+  });
+  // 登出 / 返回首頁按鈕（v2.0.2）
+  const settingsLogoutBtn = $('settings-logout-btn');
+  if (settingsLogoutBtn) settingsLogoutBtn.addEventListener('click', () => {
+    if (!confirm('確定要登出並返回官方首頁嗎？')) return;
+    el.settingsPanel.classList.remove('open');
+    if (window.AuthSystem && typeof window.AuthSystem.logout === 'function') {
+      window.AuthSystem.logout();
+    } else {
+      // fallback：直接重整（init 會回到首頁）
+      location.reload();
+    }
   });
   // 自動道具：設置面板關閉時統一保存一次
   if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', saveAutoItemsConfig);
@@ -17141,6 +24149,21 @@ function bindEvents() {
     if (window.AudioSystem) AudioSystem.setMusicEnabled(musicToggle.checked);
     addLog('system', musicToggle.checked ? '背景音樂已開啟' : '背景音樂已關閉');
   });
+  // 離線模式開關
+  const offlineToggle = $('offline-mode-toggle');
+  if (offlineToggle) {
+    offlineToggle.checked = !!USE_LOCAL_ASSETS;
+    offlineToggle.addEventListener('change', () => {
+      try {
+        localStorage.setItem('useLocal', offlineToggle.checked ? '1' : '0');
+      } catch(e) {}
+      const msg = offlineToggle.checked ? '離線模式已開啟' : '離線模式已關閉';
+      addLog('system', msg + '，重新整理後生效');
+      if (confirm(msg + '，是否立即重新整理？')) {
+        window.location.reload();
+      }
+    });
+  }
   // 音效音量滑桿
   const sfxVolumeSlider = $('sfx-volume');
   const sfxVolumeValue = $('sfx-volume-value');
@@ -17156,6 +24179,14 @@ function bindEvents() {
     const val = parseInt(musicVolumeSlider.value, 10);
     if (musicVolumeValue) musicVolumeValue.textContent = val;
     if (window.AudioSystem) AudioSystem.setMusicVolume(val / 100);
+  });
+  // 音效測試按鈕
+  const sfxTestBtn = $('sfx-test-btn');
+  if (sfxTestBtn) sfxTestBtn.addEventListener('click', () => {
+    if (window.AudioSystem) {
+      AudioSystem.ensureRunning();
+      AudioSystem.sfxTest();
+    }
   });
   const changeNameBtn = $('change-name-btn');
   if (changeNameBtn) changeNameBtn.addEventListener('click', () => {
@@ -17186,6 +24217,214 @@ function bindEvents() {
     });
   });
 
+  // ========== 離線包下載功能（完整資源版） ==========
+  const dlOfflineBtn = $('download-offline-btn');
+  const dlStatus = $('offline-download-status');
+  if (dlOfflineBtn) {
+    dlOfflineBtn.addEventListener('click', async () => {
+      if (typeof JSZip === 'undefined') {
+        if (dlStatus) { dlStatus.style.display = 'block'; dlStatus.textContent = '正在載入 JSZip...'; }
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        }).catch(() => {
+          if (dlStatus) dlStatus.textContent = 'JSZip 載入失敗，請檢查網絡';
+        });
+        if (typeof JSZip === 'undefined') return;
+      }
+      dlOfflineBtn.disabled = true;
+      dlOfflineBtn.style.opacity = '0.6';
+      if (dlStatus) { dlStatus.style.display = 'block'; dlStatus.textContent = '正在準備離線包...'; }
+      
+      // 用 XHR 下載圖片（避免 CORS 限制 blob 讀取）
+      function fetchImageBlob(url) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true);
+          xhr.responseType = 'blob';
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(xhr.response);
+            } else {
+              reject(new Error('HTTP ' + xhr.status));
+            }
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.ontimeout = () => reject(new Error('Timeout'));
+          xhr.timeout = 15000;
+          xhr.send();
+        });
+      }
+      
+      try {
+        const zip = new JSZip();
+        const assetsFolder = zip.folder('assets');
+        
+        // 1. 讀取並打包程式碼檔案
+        if (dlStatus) dlStatus.textContent = '讀取程式碼檔案...';
+        const [cssContent, langContent, gameContent, htmlContent] = await Promise.all([
+          fetch('styles.css', { cache: 'no-store' }).then(r => r.text()),
+          fetch('lang.js', { cache: 'no-store' }).then(r => r.text()),
+          fetch('game.js', { cache: 'no-store' }).then(r => r.text()),
+          fetch('index.html', { cache: 'no-store' }).then(r => r.text()),
+        ]);
+        
+        // 離線包 URL 替換函數：CDN 路徑 → 本地 assets/ 相對路徑
+        function rewriteOfflineUrls(text) {
+          // warlock 特殊命名：spark URL → assets/warlock_idle.png（必須在通用 spark 規則之前）
+          let t = text.replace(
+            /\/spark\/app\/app_17ch22wujxs\/runtime\/api\/v1\/storage\/object\/bucket_aadkq5g4dkmew_static\/static%2Faadkrd2udyyco_ve_miaoda/g,
+            'assets/warlock_idle.png'
+          );
+          // 其他 spark CDN → assets/spark_XXXXX.png
+          t = t.replace(
+            /\/spark\/app\/app_17ch22wujxs\/runtime\/api\/v1\/storage\/object\/bucket_aadkq5g4dkmew_static\/static%2F([a-z0-9]+)_ve_miaoda/g,
+            'assets/spark_$1.png'
+          );
+          // aka CDN → assets/XXXXX.png
+          t = t.replace(
+            /https:\/\/aka\.doubaocdn\.com\/s\/([a-zA-Z0-9]+)/g,
+            'assets/$1.png'
+          );
+          return t;
+        }
+        
+        // 對所有程式碼檔案做 URL 替換（只影響離線包，線上版本不變）
+        const offlineGame = rewriteOfflineUrls(gameContent);
+        const offlineHtml = rewriteOfflineUrls(htmlContent);
+        const offlineLang = rewriteOfflineUrls(langContent);
+        const offlineCss = rewriteOfflineUrls(cssContent);
+        
+        // 從 index.html 移除 JSZip CDN 引用（離線版不需要）
+        const cleanHtml = offlineHtml.replace(/<script[^>]*jszip[^>]*><\/script>/gi, '');
+        
+        zip.file('styles.css', offlineCss);
+        zip.file('lang.js', offlineLang);
+        zip.file('game.js', offlineGame);
+        zip.file('index.html', cleanHtml);
+        
+        // 2. 下載圖片資源並加入 assets 資料夾
+        const total = ASSET_MANIFEST.length;
+        let done = 0;
+        let failed = 0;
+        const failedList = [];
+        
+        // 並發數控制（避免太多並發請求）
+        const concurrency = 8;
+        const queue = [...ASSET_MANIFEST];
+        
+        async function worker() {
+          while (queue.length > 0) {
+            const id = queue.shift();
+            if (!id) break;
+            let url;
+            let filename;
+            if (id.startsWith('spark_')) {
+              // spark 資源：從原 CDN 下載
+              const sparkId = id.substring(6); // 去掉 spark_ 前綴
+              url = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2F' + sparkId + '_ve_miaoda';
+              filename = id + '.png';
+            } else {
+              // aka 資源
+              url = assetUrl('') + id;
+              filename = id + '.png';
+            }
+            try {
+              const blob = await fetchImageBlob(url);
+              assetsFolder.file(filename, blob);
+            } catch(e) {
+              failed++;
+              failedList.push(id);
+              // 失敗的資源放一個 1x1 透明占位
+              assetsFolder.file(filename, 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', { base64: true });
+            }
+            done++;
+            if (dlStatus && done % 5 === 0) {
+              dlStatus.textContent = '下載圖資中 ' + done + '/' + total + (failed ? '（失敗' + failed + '）' : '');
+            }
+          }
+        }
+        
+        if (dlStatus) dlStatus.textContent = '下載圖資中 0/' + total + '...';
+        const workers = [];
+        for (let i = 0; i < concurrency; i++) {
+          workers.push(worker());
+        }
+        await Promise.all(workers);
+        
+        // 補充：warlock_idle.png（特殊命名，不在 ASSET_MANIFEST 中）
+        try {
+          const warlockUrl = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrd2udyyco_ve_miaoda';
+          const warlockBlob = await fetchImageBlob(warlockUrl);
+          assetsFolder.file('warlock_idle.png', warlockBlob);
+        } catch(e) {
+          failed++;
+          failedList.push('warlock_idle');
+          assetsFolder.file('warlock_idle.png', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', { base64: true });
+        }
+        done++;
+        
+        // 3. 添加 README
+        const readme = '君主之刃 · 離線版\n================\n\n';
+        readme += '文件結構：\n';
+        readme += '  index.html   主頁面\n';
+        readme += '  styles.css   樣式表\n';
+        readme += '  game.js      遊戲邏輯\n';
+        readme += '  lang.js      語言文件\n';
+        readme += '  assets/      圖片資源（共 ' + total + ' 張）\n\n';
+        readme += '資源統計：\n';
+        readme += '  總數：' + total + ' 張\n';
+        readme += '  成功：' + (done - failed) + ' 張\n';
+        readme += '  失敗：' + failed + ' 張\n\n';
+        if (failedList.length > 0) {
+          readme += '失敗清單（共 ' + failedList.length + ' 個）：\n';
+          readme += failedList.slice(0, 30).join(', ');
+          if (failedList.length > 30) readme += '...等';
+          readme += '\n\n';
+        }
+        readme += '啟動方式：\n';
+        readme += '  在當前目錄下運行： python3 -m http.server 8000\n';
+        readme += '  瀏覽器打開 http://localhost:8000\n';
+        zip.file('README.txt', readme);
+        
+        // 4. 生成 zip 並下載
+        if (dlStatus) dlStatus.textContent = '正在壓縮...';
+        const blob = await zip.generateAsync({
+          type: 'blob',
+          compression: 'STORE', // 圖片已是壓縮格式，不用再壓縮省時間
+        }, (metadata) => {
+          if (dlStatus) {
+            const pct = Math.round(metadata.percent);
+            dlStatus.textContent = '壓縮中 ' + pct + '%...';
+          }
+        });
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'mmorpg_offline.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        if (dlStatus) {
+          const ok = done - failed;
+          dlStatus.textContent = '✅ 下載完成！' + ok + '/' + total + ' 張圖資' + (failed ? '（' + failed + ' 失敗）' : '');
+        }
+      } catch (err) {
+        console.error('Offline package error:', err);
+        if (dlStatus) dlStatus.textContent = '❌ 打包失敗：' + (err.message || err);
+      } finally {
+        dlOfflineBtn.disabled = false;
+        dlOfflineBtn.style.opacity = '1';
+      }
+    });
+  }
+
   // 抽卡结果關閉
   el.gachaClose.addEventListener('click', () => el.gachaModal.classList.remove('open'));
   el.gachaModal.addEventListener('click', e => {
@@ -17202,8 +24441,8 @@ function bindEvents() {
     openSidePage('hero');
   });
 
-  // 背包按钮
-  $('bag-btn').addEventListener('click', () => {
+  // 背包按钮（v2.0 移除左上角按鈕，保留底部導航列背包入口）
+  if ($('bag-btn')) $('bag-btn').addEventListener('click', () => {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     openSidePage('bag');
   });
@@ -17326,12 +24565,8 @@ function switchTarget() {
 // 全局按鈕點擊音效（事件委託）
 document.addEventListener('click', (e) => {
   if (!window.AudioSystem) return;
-  // 首次交互时恢复 AudioContext
+  // 首次交互时初始化音频系统
   AudioSystem.ensureRunning();
-  const target = e.target.closest('button, .toggle-switch, .lang-btn, .nav-btn, .menu-btn, .gacha-btn, .tab-btn, .close-btn, .ov-back-btn');
-  if (target) {
-    AudioSystem.sfxClick();
-  }
 }, true);
 
 // ===== 全局可用：宣战 & 进入攻城战场（供事件委托调用） =====
@@ -17452,15 +24687,61 @@ window.enterSiegeBattle = function(castleId) {
   const siegeMapId = 'siege_' + castleId;
   const allMaps = getAllMaps();
   if (!allMaps[siegeMapId]) { alert('找不到該城堡的攻城戰場'); return; }
+  // 關閉所有打開的面板 / 分欄 / 彈窗
   closeMapModal?.();
+  // 1. 關閉國家/軍團側邊面板
   const sidePage = document.getElementById('side-page');
-  if (sidePage) sidePage.classList.remove('open');
+  if (sidePage) {
+    sidePage.classList.remove('open');
+    sidePage.style.display = 'none';
+  }
+  // 2. 關閉可能殘留的國家選擇、城堡、軍團等彈窗
+  const closeIds = [
+    'nation-select-modal', 'guild-modal', 'castle-modal', 'siege-modal',
+    'legion-modal', 'nation-modal', 'player-menu', 'context-menu',
+    'item-detail-modal', 'shop-modal', 'bag-modal',
+  ];
+  closeIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  // 3. 清除所有 z-index >= 100 的彈窗與遮罩層（避免半透明遮罩殘留）
+  document.querySelectorAll('[class*="overlay"], [class*="modal"], [class*="popup"], [class*="dialog"]').forEach(el => {
+    const z = parseInt(window.getComputedStyle(el).zIndex) || 0;
+    const id = el.id || '';
+    // 跳過世界場景本身的 overlay（如 game-overlay / world-overlay）
+    if (id === 'game-overlay' || id === 'world-overlay' || id === 'ui-overlay') return;
+    if (z >= 100 || el.classList.contains('modal-overlay') || el.classList.contains('mask')) {
+      el.style.display = 'none';
+    }
+  });
+  // 4. 重置頁面狀態
+  if (typeof GS !== 'undefined') {
+    GS.currentPage = null;
+    GS.gachaPageTab = 'hero';
+  }
+  // 5. 關閉地圖彈窗
+  const mapModal = document.getElementById('map-modal');
+  if (mapModal) mapModal.style.display = 'none';
   loadMap(siegeMapId);
 };
 
-window.addEventListener('load', init);
+};
 
-// ========== 測試鉤子（用於preflight驗證職業切換） ==========
+window.addEventListener('load', function() {
+  // v2.0：若有帳號系統，先顯示官方首頁/登入，待玩家進入角色後再啟動遊戲
+  if (window.AuthSystem) {
+    AuthSystem.init();
+    // 遊戲進入點由 AuthSystem 觸發
+    window.onAuthReady = function(server) {
+      // 從後端載入角色存檔（如果有）
+      loadGame(); // 先讀 localStorage
+      init();
+    };
+  } else {
+    init();
+  }
+});
 window.__debugCreateChar = function(classId, name) {
   if (!name) name = '測試' + classId;
   // 先重置charCreateState為該職業屬性傾向
