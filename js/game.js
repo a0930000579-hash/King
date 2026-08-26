@@ -2,16 +2,62 @@
     君主之刃 · 自由移動 MMORPG - 主逻辑 v3
     ============================================================ */
 
-// ==================== 離線模式 / 本地圖資支援 ====================
+// ==================== 離線模式 / 本地圖資支援 ====================  
 let USE_LOCAL_ASSETS = false;
 try { USE_LOCAL_ASSETS = localStorage.getItem('useLocal') === '1'; } catch(e) {}
+
+// ========== 環境偵測：判斷是否應該優先走 CDN ==========
+// 規則：
+//   1. file:// 離線開啟 → 一定走本地（因為 CDN 可能被 CORS 擋 / 離線無網路）
+//   2. http(s) 網域 → 預設優先 CDN（避免本地 404 閃爍）；若玩家手動開啟離線模式則走本地
+//   3. 本地 assets/ 是否存在會在啟動時用一張探針圖偵測，結果緩存在 _LOCAL_ASSETS_AVAILABLE
+const CDN_BASE = 'https://aka.doubaocdn.com/s/';
+
+function _isFileProtocol() {
+  return location.protocol === 'file:';
+}
+
+let _LOCAL_ASSETS_AVAILABLE = null; // null=未偵測, true=存在, false=不存在
+function detectLocalAssets() {
+  if (_LOCAL_ASSETS_AVAILABLE !== null) return Promise.resolve(_LOCAL_ASSETS_AVAILABLE);
+  return new Promise(function (resolve) {
+    if (_isFileProtocol()) {
+      _LOCAL_ASSETS_AVAILABLE = true;
+      resolve(true);
+      return;
+    }
+    // 用一張體積小、一定存在的圖做探針（effects 裡的 gold-circle 或戰士 idle）
+    const probe = new Image();
+    probe.onload = function () { _LOCAL_ASSETS_AVAILABLE = true; resolve(true); };
+    probe.onerror = function () { _LOCAL_ASSETS_AVAILABLE = false; resolve(false); };
+    probe.src = 'assets/warrior/idle.png?_t=' + Date.now();
+    // 超時保護（3 秒）
+    setTimeout(function () {
+      if (_LOCAL_ASSETS_AVAILABLE === null) {
+        _LOCAL_ASSETS_AVAILABLE = false;
+        resolve(false);
+      }
+    }, 3000);
+  });
+}
+
+// 是否「應該優先走 CDN」（網域模式 + 本地 assets 不存在 / 未開啟離線模式）
+function _preferCdn() {
+  if (_isFileProtocol()) return false;        // file:// 一定走本地
+  if (USE_LOCAL_ASSETS) return false;         // 玩家手動開啟離線模式 → 走本地
+  if (_LOCAL_ASSETS_AVAILABLE === true) return false; // 本地 assets 存在 → 走本地
+  return true; // 其餘（http(s) + 本地沒有 / 未偵測到）→ 優先 CDN
+}
+
 function assetUrl(id) {
   if (!id) return '';
   if (typeof id !== 'string') return id;
-  // 已經是完整 URL / 本地路徑 / data URI → 原樣回傳
-  if (id.startsWith('http') || id.startsWith('assets/') || id.startsWith('data:')) return id;
-  // 以 / 開頭的絕對路徑（平台靜資） → 原樣回傳
+  // 已經是完整 URL / data URI → 原樣回傳
+  if (id.startsWith('http') || id.startsWith('data:')) return id;
+  // 以 / 開頭的絕對路徑（平台靜資 /spark/...） → 原樣回傳（由 onerror fallback 處理）
   if (id.startsWith('/')) return id;
+  // 已經是 assets/ 開頭的本地路徑 → 原樣回傳（由 onerror fallback 處理）
+  if (id.startsWith('assets/')) return id;
   // 從完整 CDN URL 中萃取出純 ID（防止重複包前綴）
   if (id.indexOf('aka.doubaocdn.com/s/') !== -1) {
     const m = id.match(/aka\.doubaocdn\.com\/s\/([^?#/\s"'<>]+)/);
@@ -19,33 +65,122 @@ function assetUrl(id) {
   }
   // 去除副檔名（png/jpg/jpeg/webp/gif）
   const pureId = id.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
-  return USE_LOCAL_ASSETS ? 'assets/' + pureId + '.png' : 'https://aka.doubaocdn.com/s/' + pureId;
+  // 根據環境決定優先路徑
+  if (_preferCdn()) {
+    return CDN_BASE + pureId;
+  }
+  return 'assets/' + pureId + '.png';
 }
 
-// 圖片載入失敗備援：本地失敗自動切CDN，CDN失敗則顯示預設占位
-function handleImgError(img) {
-  if (!img || img.dataset.errFallback) return;
-  const src = img.src || '';
-  // 第一次失敗：如果是本地 assets/ 路徑，自動切換到 CDN
-  if (src.indexOf('assets/') !== -1 || (USE_LOCAL_ASSETS && src.indexOf('aka.doubaocdn.com') === -1)) {
-    img.dataset.errFallback = '1';
-    // 從路徑中萃取出 ID 並組成 CDN URL
-    const idMatch = src.match(/assets\/([^./?#]+)/);
-    if (idMatch && idMatch[1]) {
-      img.src = 'https://aka.doubaocdn.com/s/' + idMatch[1];
-      return;
-    }
+// 從一個失敗的圖片 URL 中萃取出 CDN ID（用於 fallback 重試）
+function _extractCdnId(src) {
+  if (!src) return '';
+  // CDN URL → 直接取最後一段
+  if (src.indexOf('aka.doubaocdn.com/s/') !== -1) {
+    const m = src.match(/aka\.doubaocdn\.com\/s\/([^?#/\s"'<>]+)/);
+    if (m && m[1]) return m[1].replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
   }
-  // CDN 也失敗：隱藏圖片並加上失敗標記，避免顯示醜陋的破裂圖示
+  // 本地 assets/ 路徑 → 取檔名去掉副檔名作為 ID
+  // 例：assets/warrior/idle.png → warrior_idle （拼出組合 ID，CDN 上若有同名檔可載入）
+  // 但更常見的是「檔名即 ID」的情況，所以這裡優先取 basename
+  if (src.indexOf('assets/') !== -1) {
+    // 取最後一段檔名去掉副檔名
+    const m = src.match(/assets\/.*\/([^./?#]+)\.(png|jpg|jpeg|webp|gif)/i);
+    if (m && m[1]) return m[1];
+    // 另一種：assets/ID.png（根目錄）
+    const m2 = src.match(/assets\/([^./?#]+)\.(png|jpg|jpeg|webp|gif)/i);
+    if (m2 && m2[1]) return m2[1];
+  }
+  // 平台靜資 /spark/.../static%2FID_ve_miaoda → 取 ID_ve_miaoda 當作 cdn id 試試
+  if (src.indexOf('/spark/') !== -1) {
+    const m = src.match(/static%2F([^/?#]+)/);
+    if (m && m[1]) return decodeURIComponent(m[1]);
+    const m2 = src.match(/static\/([^/?#]+)/);
+    if (m2 && m2[1]) return m2[1];
+  }
+  return '';
+}
+
+// 圖片載入失敗備援：
+//   本地 assets/ 失敗 → 切換到 CDN
+//   CDN 失敗 → 隱藏圖片並為父層加上背景占位（避免顯示破裂圖示）
+function handleImgError(img) {
+  if (!img || img.dataset.errFallback === 'fail') return;
+  const src = img.src || '';
+
+  // 如果已經走過一次 CDN 還是失敗 → 最終 fallback：隱藏 + 父層背景
+  if (img.dataset.errFallback === 'cdn') {
+    img.dataset.errFallback = 'fail';
+    img.style.visibility = 'hidden';
+    img.style.opacity = '0';
+    if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
+      img.parentElement.dataset.imgErrorBg = '1';
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    }
+    return;
+  }
+
+  // 第一次失敗：嘗試切換到 CDN（不論本來是本地還是 /spark/ 還是 CDN 都試一次 CDN ID）
+  const cdnId = _extractCdnId(src);
+  if (cdnId && img.dataset.errFallback !== 'cdn') {
+    img.dataset.errFallback = 'cdn';
+    img.src = CDN_BASE + cdnId;
+    return;
+  }
+
+  // 連 CDN ID 都抽不出來 → 直接最終 fallback
   img.dataset.errFallback = 'fail';
   img.style.visibility = 'hidden';
   img.style.opacity = '0';
-  // 為父元素加上背景占位
   if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
     img.parentElement.dataset.imgErrorBg = '1';
     img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
   }
 }
+
+// 全域 img 錯誤捕獲：補捉所有沒寫 onerror 的 <img>
+// 使用 capture 階段攔截，確保比元素自身的 onerror 更早觸發（或補足沒寫的）
+document.addEventListener('error', function (e) {
+  const target = e.target;
+  if (!target || target.tagName !== 'IMG') return;
+  // 已經由 handleImgError 處理過的就跳過
+  if (target.dataset.errFallback === 'fail' || target.dataset.errFallback === 'cdn') return;
+  // 標註由全域監聽處理，避免和元素自帶的 onerror 重複
+  if (!target.dataset.globalErr) {
+    target.dataset.globalErr = '1';
+    handleImgError(target);
+  }
+}, true);
+
+// 背景圖（CSS background-image）失敗偵測：用 Image 對象預載
+// 用法：safeBackgroundUrl(element, url) — 設背景圖，失敗時自動 fallback CDN
+function safeBackgroundUrl(el, url) {
+  if (!el || !url) return;
+  const testImg = new Image();
+  testImg.onload = function () {
+    el.style.backgroundImage = 'url(' + url + ')';
+  };
+  testImg.onerror = function () {
+    const cdnId = _extractCdnId(url);
+    if (cdnId && !url.startsWith(CDN_BASE)) {
+      const cdnUrl = CDN_BASE + cdnId;
+      const test2 = new Image();
+      test2.onload = function () {
+        el.style.backgroundImage = 'url(' + cdnUrl + ')';
+      };
+      test2.onerror = function () {
+        el.style.backgroundImage = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+      };
+      test2.src = cdnUrl;
+    } else {
+      el.style.backgroundImage = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    }
+  };
+  testImg.src = url;
+}
+
+// 啟動時偵測一次本地 assets（非阻塞，結果用於後續 assetUrl 優先級判斷）
+detectLocalAssets();
 
 (() => {
 'use strict';
@@ -10439,7 +10574,7 @@ function initCharCreateUI() {
       if (!cls) return;
       const sp = SPRITE[cid] || SPRITE.warrior;
       const spriteHTML = sp.useImg && sp.idle
-        ? `<img src="${sp.idle}" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 0 4px ${sp.glow || '#ffd870'})"/>`
+        ? `<img src="${sp.idle}" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 0 4px ${sp.glow || '#ffd870'})" onerror="handleImgError(this)"/>`
         : `<span style="font-size:28px">${classIcons[cid] || '⚔️'}</span>`;
       const item = document.createElement('div');
       item.className = 'cc-class-item' + (cid === charCreateState.classId ? ' active' : '');
@@ -10530,7 +10665,7 @@ function updateCCSprite() {
   const glow = sp.glow || '#ffd870';
   const filter = `drop-shadow(0 0 12px ${glow}) drop-shadow(0 4px 6px rgba(0,0,0,0.8))`;
   if (sp.useImg && sp.idle) {
-    spriteEl.innerHTML = `<img src="${sp.idle}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="${cls.name}" onerror="this.style.display='none';this.parentNode.style.background='radial-gradient(ellipse at center, rgba(120,90,50,0.4), transparent)';"/>`;
+    spriteEl.innerHTML = `<img src="${sp.idle}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="${cls.name}" onerror="handleImgError(this)"/>`;
   } else {
     const icon = { warrior: '⚔️', mage: '🔮', archer: '🏹', rogue: '🗡️', paladin: '🛡️', warlock: '💀' }[spriteKey] || '⚔️';
     spriteEl.innerHTML = `<div style="font-size:56px;filter:${filter}">${icon}</div>`;
@@ -11235,7 +11370,7 @@ function loadMap(mapId) {
   if (el.siegeScene) el.siegeScene.style.display = 'none';
   if (el.scene) el.scene.style.visibility = 'visible';
 
-  sceneBg.style.backgroundImage = `url(${map.bg})`;
+  safeBackgroundUrl(sceneBg, map.bg);
   sceneBg.style.backgroundRepeat = 'no-repeat';
   el.locationName.textContent = map.name;
   if (el.minimapTitle) el.minimapTitle.textContent = map.name;
@@ -11507,10 +11642,13 @@ function buildMapCard(map, current, isSafe, locked, isSiege) {
   card.dataset.map = map.id;
   const lvlText = isSafe ? '安全區' : (isSiege ? '攻城戰' : `Lv.${map.levelMin}-${map.levelMax}`);
   card.innerHTML = `
-    <div class="map-card-bg" style="background-image:url(${map.bg})"></div>
+    <div class="map-card-bg" data-bg="${map.bg}" style="background-image:none"></div>
     <div class="map-card-info">${map.name}</div>
     <div class="map-card-level">${lvlText}</div>
   `;
+  // 延遲到 DOM 插入後再載入背景（支援 CDN fallback）
+  const bgEl = card.querySelector('.map-card-bg');
+  if (bgEl) safeBackgroundUrl(bgEl, map.bg);
   if (!locked) {
     card.addEventListener('click', () => {
       loadMap(map.id);
@@ -20414,7 +20552,8 @@ function exportGameFile() {
 
 // ========== 下載原始碼 ZIP ==========
 // 靜態 source.zip 路徑（放在專案根目錄，行動裝置優先使用這個固定連結）
-const STATIC_SOURCE_ZIP_URL = 'source.zip';
+// 加上版本參數強制瀏覽器重新下載，避免吃到舊版快取
+const STATIC_SOURCE_ZIP_URL = 'source.zip?v=v1.4.1-cdn';
 
 function downloadSourceZip() {
   closeSideMenu();
@@ -21792,7 +21931,7 @@ function updateSiegeMapByPhase(reason) {
   currentSiegeMapFrame = frame;
   const url = SIEGE_MAP_IMAGES[frame];
   if (sceneBg) {
-    sceneBg.style.backgroundImage = `url(${url})`;
+  safeBackgroundUrl(sceneBg, url);
   }
   const phaseText = frame < 3 ? 'gate' : (frame < 5 ? 'tower' : (frame === 5 ? 'scepter' : 'scepter_picked'));
   console.log('[Siege] 地圖切換 幀=' + frame + ' 階段=' + phaseText + ' 原因=' + (reason || '狀態變化') + ' URL=' + url);
@@ -22255,6 +22394,14 @@ const _siegeMapPreloaded = [];
 function preloadSiegeMaps() {
   SIEGE_MAP_IMAGES.forEach((url, i) => {
     const img = new Image();
+    img.onerror = function () {
+      if (this.dataset.fb) return;
+      this.dataset.fb = '1';
+      const cdnId = _extractCdnId(this.src);
+      if (cdnId && !this.src.startsWith(CDN_BASE)) {
+        this.src = CDN_BASE + cdnId;
+      }
+    };
     img.src = url;
     _siegeMapPreloaded[i] = img;
   });

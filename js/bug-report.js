@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const GAME_VERSION = 'v1.4.0';
+  const GAME_VERSION = 'v1.4.1-cdn';
   const DEV_PWD_KEY = 'bh_dev_password';
   const DEFAULT_DEV_PASSWORD = 'owner2026';
   const BUG_STORAGE_KEY = 'bug_reports';
@@ -110,9 +110,35 @@
   }
 
   // ====== 後端 API 偵測 ======
+  const MP_SERVER_URL_KEY = 'mp_server_url'; // 與多人連線模組共用的 localStorage key
+
+  function getMultiplayerServerUrl() {
+    try {
+      const url = localStorage.getItem(MP_SERVER_URL_KEY) || '';
+      return url.trim();
+    } catch (e) { return ''; }
+  }
+
   function getBackendBase() {
-    // 升級為全棧應用後，API 會在同源 /api 路徑
+    // 優先使用多人連線設定的同一個伺服器位址（跨網域）
+    const mpUrl = getMultiplayerServerUrl();
+    if (mpUrl) {
+      // 去掉結尾的 / 與 socket.io 路徑，確保是 origin
+      try {
+        const u = new URL(mpUrl);
+        return u.origin + '/api';
+      } catch (e) {
+        // 無法解析就當作一般字串處理
+        const base = mpUrl.replace(/\/+$/, '').replace(/\/socket\.io.*$/, '');
+        return base + '/api';
+      }
+    }
+    // 降級：同源相對路徑（全棧應用升級後 /api 在同源）
     return (location.origin || '') + '/api';
+  }
+
+  function isBackendExternal() {
+    return !!getMultiplayerServerUrl();
   }
 
   async function checkBackendAvailable() {
@@ -141,9 +167,12 @@
 
   async function fetchFromBackend(password) {
     try {
-      const res = await fetch(getBackendBase() + '/bug-report/list?pwd=' + encodeURIComponent(password), {
+      const res = await fetch(getBackendBase() + '/bug-report/list', {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-dev-password': password || '',
+        },
       });
       if (!res.ok) throw new Error('backend status ' + res.status);
       const data = await res.json();
@@ -155,8 +184,12 @@
 
   async function deleteFromBackend(id, password) {
     try {
-      const res = await fetch(getBackendBase() + '/bug-report/' + encodeURIComponent(id) + '?pwd=' + encodeURIComponent(password), {
+      const res = await fetch(getBackendBase() + '/bug-report/' + encodeURIComponent(id), {
         method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-dev-password': password || '',
+        },
       });
       return res.ok;
     } catch (e) { return false; }
@@ -164,8 +197,12 @@
 
   async function clearAllBackend(password) {
     try {
-      const res = await fetch(getBackendBase() + '/bug-report/clear?pwd=' + encodeURIComponent(password), {
+      const res = await fetch(getBackendBase() + '/bug-report/clear', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-dev-password': password || '',
+        },
       });
       return res.ok;
     } catch (e) { return false; }
