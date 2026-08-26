@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="styles.css" />
   <link href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet" />
   <script src="lang.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
+  <script src="multiplayer.js" defer></script>
 </head>
 <body>
   <div id="game-root">
@@ -53,7 +56,7 @@
 
       <div class="top-right">
         <div class="gem-pill">
-          <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhdzab2js_ve_miaoda" class="gem-icon-img" alt="鑽石"/>
+          <img src="https://aka.doubaocdn.com/s/vhtHzqEeol" class="gem-icon-img" alt="鑽石"/>
           <span class="gem-num" id="gem-count">300,000</span>
         </div>
         <button class="map-badge-btn" id="map-btn">
@@ -65,6 +68,7 @@
     <!-- 戰鬥场景 -->
     <main class="battle-scene" id="battle-scene">
       <div class="scene-bg" id="scene-bg"></div>
+      <canvas class="iso-canvas" id="iso-canvas"></canvas>
       <div class="scene-fog"></div>
 
       <div class="npc-layer" id="npc-layer"></div>
@@ -139,7 +143,6 @@
       <div class="siege-hud" id="siege-hud" style="display:none">
         <div class="siege-hud-title" id="siege-hud-title">攻城戰 20:00</div>
         <div class="siege-hud-phase" id="siege-hud-phase">第一階段：擊破城門</div>
-        <button class="siege-retreat-btn" id="siege-retreat-btn">撤退</button>
       </div>
 
       <!-- 迷你地圖 -->
@@ -269,7 +272,11 @@
           <span>副本</span>
         </button>
         <button class="nav-btn" id="settings-btn">
-          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/></div>
+          <div class="nav-icon" style="position:relative">
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/>
+            <!-- 連線狀態點：綠=已連線多人、灰=單機模式 -->
+            <span id="mp-status-dot" class="mp-status-dot mp-status-offline" title="單機模式"></span>
+          </div>
           <span>設定</span>
         </button>
       </div>
@@ -316,11 +323,41 @@
           <span class="menu-text">合成</span>
           <span class="menu-arrow">›</span>
         </button>
+        <button class="side-menu-item" id="menu-auction-btn">
+          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrxeb2kaes_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="交易所"/></span>
+          <span class="menu-text">交易所</span>
+          <span class="menu-arrow">›</span>
+        </button>
         <button class="side-menu-item" id="menu-settings-btn">
           <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/></span>
           <span class="menu-text">設定</span>
           <span class="menu-arrow">›</span>
         </button>
+      </div>
+      <div class="side-menu-footer">
+        <button class="export-game-btn" id="export-game-btn">
+          <svg class="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>匯出遊戲</span>
+        </button>
+        <button class="download-src-btn" id="download-src-btn">
+          <svg class="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="12" y1="18" x2="12" y2="12"/>
+            <polyline points="9 15 12 18 15 15"/>
+          </svg>
+          <span>下載原始碼ZIP</span>
+        </button>
+        <div class="source-url-row" id="source-url-row">
+          <span>或直接造訪：</span>
+          <a href="source.zip" download="暗黑天堂MMORPG_原始碼.zip" target="_blank" rel="noopener" id="source-zip-link">source.zip</a>
+          <button class="source-url-copy" id="source-url-copy" title="複製連結">複製</button>
+        </div>
+        <div class="export-tip">雙擊離線遊玩 · 存檔保留</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -401,6 +438,7 @@
 
     <!-- 攻城战场景（全屏，替代 battle-scene） -->
     <div class="siege-scene" id="siege-scene" style="display:none">
+      <canvas class="iso-map-canvas" id="iso-map-canvas"></canvas>
       <div class="siege-scene-bg" id="siege-scene-bg"></div>
       <div class="scene-fog"></div>
       <div class="siege-structures" id="siege-structures"></div>
@@ -411,13 +449,8 @@
 
       <!-- 攻城战 HUD -->
       <div class="siege-hud">
-        <div class="siege-hud-left">
-          <div class="siege-hud-title" id="siege-hud-title">攻城戰 - 古魯丁城堡</div>
-          <div class="siege-hud-phase" id="siege-hud-phase">攻城阶段</div>
-        </div>
-        <div class="siege-hud-right">
-          <button class="siege-retreat-btn" id="siege-retreat-btn">撤退</button>
-        </div>
+        <div class="siege-hud-title" id="siege-hud-title">攻城戰 - 古魯丁城堡</div>
+        <div class="siege-hud-phase" id="siege-hud-phase">攻城阶段</div>
       </div>
 
       <!-- 技能栏（攻城战共用） -->
@@ -566,6 +599,20 @@
             <div class="auto-items-grid" id="auto-items-grid" style="display:flex;flex-direction:column;gap:6px;padding-right:2px">
             </div>
           </div>
+         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+            <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">多人連線</div>
+            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">輸入你的 Socket.IO 伺服器位址，例如 https://xxx.onrender.com</div>
+            <div style="display:flex;gap:4px;margin-bottom:8px">
+              <input type="text" id="mp-server-input" placeholder="https://xxx.onrender.com" style="flex:1;padding:5px 8px;background:rgba(0,0,0,0.5);border:1px solid var(--gold-dark);border-radius:4px;color:var(--parchment);font-size:11px;font-family:inherit" />
+              <button class="lang-btn" id="mp-connect-btn" style="font-size:10px;padding:4px 10px;min-width:56px">連線</button>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">連線狀態</span>
+              <span id="mp-status-text" class="mp-status-text mp-status-offline">未連線</span>
+            </div>
+            <div style="font-size:9px;color:var(--parchment-dark);margin-top:4px;line-height:1.4">Render 免費版冷啟動約 30~60 秒，請稍候</div>
+          </div>
+
         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
           <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">音效與音樂</div>
           <div class="settings-row">
@@ -583,6 +630,10 @@
             </div>
           </div>
           <div class="settings-row">
+            <span class="settings-label">測試音效</span>
+            <button id="sfx-test-btn" class="lang-btn" style="padding:4px 14px;font-size:11px;">播放</button>
+          </div>
+          <div class="settings-row">
             <span class="settings-label">背景音樂</span>
             <label class="toggle-switch">
               <input type="checkbox" id="music-toggle" checked>
@@ -595,6 +646,21 @@
               <input type="range" id="music-volume" min="0" max="100" value="40" class="volume-slider">
               <span id="music-volume-value" class="volume-value">40</span>
             </div>
+          </div>
+          <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+            <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">離線工具</div>
+            <div class="settings-row">
+              <span class="settings-label">離線模式</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="offline-mode-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">開啟後從本地 assets/ 資料夾讀取圖片，需重新整理生效</div>
+            <button class="lang-btn" id="download-offline-btn" style="width:100%;padding:8px;font-size:12px;background:linear-gradient(180deg,#c9a24a,#7a5c1a);color:#fff;border:1px solid var(--gold);text-shadow:1px 1px 2px rgba(0,0,0,0.5)">
+              📦 下載離線包
+            </button>
+            <div id="offline-download-status" style="font-size:10px;color:var(--parchment-dark);margin-top:6px;text-align:center;display:none"></div>
           </div>
         </div>
         </div>
@@ -715,6 +781,8 @@
 
   <script src="transform.js"></script>
   <script src="audio.js"></script>
+  <script src="audio-manager.js"></script>
+  <script src="iso-map.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
