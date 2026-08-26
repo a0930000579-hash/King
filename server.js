@@ -8,12 +8,13 @@
 
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 const express = require('express');
 const { Server } = require('socket.io');
 
-const { World } = require('./lib/world');
-const { BotManager } = require('./lib/bot');
-const { CombatManager } = require('./lib/combat');
+const { World } = require('./world');
+const { BotManager } = require('./bot');
+const { CombatManager } = require('./combat');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,7 +25,62 @@ const io = new Server(server, {
 
 // Heroku 需要信任 proxy
 app.set('trust proxy', 1);
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '1mb' }));
+// /api 跨域（遊戲前端放在別的網域也要能回報Bug）
+app.use('/api', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,x-dev-password');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+app.use(express.static(__dirname));
+
+// ============ Bug 回報後台（JSON 檔持久化，零外部依賴）============
+const DATA_DIR = path.join(__dirname, 'data');
+const BUG_FILE = path.join(DATA_DIR, 'bug-reports.json');
+const DEV_PASSWORD = process.env.DEV_PASSWORD || 'owner2026';
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+function loadBugs() {
+  try { return JSON.parse(fs.readFileSync(BUG_FILE, 'utf8')); }
+  catch (e) { return []; }
+}
+function saveBugs(arr) {
+  try { fs.writeFileSync(BUG_FILE, JSON.stringify(arr.slice(-5000), null, 0)); }
+  catch (e) { console.error('[bug] 寫入失敗', e.message); }
+}
+const isDev = (req) =>
+  (req.header('x-dev-password') || req.query.key || '') === DEV_PASSWORD;
+
+app.get('/api/bug-report/ping', (req, res) => res.json({ ok: true }));
+app.post('/api/bug-report', (req, res) => {
+  const b = req.body || {};
+  const list = loadBugs();
+  const rec = {
+    id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    version: String(b.version || ''), mapId: String(b.mapId || ''),
+    name: String(b.name || ''), level: b.level || null, class: String(b.class || ''),
+    ua: String(b.ua || ''), platform: String(b.platform || ''),
+    screen: String(b.screen || ''), errors: Array.isArray(b.errors) ? b.errors.slice(-30) : [],
+    text: String(b.text || '').slice(0, 4000),
+    ts: Date.now()
+  };
+  list.push(rec); saveBugs(list);
+  res.json({ ok: true, id: rec.id });
+});
+app.get('/api/bug-report/list', (req, res) => {
+  if (!isDev(req)) return res.status(401).json({ ok: false, error: 'bad_password' });
+  res.json({ ok: true, reports: loadBugs().sort((a, b) => b.ts - a.ts) });
+});
+app.delete('/api/bug-report/:id', (req, res) => {
+  if (!isDev(req)) return res.status(401).json({ ok: false, error: 'bad_password' });
+  saveBugs(loadBugs().filter(x => x.id !== req.params.id));
+  res.json({ ok: true });
+});
+app.post('/api/bug-report/clear', (req, res) => {
+  if (!isDev(req)) return res.status(401).json({ ok: false, error: 'bad_password' });
+  saveBugs([]); res.json({ ok: true });
+});
 
 // 健康檢查（Heroku / 監控用）
 app.get('/health', (req, res) => {
