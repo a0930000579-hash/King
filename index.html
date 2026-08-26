@@ -11,6 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
   <script src="multiplayer.js" defer></script>
+  <script src="bug-report.js" defer></script>
 </head>
 <body>
   <div id="game-root">
@@ -343,20 +344,7 @@
           </svg>
           <span>匯出遊戲</span>
         </button>
-        <button class="download-src-btn" id="download-src-btn">
-          <svg class="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="12" y1="18" x2="12" y2="12"/>
-            <polyline points="9 15 12 18 15 15"/>
-          </svg>
-          <span>下載原始碼ZIP</span>
-        </button>
-        <div class="source-url-row" id="source-url-row">
-          <span>或直接造訪：</span>
-          <a href="source.zip" download="暗黑天堂MMORPG_原始碼.zip" target="_blank" rel="noopener" id="source-zip-link">source.zip</a>
-          <button class="source-url-copy" id="source-url-copy" title="複製連結">複製</button>
-        </div>
+
         <div class="export-tip">雙擊離線遊玩 · 存檔保留</div>
       </div>
     </div>
