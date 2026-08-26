@@ -1,6 +1,19 @@
 {
-  "name": "miaoda-design-html-app",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module"
+  "name": "dark-heaven-mmorpg-server",
+  "version": "1.0.0",
+  "description": "暗黑天堂MMORPG 多人連線伺服器 (Node.js + Socket.IO)，本機可測、Heroku 可一鍵部署",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "keywords": ["mmorpg", "socket.io", "multiplayer", "lineage", "heroku"],
+  "license": "MIT"
 }
