@@ -1,4 +1,4 @@
-name: ZIP Auto Extract and Deploy
+name: ZIP Auto Extract
 on:
   push:
     branches:
@@ -6,10 +6,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
-  pages: write
-  id-token: write
 concurrency:
-  group: king-deploy
+  group: king-extract
   cancel-in-progress: false
 jobs:
   extract:
@@ -20,96 +18,56 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Find all ZIPs
-        id: zip
+      - name: Extract all ZIPs (merge, never delete other files)
         shell: bash
         run: |
-          mapfile -t ZIPS < <(find . -type f -iname "*.zip" ! -path "./.git/*" ! -path "./.github/*")
-          if [ ${#ZIPS[@]} -eq 0 ]; then
-            echo "No ZIP found, nothing to extract."
-            echo "has_zip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Found ${#ZIPS[@]} ZIP file(s):"
-            printf '%s\n' "${ZIPS[@]}"
-            echo "has_zip=true" >> "$GITHUB_OUTPUT"
+          set -u
+          zips=()
+          while IFS= read -r f; do zips+=("$f"); done < <(find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*')
+          echo "Found ${#zips[@]} zip file(s)."
+          if [ "${#zips[@]}" -eq 0 ]; then
+            echo "No ZIP to extract. Nothing to do."
+            exit 0
           fi
-
-      - name: Extract every ZIP (merge, never delete other files)
-        if: steps.zip.outputs.has_zip == 'true'
-        shell: bash
-        run: |
-          set -e
-          mapfile -t ZIPS < <(find . -type f -iname "*.zip" ! -path "./.git/*" ! -path "./.github/*")
-          for z in "${ZIPS[@]}"; do
-            echo "================================="
+          for z in "${zips[@]}"; do
+            echo "=============================="
             echo "Extracting (merge/overwrite): $z"
-            echo "================================="
-            unzip -o "$z" -d .
+            echo "=============================="
+            unzip -o "$z" -d . || { echo "unzip failed on $z"; exit 1; }
           done
 
-      - name: Fix nested folder
-        if: steps.zip.outputs.has_zip == 'true'
-        shell: bash
-        run: |
-          if [ ! -f "index.html" ]; then
-            INDEX_FILE=$(find . -mindepth 2 -type f -name "index.html" ! -path "./.git/*" ! -path "./.github/*" | head -n 1)
-            if [ -n "$INDEX_FILE" ]; then
-              INDEX_DIR=$(dirname "$INDEX_FILE")
-              echo "Lifting nested folder: $INDEX_DIR"
+          # If a zip had one wrapper folder, lift its contents to root
+          if [ ! -f index.html ]; then
+            inner=$(find . -mindepth 2 -type f -name index.html ! -path './.git/*' ! -path './.github/*' | head -n 1 || true)
+            if [ -n "$inner" ]; then
+              d=$(dirname "$inner")
+              echo "Lifting nested folder: $d"
               shopt -s dotglob nullglob
-              mv "$INDEX_DIR"/* . 2>/dev/null || true
-              rmdir "$INDEX_DIR" 2>/dev/null || true
-            else
-              echo "index.html not at root yet (may arrive with another part)."
+              mv "$d"/* . 2>/dev/null || true
             fi
           fi
 
-      - name: Remove consumed ZIPs (keeps all extracted files)
-        if: steps.zip.outputs.has_zip == 'true'
-        shell: bash
-        run: |
-          find . -type f -iname "*.zip" ! -path "./.git/*" ! -path "./.github/*" -print -delete
+          # Remove only the consumed archives (game files are kept)
+          find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*' -delete || true
 
-      - name: Check files
-        shell: bash
-        run: |
-          echo "================================="
-          echo "Final files:"
-          echo "================================="
+          echo "=== Root after extract ==="
           ls -la
-          echo "================================="
-          if [ -f "index.html" ]; then
-            echo "SUCCESS: index.html exists."
+          if [ -f index.html ]; then
+            echo "OK: index.html present."
           else
-            echo "WARN: index.html missing (upload game-code.zip too)."
+            echo "NOTE: index.html not at root yet (upload game-code.zip too)."
           fi
 
-      - name: Commit extracted files
-        if: steps.zip.outputs.has_zip == 'true'
+      - name: Commit and push
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes."
+            echo "No changes to commit."
           else
             git commit -m "Auto extract ZIP(s) and merge game files [skip ci]"
             git push
+            echo "Pushed extracted files."
           fi
-
-      - name: Upload Pages
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-
-  deploy:
-    needs: extract
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
