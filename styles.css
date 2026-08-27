@@ -11808,6 +11808,34 @@ img { display: block; pointer-events: none; }
   object-fit: contain;
   filter: drop-shadow(0 6px 20px rgba(0,0,0,0.8)) drop-shadow(0 0 10px rgba(232,192,96,0.2));
 }
+/* v2.1.2：立繪兜底，圖片失敗時也不會出現破圖 */
+.cc2-portrait-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(120,70,30,0.4) 0%, transparent 65%),
+    linear-gradient(180deg, #14100a 0%, #0a0805 50%, #14100a 100%);
+  border-radius: 4px;
+}
+.cc2-fallback-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  color: #ffd880;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.9), 0 0 20px rgba(232,192,96,0.3);
+  padding-left: 8px;
+}
+.cc2-fallback-sub {
+  font-size: 11px;
+  letter-spacing: 4px;
+  color: #a08050;
+}
 .cc2-portrait-vignette {
   position: absolute;
   inset: 0;
@@ -12038,6 +12066,7 @@ img { display: block; pointer-events: none; }
 .cc2-name-status.ok { color: #50d070; }
 .cc2-name-status.error { color: #ff6060; }
 .cc2-name-status.checking { color: #c8a060; }
+.cc2-name-status.warn { color: #e0b060; }
 
 /* ===== 底部建立按鈕 ===== */
 .cc2-footer {

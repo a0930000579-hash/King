@@ -1688,6 +1688,7 @@
 }
 .cc-name-status.ok { color: #50d070; }
 .cc-name-status.error { color: #ff6060; }
+.cc-name-status.warn { color: #e0b060; }
 
 /* 底部按鈕 */
 .cc-footer { text-align: center; }
@@ -1890,6 +1891,45 @@
   object-position: top center;
   display: block;
   filter: brightness(0.95) contrast(1.05);
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+/* 預覽兜底：暗色漸層 + 金變名稱，永遠不會出現破圖 */
+.cc-portrait-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(120,70,30,0.5) 0%, transparent 60%),
+    linear-gradient(180deg, #1a0f08 0%, #0d0804 50%, #1a0f08 100%);
+  color: #e8c068;
+  padding: 20px;
+  text-align: center;
+}
+.cc-fallback-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: #ffd880;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.9), 0 0 20px rgba(232,192,96,0.3);
+  padding-left: 6px;
+}
+.cc-fallback-sub {
+  font-size: 12px;
+  letter-spacing: 4px;
+  color: #a08050;
+}
+.cc-fallback-deco {
+  font-size: 11px;
+  color: #8a6838;
+  letter-spacing: 6px;
+  margin-top: 8px;
 }
 .cc-portrait-vignette {
   position: absolute;
@@ -1987,21 +2027,24 @@
   gap: 12px;
 }
 .cc-spec-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, rgba(60,42,24,0.9), rgba(30,20,10,0.9));
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.4);
   border: 1px solid rgba(180,140,60,0.35);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent, #c49850);
-  flex-shrink: 0;
-  box-shadow: inset 0 1px 0 rgba(255,220,150,0.1);
+  color: var(--accent, #d4a054);
+  font-size: 18px;
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
 }
-.cc-spec-icon svg {
-  width: 18px;
-  height: 18px;
+.cc-spec-glyph {
+  line-height: 1;
+  font-style: normal;
+  color: var(--accent, #e8c068);
+  text-shadow: 0 0 6px var(--accent, rgba(232,192,96,0.5));
 }
 .cc-spec-text {
   display: flex;
@@ -2090,6 +2133,7 @@
 }
 .cc-name-status.ok { color: #7ab86a; }
 .cc-name-status.error { color: #c87858; }
+.cc-name-status.warn { color: #c8a060; }
 
 /* 底部創建按鈕 */
 .cc-footer-area {

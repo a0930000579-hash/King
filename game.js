@@ -11214,9 +11214,9 @@ function initCC2UI() {
       btn.className = 'cc2-class-icon-btn' + (cid === charCreateState.classId ? ' active' : '');
       btn.dataset.classId = cid;
       if (sp.useImg && sp.idle) {
-        btn.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" onerror="this.style.display='none'"/>`;
+        btn.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" onerror="this.style.display='none';this.parentElement.querySelector('.cc2-icon-fallback')&&(this.parentElement.querySelector('.cc2-icon-fallback').style.display='flex');"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8)">${detail.name.slice(0, 1)}</span>`;
       } else {
-        btn.innerHTML = '<span class="cc2-icon-placeholder">?</span>';
+        btn.innerHTML = `<span class="cc2-icon-fallback" style="display:flex;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8)">${detail.name.slice(0, 1)}</span>`;
       }
       
       const label = document.createElement('span');
@@ -11288,10 +11288,16 @@ function updateCC2Portrait() {
   // 8 幀 idle 動畫（面朝右，第一幀為主）
   const frames = [sp.idle, sp.walk, sp.walk2, sp.walk3, sp.walk4].filter(Boolean);
   
-  if (sp.useImg && sp.idle) {
-    portraitEl.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" class="cc2-portrait-img" data-frames='${JSON.stringify(frames)}'/>`;
-    startCC2PortraitAnim(portraitEl.querySelector('img'), frames);
-  }
+  // v2.1.2：永遠先放兜底（暗色漸層 + 職業名文字），圖片成功才顯示，確保不出現破圖 ?
+  portraitEl.innerHTML = `
+    <div class="cc2-portrait-fallback">
+      <div class="cc2-fallback-title">${detail ? detail.name : ''}</div>
+      <div class="cc2-fallback-sub">${detail && detail.topTransform ? detail.topTransform : '真系列金變'}</div>
+    </div>
+  ` + (sp.useImg && sp.idle ? `<img src="${sp.idle}" alt="${detail ? detail.name : ''}" class="cc2-portrait-img" data-frames='${JSON.stringify(frames)}' style="display:none" onload="this.style.display='block'" onerror="this.style.display='none'"/>` : '');
+  
+  const img = portraitEl.querySelector('img');
+  if (img) startCC2PortraitAnim(img, frames);
 }
 
 // 8 幀動畫播放（用於創角頁立繪輕微呼吸/待機效果）
@@ -11460,7 +11466,8 @@ function updateCC2CreateBtnState() {
   const btn = $('cc2-create-btn');
   if (!btn) return;
   const name = charCreateState.name.trim();
-  const valid = name.length >= 2 && name.length <= 10 && charCreateState.nameChecked;
+  // v2.1.2：完成創建按鈕一律可按，只驗證名稱長度，不被健康檢查/查重結果擋住
+  const valid = name.length >= 2 && name.length <= 10;
   btn.disabled = !valid;
 }
 
@@ -11471,14 +11478,28 @@ function confirmCC2CharCreate() {
     updateCC2NameStatus('請輸入角色名稱', 'error');
     return;
   }
-  if (!charCreateState.nameChecked) {
-    updateCC2NameStatus('請先點擊「重複確認」檢查名稱', 'error');
+  if (name.length < 2 || name.length > 10) {
+    updateCC2NameStatus('角色名稱長度需為 2-10 個字元', 'error');
     return;
+  }
+  // 簡單敏感詞檢查
+  const forbidden = ['管理員', 'GM', 'gm', '系統', '官方', '總裁', '皇帝', '天王'];
+  for (const w of forbidden) {
+    if (name.indexOf(w) !== -1) {
+      updateCC2NameStatus('名稱含有違禁字詞，請重新輸入', 'error');
+      return;
+    }
   }
   
   const cid = charCreateState.classId;
   const cls = CLASSES[cid];
   if (!cls) return;
+  
+  // v2.1.2：建立 loading 狀態，避免重複點擊
+  const createBtn = $('cc2-create-btn');
+  const originBtnText = createBtn ? createBtn.textContent : '';
+  if (createBtn) { createBtn.disabled = true; createBtn.textContent = '創建中...'; }
+  updateCC2NameStatus('正在創建角色，請稍候...', 'checking');
   
   // 根據職業預設屬性自動分配（玩家不用手動配點）
   const pref = CLASS_STAT_PREFS[cid] || CLASS_STAT_PREFS.warrior;
@@ -11498,42 +11519,79 @@ function confirmCC2CharCreate() {
   GS.player.crit = Math.floor(Number(cls.baseStats.crit || 5) + dexBonus * 0.3);
   GS.player.baseStats6 = { ...pref };
   
-  // 關閉創建介面
-  const screen = $('char-create-screen');
-  if (screen) screen.classList.add('hidden');
-  
-  // 更新介面
-  if (el.topName) el.topName.textContent = name;
-  if (el.classBadge) el.classBadge.textContent = cls.name;
-  updatePlayerSprite();
-  updateTransformVisual();
-  updateUI();
-  updateSkillBar();
-  updateSlotDisplay();
-  const topAvatarEl = $('top-avatar');
-  if (topAvatarEl) {
-    topAvatarEl.innerHTML = spriteEmojiHTML(cls.sprite, 36);
-  }
-  addLog('system', '歡迎來到君主之刃，' + name + '！');
-  addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/公會/城堡。');
-  
-  // 初始化音訊系統
-  if (window.AudioSystem) {
-    AudioSystem.init();
-    AudioSystem.ensureRunning();
-    AudioSystem.startMusic(GS.currentMap);
-  }
-  
-  // 全局 AI 池初始化
-  setTimeout(() => {
-    try { initGlobalAIPool(); } catch(e) {
-      console.error('[AI System] AI初始化失敗，已跳過：', e);
-      addLog('system', '⚠ AI玩家系統初始化異常，已跳過');
+  // 進入世界的共用流程
+  function enterWorld() {
+    // 關閉創建介面
+    const screen = $('char-create-screen');
+    if (screen) screen.classList.add('hidden');
+    
+    // 更新介面
+    if (el.topName) el.topName.textContent = name;
+    if (el.classBadge) el.classBadge.textContent = cls.name;
+    updatePlayerSprite();
+    updateTransformVisual();
+    updateUI();
+    updateSkillBar();
+    updateSlotDisplay();
+    const topAvatarEl = $('top-avatar');
+    if (topAvatarEl) {
+      topAvatarEl.innerHTML = spriteEmojiHTML(cls.sprite, 36);
     }
-  }, 1000);
+    addLog('system', '歡迎來到君主之刃，' + name + '！');
+    addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/公會/城堡。');
+    
+    // 初始化音訊系統
+    if (window.AudioSystem) {
+      try {
+        AudioSystem.init();
+        AudioSystem.ensureRunning();
+        AudioSystem.startMusic(GS.currentMap);
+      } catch (e) { console.warn('[Audio] 初始化異常', e); }
+    }
+    
+    // 全局 AI 池初始化
+    setTimeout(() => {
+      try { initGlobalAIPool(); } catch(e) {
+        console.error('[AI System] AI初始化失敗，已跳過：', e);
+        addLog('system', '⚠ AI玩家系統初始化異常，已跳過');
+      }
+    }, 1000);
+    
+    // 國家選擇
+    if (!GS.nation) showNationSelect();
+  }
   
-  // 國家選擇
-  if (!GS.nation) showNationSelect();
+  // v2.1.2：直接 POST /api/characters/create，成功進世界；失敗顯示具體錯誤並恢復按鈕
+  const apiFn = window.AuthSystem?.api || null;
+  const serverInfo = (window.AuthSystem && typeof window.AuthSystem.getCurrentServer === 'function')
+    ? window.AuthSystem.getCurrentServer()
+    : null;
+  const serverId = serverInfo?.id || 'local';
+  
+  if (apiFn) {
+    apiFn('/characters/create', {
+      name: name,
+      classId: cid,
+      server: serverId,
+    }).then(result => {
+      if (result && result.ok) {
+        enterWorld();
+      } else {
+        // server 回 ok:false 或非預期格式，顯示具體錯誤
+        const msg = result?.error || result?.message || '創建失敗，請重試';
+        updateCC2NameStatus(msg, 'error');
+        if (createBtn) { createBtn.disabled = false; createBtn.textContent = originBtnText; }
+      }
+    }).catch(err => {
+      // v2.1.2：真失敗才提示，用伺服器具體錯誤訊息，不用靜態模式文字擋人
+      const msg = err?.message || '網路異常，請稍後重試';
+      updateCC2NameStatus(msg, 'error');
+      if (createBtn) { createBtn.disabled = false; createBtn.textContent = originBtnText; }
+    });
+  } else {
+    // 沒有 api → 直接進入（離線模式，localStorage 存檔）
+    enterWorld();
+  }
 }
 
 function showNationSelect() {
