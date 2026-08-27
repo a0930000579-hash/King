@@ -137,37 +137,37 @@
       desc: '以強大的鎧甲和體力站在戰場的最前線，揮舞巨劍將一切阻擋者化為廢土。',
       stats: { STR: 15, DEX: 8, INT: 5, CON: 14, LUK: 3 },
       topTransform: '真・死亡騎士',
-      portrait: 'assets/class/warrior/portrait.jpg',
+      portrait: 'assets/transform/gold/true_death_knight/portrait.jpg',
       accent: '#8b3a3a' },
     paladin: { name: '聖騎士', weapon: '劍盾', type: '近戰物理', trait: '坦克・治癒',
       desc: '曾經的聖光守護者，如今背負著黑暗的詛咒，以墮落的聖裁審判一切罪惡。',
       stats: { STR: 10, DEX: 6, INT: 8, CON: 18, LUK: 3 },
       topTransform: '真・墮落聖執者',
-      portrait: 'assets/class/paladin/portrait.jpg',
+      portrait: 'assets/transform/gold/true_fallen_paladin/portrait.jpg',
       accent: '#7d6a3a' },
     rogue: { name: '黑暗妖精', weapon: '雙刀', type: '近戰物理', trait: '高爆擊・高閃避',
       desc: '潛伏於暗影中的死亡信使，以迅雷不及掩耳的速度給予敵人最後一擊。',
       stats: { STR: 10, DEX: 16, INT: 4, CON: 10, LUK: 10 },
       topTransform: '真・死亡刺客',
-      portrait: 'assets/class/assassin/portrait.jpg',
+      portrait: 'assets/transform/gold/true_death_assassin/portrait.jpg',
       accent: '#2d5a3d' },
     archer: { name: '精靈', weapon: '長弓', type: '遠程物理', trait: '高輸出・遠程',
       desc: '百步穿楊的亡靈射手，以白骨之弓從遠處給予敵人穩定而致命的審判。',
       stats: { STR: 7, DEX: 18, INT: 4, CON: 9, LUK: 12 },
       topTransform: '真・死亡弓箭手',
-      portrait: 'assets/class/archer/portrait.jpg',
+      portrait: 'assets/transform/gold/true_death_archer/portrait.jpg',
       accent: '#3a4d6b' },
     mage: { name: '法師', weapon: '法杖', type: '遠程魔法', trait: '高魔攻・範圍',
       desc: '操控死亡奧義的智者，以巴風特之力召喚毀滅級的暗影魔法吞噬一切。',
       stats: { STR: 4, DEX: 8, INT: 18, CON: 8, LUK: 12 },
       topTransform: '真・死亡法師',
-      portrait: 'assets/class/mage/portrait.jpg',
+      portrait: 'assets/transform/gold/true_death_mage/portrait.jpg',
       accent: '#5a2d6b' },
     warlock: { name: '幻術師', weapon: '權杖', type: '遠程魔法', trait: '召喚・持續傷害',
       desc: '與黑暗締結契約的亡靈咒術師，以惡魔召喚與死亡詛咒逐漸吞噬敵人。',
       stats: { STR: 3, DEX: 6, INT: 16, CON: 10, LUK: 15 },
       topTransform: '真・死亡術士',
-      portrait: 'assets/class/warlock/portrait.jpg',
+      portrait: 'assets/transform/gold/true_death_sorcerer/portrait.jpg',
       accent: '#2d5a5a' },
   };
   function renderInitStats(classId) {
@@ -557,7 +557,7 @@
         slots.push(`
           <div class="char-slot" data-char-idx="${i}">
             <div class="char-avatar-box">
-              <span style="font-size:28px;color:#f0c040">◆</span>
+              <span style="font-size:28px;color:#f0c040">[ 金 ]</span>
             </div>
             <div class="char-details">
               <div class="char-name-row">${escapeHtml(c.name)}</div>
@@ -628,7 +628,7 @@
                   <div class="cc-portrait-fallback" id="cc-portrait-fallback">
                     <div class="cc-fallback-title" id="cc-fallback-title">${defaultClass.topTransform}</div>
                     <div class="cc-fallback-sub">真・系列金變</div>
-                    <div class="cc-fallback-deco">◆ ◇ ◆</div>
+                    <div class="cc-fallback-deco">[ 金變 ] [ 神話 ] [ 金變 ]</div>
                   </div>
                   <img class="cc-portrait-img" id="cc-portrait-img" src="${defaultClass.portrait}" alt="${defaultClass.name}" style="display:none" onload="this.style.display='block'" onerror="this.style.display='none'"/>
                   <div class="cc-portrait-vignette"></div>
@@ -1024,18 +1024,18 @@
             const data = await api('/characters/check-name?name=' + encodeURIComponent(v) + '&server=' + encodeURIComponent(currentServer?.id || ''));
             if (data && data.available) {
               nameChecked = true;
-              nameStatus.textContent = '✓ 此名稱可使用';
+              nameStatus.textContent = '可用：此名稱可使用';
               nameStatus.className = 'cc-name-status ok';
             } else {
               nameChecked = false;
-              nameStatus.textContent = '✗ 此名稱已被使用';
+              nameStatus.textContent = '已占用：此名稱已被使用';
               nameStatus.className = 'cc-name-status error';
             }
           } catch (e) {
             // v2.1.2：查重失敗僅提示稍後重試，不阻止玩家用 create 直接嘗試
             // 最終重名由 server 端把關
             nameChecked = false;
-            nameStatus.textContent = '⚠ 名稱檢查暫時失敗，稍後可重試；仍可直接嘗試創建';
+            nameStatus.textContent = '檢查失敗：名稱檢查暫時失敗，稍後可重試；仍可直接嘗試創建';
             nameStatus.className = 'cc-name-status warn';
           }
           updateBtnState();
@@ -1087,7 +1087,7 @@
             } else {
               // server 回 ok:false 或其他非預期格式
               const msg = result?.error || result?.message || '創建失敗，請重試';
-              nameStatus.textContent = '✗ ' + msg;
+              nameStatus.textContent = '失敗：' + msg;
               nameStatus.className = 'cc-name-status error';
               createBtn.disabled = false;
               return;

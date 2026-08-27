@@ -323,13 +323,21 @@ function assetUrl(id) {
     if (mpath.startsWith('assets/')) return mpath;
     return 'assets/' + mpath;
   }
-  // v2.3.3：若 manifest 已載入但此 id 不存在 → 視為棄用 hash / 未使用單位
+  // v2.3.4：若 manifest 已載入但此 id 不存在 → 視為棄用 hash / 未使用單位
   // 直接返回空字串，避免產生 404。只有新路徑格式（含 / 的語意路徑）才會 fallback 到直接拼接
   if (ASSETS_MANIFEST_LOADED && ASSETS_MANIFEST) {
     if (pureId.indexOf('/') === -1) {
       // 純 hash（無路徑分隔）且不在 manifest → 棄用，返回空
       return '';
     }
+  }
+  // v2.3.4：語意路徑優先走 manifest；若不在 manifest，嘗試 jpg/png 並以 manifest 結果為準
+  // 對於有 / 的語意路徑，優先嘗試 .jpg（多數美術圖為 jpg），其次 .png
+  if (id.indexOf('/') !== -1) {
+    // 有副檔名 → 直接拼接
+    if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
+    // 沒副檔名 → 先嘗試 .jpg（多數美術資源），fallback 到 .png（onerror 鏈接續）
+    return 'assets/' + pureId + '.jpg';
   }
   const cat = getSpriteCategory(pureId);
   if (cat) return 'assets/' + cat + '/' + pureId + '.png';
@@ -400,13 +408,26 @@ function handleImgError(img) {
   }
 
   // 已經走過 CDN 還是失敗 → 最終 fallback
+  // v2.3.4：不再隱藏圖片，改為顯示暗色漸層+文字兜底，絕不出現藍底問號或原生破圖
   if (img.dataset.errFallback === 'cdn') {
     img.dataset.errFallback = 'fail';
+    // 隱藏自身，但父層加上帶名稱的漸層占位
     img.style.visibility = 'hidden';
     img.style.opacity = '0';
     if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
       img.parentElement.dataset.imgErrorBg = '1';
-      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+      const name = img.alt || img.dataset.unitName || '';
+      const initial = name ? name.charAt(0) : '';
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(80,60,40,0.85), rgba(20,15,10,0.95) 75%)';
+      // 若父層還沒有兜底文字，加一個
+      if (!img.parentElement.querySelector('.img-fallback-text')) {
+        const fb = document.createElement('div');
+        fb.className = 'img-fallback-text';
+        fb.textContent = initial || '◆';
+        fb.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(210,180,120,0.6);font-size:24px;font-weight:700;pointer-events:none;letter-spacing:1px;';
+        img.parentElement.style.position = img.parentElement.style.position || 'relative';
+        img.parentElement.appendChild(fb);
+      }
     }
     return;
   }
@@ -4145,7 +4166,7 @@ function getSkillIconPos(skill) {
   return [0, 0, 0];
 }
 
-// v2.3.3：停用 SVG 技能圖標，改用文字+漸層背景（禁 SVG）
+// v2.3.4：停用 SVG 技能圖標，改用文字+漸層背景（禁 SVG）
 const SKILL_SVG_MAP = {};
 
 // 暗黑天堂W 風格技能圖標圖片（替代SVG/emoji）
@@ -5619,7 +5640,7 @@ const AUTO_ITEMS_CATALOG = [
 ];
 
 const ITEM_ICONS = {
-  // 藥水（v2.3.3：新語意路徑 assets/item/icon_*.jpg）
+  // 藥水（v2.3.4：新語意路徑 assets/item/icon_*.jpg）
   hp1: assetUrl('item/icon_potion_hp.jpg'),
   hp2: assetUrl('item/icon_potion_hp.jpg'),
   hp3: assetUrl('item/icon_potion_hp.jpg'),
@@ -5653,7 +5674,7 @@ const ITEM_ICONS = {
   ancient_book: assetUrl('item/icon_scroll.jpg'),
   monster_eye: assetUrl('item/icon_gem_ruby.jpg'),
   dragon_scale: assetUrl('item/icon_gem_ruby.jpg'),
-  // 裝備類型（v2.3.3：新語意路徑 assets/equip/icon_*.jpg）
+  // 裝備類型（v2.3.4：新語意路徑 assets/equip/icon_*.jpg）
   weapon: assetUrl('equip/icon_sword.jpg'),
   armor: assetUrl('equip/icon_armor.jpg'),
   helmet: assetUrl('equip/icon_helmet.jpg'),
@@ -5692,7 +5713,7 @@ const EQUIP_SLOTS = [
   { id: 'boots',   name: '靴子',   pos: 'feet' },
 ];
 
-// 裝備部位對應圖標（v2.3.3：新語意路徑 assets/equip/icon_*.jpg）
+// 裝備部位對應圖標（v2.3.4：新語意路徑 assets/equip/icon_*.jpg）
 const EQUIP_ICON_MAP = {
   helmet:   assetUrl('equip/icon_helmet.jpg'),
   armor:    assetUrl('equip/icon_armor.jpg'),
@@ -5711,7 +5732,7 @@ const EQUIP_ICON_MAP = {
   staff:    assetUrl('equip/icon_staff.jpg'),
 };
 
-// 道具/消耗品圖標（v2.3.3：新語意路徑 assets/item/icon_*.jpg）
+// 道具/消耗品圖標（v2.3.4：新語意路徑 assets/item/icon_*.jpg）
 const ITEM_ICON_MAP = {
   potion_hp: assetUrl('item/icon_potion_hp.jpg'),
   potion_mp: assetUrl('item/icon_potion_mp.jpg'),
@@ -8602,7 +8623,7 @@ function onPlayerDead() {
     p.state = 'idle';
     const isSiege = curMap?.type === 'castle_siege';
     if (isSiege) {
-      // v2.3.3：攻城戰中死亡 → 原地復活（50%血量），戰鬥繼續；以時間為主
+      // v2.3.4：攻城戰中死亡 → 原地復活（50%血量），戰鬥繼續；以時間為主
       // 把玩家移到攻城地圖內的安全位置（入口區）
       p.x = 200;
       p.y = 200;
@@ -11338,7 +11359,7 @@ function initCC2UI() {
       btn.dataset.classId = cid;
       btn.style.cursor = 'pointer';
       btn.title = detail.name + ' — 點擊選擇此職業';
-      // v2.3.3：使用職業頭像 icon，加上邊框強化可點擊性
+      // v2.3.4：使用職業頭像 icon，加上邊框強化可點擊性
       const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
       if (sp.useImg && sp.idle) {
         btn.innerHTML = `<img src="${portraitUrl}" alt="${detail.name}" 
@@ -11412,7 +11433,7 @@ function updateCC2Portrait() {
   if (!portraitEl) return;
   const cid = charCreateState.classId;
   const detail = CLASS_DETAIL[cid];
-  // v2.3.3：使用職業立繪真圖（portrait.jpg），不再用精靈圖當大立繪
+  // v2.3.4：使用職業立繪真圖（portrait.jpg），不再用精靈圖當大立繪
   const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
   
   portraitEl.innerHTML = `
@@ -11474,7 +11495,7 @@ function updateCC2TransformPreview() {
   const poolTf = TRANSFORM_POOL.find(t => t.id === tf.id);
   if (descEl) descEl.textContent = poolTf?.desc || '最強變身形態，全屬性大幅提升';
   
-  // v2.3.3：變身預覽使用 portrait 立繪真圖
+  // v2.3.4：變身預覽使用 portrait 立繪真圖
   if (spriteEl) {
     const portraitUrl = tf.portrait || (sp && sp.idle);
     if (portraitUrl) {
@@ -11776,7 +11797,7 @@ function showNationSelect() {
   });
 }
 
-// v2.3.3：舊創角模態 class-select-modal 已移除，統一使用 char-create-screen（羊皮紙樣式）
+// v2.3.4：舊創角模態 class-select-modal 已移除，統一使用 char-create-screen（羊皮紙樣式）
 
 // 金/紫變身新精靈圖（帶閃電冒煙效果）
 // ==================== 玩家渲染 ====================
@@ -12525,7 +12546,7 @@ function renderMapModal() {
       const warActive = GS.siegeWar && GS.siegeWar.status === 'active' && GS.siegeWar.castleId === map.castle && GS.siegeWar.endTime > Date.now();
       const current = GS.currentMap === map.id;
       const isSiege = true;
-      // v2.3.3：只有「等級不夠」才鎖定；宣戰狀態只影響是否顯示「戰鬥中」標籤
+      // v2.3.4：只有「等級不夠」才鎖定；宣戰狀態只影響是否顯示「戰鬥中」標籤
       // 玩家隨時可以進出攻城地圖（類似一般戰鬥地圖），戰鬥邏輯僅在戰爭期間生效
       const locked = !lvUnlocked;
       const card = buildMapCard(map, current, false, locked, isSiege);
@@ -24983,7 +25004,7 @@ window.addEventListener('load', function() {
   }
 });
 
-// v2.3.3：登出 / 換帳號時清空所有遊戲狀態
+// v2.3.4：登出 / 換帳號時清空所有遊戲狀態
 // 確保換帳號登入後只顯示該帳號從 server 取到的角色，A 帳角色不會殘留到 B 帳
 window.__clearGameState = function() {
   try {

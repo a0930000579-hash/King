@@ -1,6 +1,6 @@
 {
   "name": "monarch-blade",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "description": "君主之刃 - 暗黑奇幻天堂W風MMO放置養成",
   "main": "server/server.cjs",
   "scripts": {

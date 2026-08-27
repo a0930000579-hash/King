@@ -2190,6 +2190,11 @@
   transform: skewX(-20deg);
   animation: cc-btn-sweep 3s ease-in-out infinite;
 }
+.cc-btn-text {
+  position: relative;
+  z-index: 2;
+  display: inline-block;
+}
 .cc-create-parchment-btn:disabled .cc-btn-glow {
   display: none;
 }
