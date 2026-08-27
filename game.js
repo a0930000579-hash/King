@@ -42,7 +42,7 @@ function detectLocalAssets() {
 }
 
 // 是否「應該優先走 CDN」
-// v2.0.7：預設一律本地分類目錄優先，CDN 僅作最後 fallback
+// v2.0.8：預設一律本地分類目錄優先，CDN 僅作最後 fallback
 // 規範順序：assets/<分類>/<id>.png → assets/<id>.png → CDN
 // 例外：USE_CDN_FIRST 全域設為 true 時才反轉
 function _preferCdn() {
@@ -24697,6 +24697,20 @@ window.addEventListener('load', function() {
     AuthSystem.init();
     // 遊戲進入點由 AuthSystem 觸發
     window.onAuthReady = function(server) {
+      // v2.0.8 修復：若剛完成創角（auth.js 寫入 mmo_new_char），用其資料初始化
+      try {
+        const raw = localStorage.getItem('mmo_new_char');
+        if (raw) {
+          const nc = JSON.parse(raw);
+          if (nc.name) GS.player.name = nc.name;
+          if (nc.classId) GS.player.classId = nc.classId;
+          GS.player.created = true;
+          GS.player.level = nc.level || 1;
+          GS.player.exp = 0;
+          localStorage.removeItem('mmo_new_char');
+          console.log('[Auth] 新創角色載入:', GS.player.name, '/', GS.player.classId);
+        }
+      } catch (e) { console.warn('[Auth] 讀取新創角色失敗:', e); }
       // 從後端載入角色存檔（如果有）
       loadGame(); // 先讀 localStorage
       init();

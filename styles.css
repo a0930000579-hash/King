@@ -3562,20 +3562,7 @@ img { display: block; pointer-events: none; }
 /* ===== v2.0.4 底部導航文字icon ===== */
 .nav-icon-text {
   background: radial-gradient(circle at 50% 35%, #2a1d0e 0%, #120b05 70%, #0a0603 100%);
-  color: #e8c870;
-  font-size: 14px;
-  font-weight: 700;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-  letter-spacing: 0;
   position: relative;
-}
-.nav-icon-text::before {
-  content: attr(data-label);
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 .nav-icon-text.gacha {
   background: radial-gradient(circle at 50% 35%, #3d2460 0%, #1e1230 70%, #0f0818 100%);
