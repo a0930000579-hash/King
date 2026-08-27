@@ -37,9 +37,8 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2MB
-const DEV_PASSWORD = process.env.DEV_PASSWORD || 'owner2026';
 const GM_ACCOUNT = '19811013';
-const GM_PASSWORD = '19811013';
+const GM_PASSWORD = process.env.GM_PASSWORD || '19811013';
 
 // 確保 data 目錄存在
 if (!fs.existsSync(DATA_DIR)) {
@@ -97,9 +96,8 @@ function verifyToken(token) {
 
 // ========== 伺服器清單 ==========
 const SERVERS = [
-  { id: 'justice', name: '正義伺服器', desc: '新手推薦 · 和平環境', status: 'smooth', online: true },
-  { id: 'evil', name: '邪惡伺服器', desc: '高手雲集 · 自由 PVP', status: 'busy', online: true },
-  { id: 'chaos', name: '混亂伺服器', desc: '熱血對戰 · 滿員警戒', status: 'full', online: true },
+  { id: 'zeus', name: '宙斯', desc: '開放 · 順暢', status: 'smooth', online: true },
+  { id: 'hades', name: '黑帝斯', desc: '準備中 · 即將開放', status: 'maintain', online: false },
 ];
 
 // ========== 線上玩家狀態（Socket.IO 用） ==========
@@ -325,7 +323,7 @@ async function handleApi(req, res, pathname, query) {
   if (req.method === 'GET' && pathname === '/api/characters') {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
-    const serverId = query.server || 'justice';
+    const serverId = query.server || 'zeus';
     const accounts = loadJSON('accounts.json', {});
     const acc = accounts[accName];
     if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
@@ -350,7 +348,7 @@ async function handleApi(req, res, pathname, query) {
     const idxStr = pathname.slice('/api/characters/'.length);
     const idx = parseInt(idxStr);
     if (isNaN(idx)) return sendJson(res, 400, { error: '無效索引' });
-    const serverId = query.server || 'justice';
+    const serverId = query.server || 'zeus';
     const accounts = loadJSON('accounts.json', {});
     const acc = accounts[accName];
     if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
@@ -363,7 +361,7 @@ async function handleApi(req, res, pathname, query) {
   // 檢查角色名是否重複（同一伺服器全局唯一）
   if (req.method === 'GET' && pathname === '/api/characters/check-name') {
     const name = query.name || '';
-    const serverId = query.server || 'justice';
+    const serverId = query.server || 'zeus';
     if (!name) return sendJson(res, 400, { error: '名稱不可為空' });
     const accounts = loadJSON('accounts.json', {});
     let conflict = false;
@@ -384,7 +382,7 @@ async function handleApi(req, res, pathname, query) {
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     let body;
     try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
-    const serverId = body.serverId || 'justice';
+    const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx != null ? body.charIdx : 0;
     const saveData = body.saveData || {};
     const accounts = loadJSON('accounts.json', {});
@@ -425,14 +423,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, service: 'mmo-server', version: '2.0.0' });
   }
 
-  // === GM API ===
-  function verifyDevPassword(req, query, body) {
-    const pwd =
-      (req.headers && req.headers['x-dev-password']) ||
-      (query && query.pwd) ||
-      (body && body.pwd) || '';
-    return String(pwd) === DEV_PASSWORD;
-  }
+  // === GM API 驗證 ===
   function verifyGM(req) {
     const acc = getAuthAccount(req);
     if (!acc) return false;
@@ -442,18 +433,14 @@ async function handleApi(req, res, pathname, query) {
 
   // GET /api/bug-report/list
   if (req.method === 'GET' && (pathname === '/api/bug-report/list' || pathname === '/api/bug-report')) {
-    if (!verifyDevPassword(req, query, null) && !verifyGM(req)) {
-      return sendJson(res, 403, { error: 'unauthorized' });
-    }
+    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
     const list = loadJSON('bug-reports.json', []);
     return sendJson(res, 200, { ok: true, list });
   }
   // DELETE /api/bug-report/:id
   if (req.method === 'DELETE' && pathname.startsWith('/api/bug-report/')) {
     const id = decodeURIComponent(pathname.slice('/api/bug-report/'.length));
-    if (!verifyDevPassword(req, query, null) && !verifyGM(req)) {
-      return sendJson(res, 403, { error: 'unauthorized' });
-    }
+    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
     const list = loadJSON('bug-reports.json', []);
     const idx = list.findIndex(r => r.id === id);
     if (idx === -1) return sendJson(res, 404, { error: 'not found' });
@@ -465,9 +452,7 @@ async function handleApi(req, res, pathname, query) {
   if (req.method === 'POST' && pathname === '/api/bug-report/clear') {
     let body = {};
     try { body = await parseJsonBody(req); } catch (e) { /* ignore */ }
-    if (!verifyDevPassword(req, query, body) && !verifyGM(req)) {
-      return sendJson(res, 403, { error: 'unauthorized' });
-    }
+    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
     saveJSON('bug-reports.json', []);
     return sendJson(res, 200, { ok: true });
   }
@@ -497,6 +482,96 @@ async function handleApi(req, res, pathname, query) {
       if (targetSocket) targetSocket.disconnect(true);
     }
     return sendJson(res, 200, { ok: true });
+  }
+
+  // POST /api/gm/adjust - GM 調整資源(金幣/鑽石)等
+  if (req.method === 'POST' && pathname === '/api/gm/adjust') {
+    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const targetAccount = String(body.account || '');
+    const serverId = body.serverId || 'zeus';
+    const charIdx = body.charIdx != null ? parseInt(body.charIdx) : 0;
+    const action = body.action || ''; // addGold/setGold/addGem/setGem/setLevel/giveItem/teleport
+    const value = body.value;
+    const itemId = body.itemId;
+    const itemCount = body.count || 1;
+    const mapId = body.mapId;
+
+    const accounts = loadJSON('accounts.json', {});
+    const acc = accounts[targetAccount];
+    if (!acc) return sendJson(res, 404, { error: '帳號不存在' });
+    if (!acc.characters) acc.characters = {};
+    if (!acc.characters[serverId]) acc.characters[serverId] = [];
+    const saveData = acc.characters[serverId][charIdx] || {};
+
+    // 確保 resources 存在
+    if (!saveData.resources) saveData.resources = { gold: 0, gem: 0 };
+    if (!saveData.player) saveData.player = { level: 1 };
+    if (!saveData.inventory) saveData.inventory = [];
+
+    switch (action) {
+      case 'addGold':
+        saveData.resources.gold = (saveData.resources.gold || 0) + (parseInt(value) || 0);
+        break;
+      case 'setGold':
+        saveData.resources.gold = parseInt(value) || 0;
+        break;
+      case 'addGem':
+        saveData.resources.gem = (saveData.resources.gem || 0) + (parseInt(value) || 0);
+        break;
+      case 'setGem':
+        saveData.resources.gem = parseInt(value) || 0;
+        break;
+      case 'setLevel':
+        const lv = Math.max(1, Math.min(99, parseInt(value) || 1));
+        saveData.player.level = lv;
+        saveData.player.expMax = Math.floor(100 * Math.pow(1.3, lv - 1));
+        saveData.player.exp = 0;
+        break;
+      case 'giveItem':
+        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId' });
+        const inv = saveData.inventory;
+        let found = false;
+        for (let i = 0; i < inv.length; i++) {
+          if (inv[i] && inv[i].id === itemId && inv[i].stackable !== false) {
+            inv[i].count = (inv[i].count || 1) + (parseInt(itemCount) || 1);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          inv.push({
+            id: itemId,
+            name: itemId,
+            type: 'consumable',
+            itemType: 'consumable',
+            rarity: 'green',
+            count: parseInt(itemCount) || 1,
+          });
+        }
+        break;
+      case 'teleport':
+        if (mapId) saveData.currentMap = mapId;
+        break;
+      default:
+        return sendJson(res, 400, { error: '未知 action' });
+    }
+
+    acc.characters[serverId][charIdx] = saveData;
+    saveJSON('accounts.json', accounts);
+
+    // 若玩家線上，透過 socket 廣播 gm_update 通知客戶端刷新
+    if (io) {
+      for (const [sid, p] of onlinePlayers) {
+        if (p.account === targetAccount && p.serverId === serverId) {
+          io.to(sid).emit('gm_update', { action, value, itemId, count: itemCount, mapId });
+          break;
+        }
+      }
+    }
+
+    return sendJson(res, 200, { ok: true, action, resources: saveData.resources, level: saveData.player?.level });
   }
 
   return sendJson(res, 404, { error: 'not found' });
@@ -567,7 +642,7 @@ if (socketIoInstalled) {
         }
         player.mapId = data.mapId || 'village';
         player.channel = data.channel || 0;
-        if (!player.serverId) player.serverId = 'justice';
+        if (!player.serverId) player.serverId = 'zeus';
         socket.join('map:' + player.mapId);
 
         // 廣播給地圖內其他人
@@ -709,7 +784,10 @@ server.listen(PORT, () => {
   console.log('  服務位址: http://localhost:' + PORT);
   console.log('  資料目錄: ' + DATA_DIR);
   console.log('  多人連線: ' + (socketIoInstalled ? '已啟用 (Socket.IO)' : '未啟用 (單機模式)'));
-  console.log('  GM 帳號: ' + GM_ACCOUNT + ' / ' + GM_PASSWORD);
+  console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
+  if (GM_PASSWORD === '19811013') {
+    console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');
+  }
   console.log('  API:');
   console.log('    POST /api/auth/register       註冊');
   console.log('    POST /api/auth/login          登入');
