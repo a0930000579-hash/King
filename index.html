@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v2.3.4 · 本地化自足版</title>
+  <title>君主之刃 v2.3.0 · 本地化自足版</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1a0f05" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="assets/11_ui/apple-touch-icon.jpg" />
   <link rel="stylesheet" href="styles.css?v=2.3.0" />
   <link rel="stylesheet" href="auth.css?v=2.3.0" />
-  <!-- v2.3.4：移除外部字體CDN，使用系統字型確保離線可用 -->
+  <!-- v2.3.0：移除外部字體CDN，使用系統字型確保離線可用 -->
   <script src="lang.js?v=2.3.0"></script>
   <script src="assets/17_lib/jszip.min.js"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
@@ -113,7 +113,7 @@
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v2.3.4 · 美術與資料庫重構版</div>
+    <div class="splash-version">v2.3.0 · 美術與資料庫重構版</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->
@@ -136,15 +136,22 @@
           </div>
           <div class="atk-def-row">
             <span class="atk-def-item atk">
-              <span class="ad-icon-text" style="color:#ff8060;font-weight:700;font-size:12px">攻</span>
+              <svg class="ad-icon" viewBox="0 0 24 24" fill="none" stroke="#ff8060" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.5 17.5L3 6V3h3l11.5 11.5-3 3z"/>
+                <path d="M19 21l2-2-4-4"/>
+              </svg>
               <span id="mini-atk">18</span>
             </span>
             <span class="atk-def-item def">
-              <span class="ad-icon-text" style="color:#60b0ff;font-weight:700;font-size:12px">防</span>
+              <svg class="ad-icon" viewBox="0 0 24 24" fill="none" stroke="#60b0ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
               <span id="mini-def">12</span>
             </span>
             <span class="atk-def-item cp">
-              <span class="ad-icon-text cp-icon" style="color:#ffd860;font-weight:700;font-size:12px">戰</span>
+              <svg class="ad-icon cp-icon" viewBox="0 0 24 24" fill="none" stroke="#ffd860" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9"/>
+              </svg>
               <span id="cp-value">320</span>
             </span>
           </div>
@@ -176,7 +183,11 @@
       <!-- 左侧工具栏 + 選單按钮 -->
       <div class="side-tools left-tools">
         <button class="side-btn" id="menu-btn" title="選單">
-          <div class="side-btn-svg" style="font-size:14px;font-weight:700">≡</div>
+          <svg class="side-btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
         </button>
         <div class="buff-bar" id="buff-bar"></div>
       </div>
@@ -184,11 +195,18 @@
       <!-- 自動挂机按钮 -->
       <div class="auto-btn-wrap" id="auto-btn-wrap">
         <button class="auto-btn" id="auto-btn" style="margin:0">
-            <div class="auto-icon" style="font-size:14px;font-weight:700">⏱</div>
+          <div class="auto-icon">
+            <svg class="auto-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <polyline points="12 7 12 12 15 14"/>
+            </svg>
+          </div>
           <span class="auto-label" id="auto-label">自動</span>
         </button>
         <button class="auto-skill-btn" id="auto-skill-btn" title="自動技能：開啟後自動模式下技能CD好了自動施放">
-          <div class="auto-skill-svg" style="font-size:14px;font-weight:700">技</div>
+          <svg class="auto-skill-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
           <span class="auto-skill-label" id="auto-skill-label">自動技</span>
         </button>
       </div>
@@ -451,11 +469,11 @@
           <button class="modal-close" id="map-close">✕</button>
         </div>
         <div class="map-modal-body">
-          <div class="map-section-title">村 安全區域</div>
+          <div class="map-section-title">🏘 安全区域</div>
           <div class="map-list safe-list" id="safe-map-list"></div>
           <div class="map-section-title"><span style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:4px;"><img src="assets/equip/icon_sword.jpg" style="width:100%;height:100%;object-fit:contain;display:block;" alt=""/></span>戰鬥區域</div>
           <div class="map-list battle-list" id="battle-map-list"></div>
-          <div class="map-section-title">城 攻城區域</div>
+          <div class="map-section-title">🏰 攻城区域</div>
           <div class="map-list siege-list" id="siege-map-list"></div>
         </div>
       </div>
@@ -496,7 +514,7 @@
             <div class="castle-tower left"></div>
             <div class="castle-tower right"></div>
             <div class="castle-lord" id="castle-lord">
-              <div style="font-size:28px;font-weight:700;color:var(--gold-bright)">王</div>
+              <div style="font-size:32px">👑</div>
               <div class="castle-lord-name" id="castle-lord-name">城主</div>
             </div>
           </div>
@@ -764,7 +782,7 @@
             </div>
             <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">開啟後從本地 assets/ 資料夾讀取圖片，需重新整理生效</div>
             <button class="lang-btn" id="download-offline-btn" style="width:100%;padding:8px;font-size:12px;background:linear-gradient(180deg,#c9a24a,#7a5c1a);color:#fff;border:1px solid var(--gold);text-shadow:1px 1px 2px rgba(0,0,0,0.5)">
-              包 下載離線包
+              📦 下載離線包
             </button>
             <div id="offline-download-status" style="font-size:10px;color:var(--parchment-dark);margin-top:6px;text-align:center;display:none"></div>
           </div>
@@ -778,7 +796,7 @@
     </div>
 
     <!-- 职业選擇初始弹窗 -->
-    <!-- 角色創建介面（天堂經典樣式 / v2.3.4 唯一創角頁） -->
+    <!-- 角色創建介面（天堂經典樣式 / v2.3.0 唯一創角頁） -->
     <div class="char-create-screen hidden" id="char-create-screen">
       <div class="cc2-bg"></div>
       <div class="cc2-panel">

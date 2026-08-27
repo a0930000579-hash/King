@@ -8,12 +8,12 @@
  *   4. GM 後台 API
  *   5. Bug 回報 API（向後相容）
  *
- * 資料庫：預設 JSON 檔案（單機）；設 DATABASE_URL 環境變數則切換 Postgres（跨設備共享）
+ * 資料庫：JSON 檔案持久化（無需外部資料庫，輕量部署）
  *   - data/accounts.json  帳號資料
  *   - data/characters.json 角色存檔
  *   - data/bug-reports.json Bug 回報
  *
- * 啟動：node server/server.cjs（根目錄 npm start 亦可）
+ * 啟動：node server/server.cjs
  */
 
 const http = require('http');
@@ -45,7 +45,7 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// ========== 資料存儲層（v2.3.4：Postgres / JSON 自動切換） ==========
+// ========== 資料存儲層（v2.3.0：Postgres / JSON 自動切換） ==========
 const db = require('./db-layer.cjs');
 // 密碼雜湊
 function hashPassword(pwd) {
@@ -168,12 +168,8 @@ function serveStatic(req, res, pathname) {
   } catch (e) { /* ignore */ }
 
   if (!fs.existsSync(filePath)) {
-    // API 路徑 404 → 回 JSON；靜態頁 404 → 回 HTML
-    if (pathname.startsWith('/api/')) {
-      return sendJson(res, 404, { error: 'API Not Found' });
-    }
-    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><title>404</title></head><body>Not Found</body></html>');
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not Found');
     return;
   }
 
@@ -232,7 +228,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.3.4',
+      version: '2.3.0',
       time: Date.now(),
       socketIo: socketIoInstalled,
       dbBackend: db.getBackend(),
@@ -328,13 +324,17 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, characters: chars });
   }
 
-  // GET /api/characters/list?server=xxx（明確 list 路由，避免與 idx 衝突）
-  if (req.method === 'GET' && pathname === '/api/characters/list') {
+  // GET /api/characters/:idx?server=xxx
+  if (req.method === 'GET' && pathname.startsWith('/api/characters/')) {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
+    const idxStr = pathname.slice('/api/characters/'.length);
+    const idx = parseInt(idxStr);
+    if (isNaN(idx)) return sendJson(res, 400, { error: '無效索引' });
     const serverId = query.server || 'zeus';
-    const chars = await db.listCharacters(accName, serverId);
-    return sendJson(res, 200, { ok: true, characters: chars });
+    const saveData = await db.getCharacter(accName, serverId, idx);
+    if (!saveData) return sendJson(res, 404, { error: '角色不存在' });
+    return sendJson(res, 200, { ok: true, saveData });
   }
 
   // GET /api/characters/check-name?name=xxx&server=xxx
@@ -786,7 +786,7 @@ async function initGM() {
   await initGM();
   server.listen(PORT, () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.3.4 · 正式營運伺服器');
+    console.log('  君主之刃 v2.3.0 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://localhost:' + PORT);
     console.log('  資料後端: ' + db.getBackend());

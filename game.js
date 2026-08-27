@@ -323,21 +323,13 @@ function assetUrl(id) {
     if (mpath.startsWith('assets/')) return mpath;
     return 'assets/' + mpath;
   }
-  // v2.3.4：若 manifest 已載入但此 id 不存在 → 視為棄用 hash / 未使用單位
+  // v2.3.0：若 manifest 已載入但此 id 不存在 → 視為棄用 hash / 未使用單位
   // 直接返回空字串，避免產生 404。只有新路徑格式（含 / 的語意路徑）才會 fallback 到直接拼接
   if (ASSETS_MANIFEST_LOADED && ASSETS_MANIFEST) {
     if (pureId.indexOf('/') === -1) {
       // 純 hash（無路徑分隔）且不在 manifest → 棄用，返回空
       return '';
     }
-  }
-  // v2.3.4：語意路徑優先走 manifest；若不在 manifest，嘗試 jpg/png 並以 manifest 結果為準
-  // 對於有 / 的語意路徑，優先嘗試 .jpg（多數美術圖為 jpg），其次 .png
-  if (id.indexOf('/') !== -1) {
-    // 有副檔名 → 直接拼接
-    if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
-    // 沒副檔名 → 先嘗試 .jpg（多數美術資源），fallback 到 .png（onerror 鏈接續）
-    return 'assets/' + pureId + '.jpg';
   }
   const cat = getSpriteCategory(pureId);
   if (cat) return 'assets/' + cat + '/' + pureId + '.png';
@@ -408,26 +400,13 @@ function handleImgError(img) {
   }
 
   // 已經走過 CDN 還是失敗 → 最終 fallback
-  // v2.3.4：不再隱藏圖片，改為顯示暗色漸層+文字兜底，絕不出現藍底問號或原生破圖
   if (img.dataset.errFallback === 'cdn') {
     img.dataset.errFallback = 'fail';
-    // 隱藏自身，但父層加上帶名稱的漸層占位
     img.style.visibility = 'hidden';
     img.style.opacity = '0';
     if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
       img.parentElement.dataset.imgErrorBg = '1';
-      const name = img.alt || img.dataset.unitName || '';
-      const initial = name ? name.charAt(0) : '';
-      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(80,60,40,0.85), rgba(20,15,10,0.95) 75%)';
-      // 若父層還沒有兜底文字，加一個
-      if (!img.parentElement.querySelector('.img-fallback-text')) {
-        const fb = document.createElement('div');
-        fb.className = 'img-fallback-text';
-        fb.textContent = initial || '◆';
-        fb.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(210,180,120,0.6);font-size:24px;font-weight:700;pointer-events:none;letter-spacing:1px;';
-        img.parentElement.style.position = img.parentElement.style.position || 'relative';
-        img.parentElement.appendChild(fb);
-      }
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
     }
     return;
   }
@@ -715,149 +694,145 @@ const SPRITE = {
   // ========== 變身形態（8幀完整動畫） ==========
   // ---------- 金色神話 ----------
   death_knight: {
-    idle: assetUrl('transform/gold/death_knight/idle'),
-    walk: assetUrl('transform/gold/death_knight/walk_down'),
-    walk2: assetUrl('transform/gold/death_knight/walk_side'),
-    walk3: assetUrl('transform/gold/death_knight/walk_up'),
-    walk4: assetUrl('transform/gold/death_knight/walk_side'),
-    attack: assetUrl('transform/gold/death_knight/attack_1'),
-    attack2: assetUrl('transform/gold/death_knight/attack_2'),
-    attack3: assetUrl('transform/gold/death_knight/attack_3'),
-    hit: assetUrl('transform/gold/death_knight/attack_3'),
+    idle: assetUrl('transform/gold/death_knight/down'),
+    walk: assetUrl('transform/gold/death_knight/down'),
+    walk2: assetUrl('transform/gold/death_knight/side'),
+    walk3: assetUrl('transform/gold/death_knight/up'),
+    walk4: assetUrl('transform/gold/death_knight/side'),
+    attack: assetUrl('transform/gold/death_knight/attack'),
+    attack2: assetUrl('transform/gold/death_knight/attack'),
+    hit: assetUrl('transform/gold/death_knight/attack'),
     color: '#44aaff', glow: '#66ccff', useImg: true,
     multiFrame: true, coverMode: true,
-    slashColor: '#60ff80', eightFrame: true,
+    slashColor: '#60ff80',
   },
   ishti: {
-    idle: assetUrl('transform/gold/ishti/idle'),
-    walk: assetUrl('transform/gold/ishti/walk_down'),
-    walk2: assetUrl('transform/gold/ishti/walk_side'),
-    walk3: assetUrl('transform/gold/ishti/walk_up'),
-    walk4: assetUrl('transform/gold/ishti/walk_side'),
-    attack: assetUrl('transform/gold/ishti/attack_1'),
-    attack2: assetUrl('transform/gold/ishti/attack_2'),
-    attack3: assetUrl('transform/gold/ishti/attack_3'),
-    hit: assetUrl('transform/gold/ishti/attack_3'),
+    idle: assetUrl('transform/gold/ishti/down'),
+    walk: assetUrl('transform/gold/ishti/down'),
+    walk2: assetUrl('transform/gold/ishti/side'),
+    walk3: assetUrl('transform/gold/ishti/up'),
+    walk4: assetUrl('transform/gold/ishti/side'),
+    attack: assetUrl('transform/gold/ishti/attack'),
+    attack2: assetUrl('transform/gold/ishti/attack'),
+    hit: assetUrl('transform/gold/ishti/attack'),
     color: '#88ccff', glow: '#aaeeff', useImg: true,
     multiFrame: true, coverMode: true,
-    slashColor: '#a0ffd0', eightFrame: true,
+    slashColor: '#a0ffd0',
   },
   reya: {
-    idle: assetUrl('transform/gold/reya/idle'),
-    walk: assetUrl('transform/gold/reya/walk_down'),
-    walk2: assetUrl('transform/gold/reya/walk_side'),
-    walk3: assetUrl('transform/gold/reya/walk_up'),
-    walk4: assetUrl('transform/gold/reya/walk_side'),
-    attack: assetUrl('transform/gold/reya/attack_1'),
-    attack2: assetUrl('transform/gold/reya/attack_2'),
-    attack3: assetUrl('transform/gold/reya/attack_3'),
-    hit: assetUrl('transform/gold/reya/attack_3'),
+    idle: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk2: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk3: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk4: assetUrl('transform/gold/reya/portrait.jpg'),
+    attack: assetUrl('transform/gold/reya/portrait.jpg'),
+    attack2: assetUrl('transform/gold/reya/portrait.jpg'),
+    hit: assetUrl('transform/gold/reya/portrait.jpg'),
     color: '#aa44ff', glow: '#cc66ff', useImg: true,
     multiFrame: true, coverMode: true,
-    slashColor: '#ff90c0', eightFrame: true,
+    slashColor: '#ff90c0',
   },
   baphomet: {
-    idle: assetUrl('transform/gold/baphomet/idle'),
-    walk: assetUrl('transform/gold/baphomet/walk_down'),
-    walk2: assetUrl('transform/gold/baphomet/walk_side'),
-    walk3: assetUrl('transform/gold/baphomet/walk_up'),
-    walk4: assetUrl('transform/gold/baphomet/walk_side'),
-    attack: assetUrl('transform/gold/baphomet/attack_1'),
-    attack2: assetUrl('transform/gold/baphomet/attack_2'),
-    attack3: assetUrl('transform/gold/baphomet/attack_3'),
-    hit: assetUrl('transform/gold/baphomet/attack_3'),
+    idle: assetUrl('transform/gold/baphomet/down'),
+    walk: assetUrl('transform/gold/baphomet/down'),
+    walk2: assetUrl('transform/gold/baphomet/side'),
+    walk3: assetUrl('transform/gold/baphomet/up'),
+    walk4: assetUrl('transform/gold/baphomet/side'),
+    attack: assetUrl('transform/gold/baphomet/attack'),
+    attack2: assetUrl('transform/gold/baphomet/attack'),
+    hit: assetUrl('transform/gold/baphomet/attack'),
     color: '#ff4400', glow: '#ff6600', useImg: true,
     multiFrame: true, coverMode: true,
-    slashColor: '#c080ff', eightFrame: true,
+    slashColor: '#c080ff',
   },
   // ---------- 紫色傳說 ----------
   demon_hunter: {
-    idle: assetUrl('transform/purple/demon_hunter/idle'),
-    walk: assetUrl('transform/purple/demon_hunter/walk_down'),
-    walk2: assetUrl('transform/purple/demon_hunter/walk_side'),
-    walk3: assetUrl('transform/purple/demon_hunter/walk_up'),
-    walk4: assetUrl('transform/purple/demon_hunter/walk_side'),
-    attack: assetUrl('transform/purple/demon_hunter/attack_1'),
-    attack2: assetUrl('transform/purple/demon_hunter/attack_2'),
-    hit: assetUrl('transform/purple/demon_hunter/attack_3'),
+    idle: assetUrl('qWnNUVJHjt'),
+    walk: assetUrl('qWnNUVJHjt'),
+    walk2: assetUrl('GQiVtSUkGM'),
+    walk3: assetUrl('xF49Pin6zA'),
+    walk4: assetUrl('1UZKpoQt4D'),
+    attack: assetUrl('jMG2E9M5GC'),
+    attack2: assetUrl('yALOugPi8M'),
+    hit: assetUrl('bx9Mhx02ok'),
     color: '#cc2222', glow: '#ff4444', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff8060',
   },
   illusionist: {
-    idle: assetUrl('transform/purple/illusionist/idle'),
-    walk: assetUrl('transform/purple/illusionist/walk_down'),
-    walk2: assetUrl('transform/purple/illusionist/walk_side'),
-    walk3: assetUrl('transform/purple/illusionist/walk_up'),
-    walk4: assetUrl('transform/purple/illusionist/walk_side'),
-    attack: assetUrl('transform/purple/illusionist/attack_1'),
-    attack2: assetUrl('transform/purple/illusionist/attack_2'),
-    hit: assetUrl('transform/purple/illusionist/attack_3'),
+    idle: assetUrl('class/illusionist/portrait.jpg'),
+    walk: assetUrl('class/illusionist/portrait.jpg'),
+    walk2: assetUrl('class/illusionist/portrait.jpg'),
+    walk3: assetUrl('class/illusionist/portrait.jpg'),
+    walk4: assetUrl('class/illusionist/portrait.jpg'),
+    attack: assetUrl('class/illusionist/portrait.jpg'),
+    attack2: assetUrl('class/illusionist/portrait.jpg'),
+    hit: assetUrl('class/illusionist/portrait.jpg'),
     color: '#22ccaa', glow: '#44eebb', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0a0ff',
   },
   anubis: {
-    idle: assetUrl('transform/purple/anubis/idle'),
-    walk: assetUrl('transform/purple/anubis/walk_down'),
-    walk2: assetUrl('transform/purple/anubis/walk_side'),
-    walk3: assetUrl('transform/purple/anubis/walk_up'),
-    walk4: assetUrl('transform/purple/anubis/walk_side'),
-    attack: assetUrl('transform/purple/anubis/attack_1'),
-    attack2: assetUrl('transform/purple/anubis/attack_2'),
-    hit: assetUrl('transform/purple/anubis/attack_3'),
+    idle: assetUrl('uWVpLtw83e'),
+    walk: assetUrl('uWVpLtw83e'),
+    walk2: assetUrl('cYtJbElVs8'),
+    walk3: assetUrl('cVrwZiXkl0'),
+    walk4: assetUrl('gWHXi4D2KR'),
+    attack: assetUrl('yT0VMafbdE'),
+    attack2: assetUrl('UG62bf0JNu'),
+    hit: assetUrl('3pD82uqAfo'),
     color: '#ddaa22', glow: '#ffcc44', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffd880',
   },
   chaos_knight: {
-    idle: assetUrl('transform/purple/chaos_knight/idle'),
-    walk: assetUrl('transform/purple/chaos_knight/walk_down'),
-    walk2: assetUrl('transform/purple/chaos_knight/walk_side'),
-    walk3: assetUrl('transform/purple/chaos_knight/walk_up'),
-    walk4: assetUrl('transform/purple/chaos_knight/walk_side'),
-    attack: assetUrl('transform/purple/chaos_knight/attack_1'),
-    attack2: assetUrl('transform/purple/chaos_knight/attack_2'),
-    hit: assetUrl('transform/purple/chaos_knight/attack_3'),
+    idle: assetUrl('dgZiU5ybp0'),
+    walk: assetUrl('dgZiU5ybp0'),
+    walk2: assetUrl('tXJSEwWVsy'),
+    walk3: assetUrl('yV45js1CzO'),
+    walk4: assetUrl('GmhHzyM35a'),
+    attack: assetUrl('1zfYw9YO2l'),
+    attack2: assetUrl('JwUkzb2ULU'),
+    hit: assetUrl('9QIYbWxUek'),
     color: '#cc1111', glow: '#ff3333', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c06060',
   },
   shadow_assassin: {
-    idle: assetUrl('transform/purple/shadow_assassin/idle'),
-    walk: assetUrl('transform/purple/shadow_assassin/walk_down'),
-    walk2: assetUrl('transform/purple/shadow_assassin/walk_side'),
-    walk3: assetUrl('transform/purple/shadow_assassin/walk_up'),
-    walk4: assetUrl('transform/purple/shadow_assassin/walk_side'),
-    attack: assetUrl('transform/purple/shadow_assassin/attack_1'),
-    attack2: assetUrl('transform/purple/shadow_assassin/attack_2'),
-    hit: assetUrl('transform/purple/shadow_assassin/attack_3'),
+    idle: assetUrl('Qt3jPiUHWB'),
+    walk: assetUrl('Qt3jPiUHWB'),
+    walk2: assetUrl('iLLSI4Ugp4'),
+    walk3: assetUrl('z29DBTuv6u'),
+    walk4: assetUrl('BBIRZaDf3w'),
+    attack: assetUrl('XELd2NyONv'),
+    attack2: assetUrl('KnhgNV0Vpg'),
+    hit: assetUrl('wYvHwdI66x'),
     color: '#8822cc', glow: '#aa44ee', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#8080d0',
   },
   holy_envoy: {
-    idle: assetUrl('transform/purple/holy_envoy/idle'),
-    walk: assetUrl('transform/purple/holy_envoy/walk_down'),
-    walk2: assetUrl('transform/purple/holy_envoy/walk_side'),
-    walk3: assetUrl('transform/purple/holy_envoy/walk_up'),
-    walk4: assetUrl('transform/purple/holy_envoy/walk_side'),
-    attack: assetUrl('transform/purple/holy_envoy/attack_1'),
-    attack2: assetUrl('transform/purple/holy_envoy/attack_2'),
-    hit: assetUrl('transform/purple/holy_envoy/attack_3'),
+    idle: assetUrl('MV7BqtB99J'),
+    walk: assetUrl('MV7BqtB99J'),
+    walk2: assetUrl('VG3McWxGjS'),
+    walk3: assetUrl('QhpgNeRnxD'),
+    walk4: assetUrl('AabmhFFskx'),
+    attack: assetUrl('xisa2l3L81'),
+    attack2: assetUrl('fsRV73Zlc2'),
+    hit: assetUrl('tRzhWyINkC'),
     color: '#ffdd44', glow: '#ffee88', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   divine_envoy: {
-    idle: assetUrl('transform/purple/divine_envoy/idle'),
-    walk: assetUrl('transform/purple/divine_envoy/walk_down'),
-    walk2: assetUrl('transform/purple/divine_envoy/walk_side'),
-    walk3: assetUrl('transform/purple/divine_envoy/walk_up'),
-    walk4: assetUrl('transform/purple/divine_envoy/walk_side'),
-    attack: assetUrl('transform/purple/divine_envoy/attack_1'),
-    attack2: assetUrl('transform/purple/divine_envoy/attack_2'),
-    hit: assetUrl('transform/purple/divine_envoy/attack_3'),
+    idle: assetUrl('wbVe3TL0Us'),
+    walk: assetUrl('wbVe3TL0Us'),
+    walk2: assetUrl('zwacAmuGuC'),
+    walk3: assetUrl('vt1sWuAPjU'),
+    walk4: assetUrl('2UJcZM4bVX'),
+    attack: assetUrl('8KkfFpRmlG'),
+    attack2: assetUrl('cn1JRTsp1r'),
+    hit: assetUrl('w9NoGKlwkf'),
     color: '#ffffff', glow: '#ffffaa', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#fff8d0',
@@ -1775,85 +1750,85 @@ const SPRITE = {
   },
   // ========== 真系列金變（8 幀動畫） ==========
   t_true_death_knight: {
-    idle:    assetUrl('transform/gold/true_death_knight/idle'),
-    walk:    assetUrl('transform/gold/true_death_knight/walk_down'),
-    walk2:   assetUrl('transform/gold/true_death_knight/walk_side'),
-    walk3:   assetUrl('transform/gold/true_death_knight/walk_up'),
-    walk4:   assetUrl('transform/gold/true_death_knight/walk_side'),
-    attack:  assetUrl('transform/gold/true_death_knight/attack_1'),
-    attack2: assetUrl('transform/gold/true_death_knight/attack_2'),
-    attack3: assetUrl('transform/gold/true_death_knight/attack_3'),
-    hit:     assetUrl('transform/gold/true_death_knight/attack_3'),
+    idle:    assetUrl('R00axCfBpj'),
+    walk:    assetUrl('gReueVbraV'),
+    walk2:   assetUrl('NvUjJpgNau'),
+    walk3:   assetUrl('RBcRgmVnXr'),
+    walk4:   assetUrl('gReueVbraV'),
+    attack:  assetUrl('wpxuawrVCV'),
+    attack2: assetUrl('Uy34UUhRLV'),
+    attack3: assetUrl('KrBsZ5am4a'),
+    hit:     assetUrl('KrBsZ5am4a'),
     color: '#202020', glow: '#ffd700', useImg: true,
     multiFrame: true, coverMode: true, eightFrame: true,
     slashColor: '#ffd700', trueGold: true,
   },
   t_true_death_mage: {
-    idle:    assetUrl('transform/gold/true_death_mage/idle'),
-    walk:    assetUrl('transform/gold/true_death_mage/walk_down'),
-    walk2:   assetUrl('transform/gold/true_death_mage/walk_side'),
-    walk3:   assetUrl('transform/gold/true_death_mage/walk_up'),
-    walk4:   assetUrl('transform/gold/true_death_mage/walk_side'),
-    attack:  assetUrl('transform/gold/true_death_mage/attack_1'),
-    attack2: assetUrl('transform/gold/true_death_mage/attack_2'),
-    attack3: assetUrl('transform/gold/true_death_mage/attack_3'),
-    hit:     assetUrl('transform/gold/true_death_mage/attack_3'),
+    idle:    assetUrl('VethpE7HTK'),
+    walk:    assetUrl('Y1LvxRAKVX'),
+    walk2:   assetUrl('FknXIoGH7m'),
+    walk3:   assetUrl('BNueAO9UiJ'),
+    walk4:   assetUrl('VethpE7HTK'),
+    attack:  assetUrl('mzfq8TKq4x'),
+    attack2: assetUrl('SOUyJPF1a4'),
+    attack3: assetUrl('dhRCyjwjXd'),
+    hit:     assetUrl('VethpE7HTK'),
     color: '#201030', glow: '#ffd700', useImg: true,
     multiFrame: true, coverMode: true, eightFrame: true,
     slashColor: '#80c0ff', trueGold: true,
   },
   t_true_death_archer: {
-    idle:    assetUrl('transform/gold/true_death_archer/idle'),
-    walk:    assetUrl('transform/gold/true_death_archer/walk_down'),
-    walk2:   assetUrl('transform/gold/true_death_archer/walk_side'),
-    walk3:   assetUrl('transform/gold/true_death_archer/walk_up'),
-    walk4:   assetUrl('transform/gold/true_death_archer/walk_side'),
-    attack:  assetUrl('transform/gold/true_death_archer/attack_1'),
-    attack2: assetUrl('transform/gold/true_death_archer/attack_2'),
-    attack3: assetUrl('transform/gold/true_death_archer/attack_3'),
-    hit:     assetUrl('transform/gold/true_death_archer/attack_3'),
+    idle:    assetUrl('rVWKSw3VY3'),
+    walk:    assetUrl('hARxvrASWY'),
+    walk2:   assetUrl('14exjSZWW4'),
+    walk3:   assetUrl('dkI8y3JSa8'),
+    walk4:   assetUrl('rVWKSw3VY3'),
+    attack:  assetUrl('tIFfmNcsAK'),
+    attack2: assetUrl('VpFGcBGsio'),
+    attack3: assetUrl('uVxyoSmBMS'),
+    hit:     assetUrl('rVWKSw3VY3'),
     color: '#102010', glow: '#ffd700', useImg: true,
     multiFrame: true, coverMode: true, eightFrame: true,
     slashColor: '#c0ff80', trueGold: true,
   },
   t_true_death_assassin: {
-    idle:    assetUrl('transform/gold/true_death_assassin/idle'),
-    walk:    assetUrl('transform/gold/true_death_assassin/walk_down'),
-    walk2:   assetUrl('transform/gold/true_death_assassin/walk_side'),
-    walk3:   assetUrl('transform/gold/true_death_assassin/walk_up'),
-    walk4:   assetUrl('transform/gold/true_death_assassin/walk_side'),
-    attack:  assetUrl('transform/gold/true_death_assassin/attack_1'),
-    attack2: assetUrl('transform/gold/true_death_assassin/attack_2'),
-    attack3: assetUrl('transform/gold/true_death_assassin/attack_3'),
-    hit:     assetUrl('transform/gold/true_death_assassin/attack_3'),
+    idle:    assetUrl('wk8blv3H1y'),
+    walk:    assetUrl('pKWI45mDye'),
+    walk2:   assetUrl('O6IPrYZZPE'),
+    walk3:   assetUrl('PQCWH5S0nt'),
+    walk4:   assetUrl('wk8blv3H1y'),
+    attack:  assetUrl('2Jh1KzopT9'),
+    attack2: assetUrl('DwH0XNy4cM'),
+    attack3: assetUrl('UTRwvn4Jvu'),
+    hit:     assetUrl('wk8blv3H1y'),
     color: '#101010', glow: '#ffd700', useImg: true,
     multiFrame: true, coverMode: true, eightFrame: true,
     slashColor: '#ff80c0', trueGold: true,
   },
   t_true_death_sorcerer: {
-    idle:    assetUrl('transform/gold/true_death_sorcerer/idle'),
-    walk:    assetUrl('transform/gold/true_death_sorcerer/walk_down'),
-    walk2:   assetUrl('transform/gold/true_death_sorcerer/walk_side'),
-    walk3:   assetUrl('transform/gold/true_death_sorcerer/walk_up'),
-    walk4:   assetUrl('transform/gold/true_death_sorcerer/walk_side'),
-    attack:  assetUrl('transform/gold/true_death_sorcerer/attack_1'),
-    attack2: assetUrl('transform/gold/true_death_sorcerer/attack_2'),
-    attack3: assetUrl('transform/gold/true_death_sorcerer/attack_3'),
-    hit:     assetUrl('transform/gold/true_death_sorcerer/attack_3'),
+    idle:    assetUrl('zj8RfqmcjX'),
+    walk:    assetUrl('hnzd6J8WBV'),
+    walk2:   assetUrl('RlqyeyACqE'),
+    walk3:   assetUrl('2SSEb3jbgH'),
+    walk4:   assetUrl('zj8RfqmcjX'),
+    attack:  assetUrl('alr9iCtgLt'),
+    attack2: assetUrl('r0Wr3RU7yy'),
+    attack3: assetUrl('NDVG5UKea8'),
+    hit:     assetUrl('zj8RfqmcjX'),
     color: '#301020', glow: '#ffd700', useImg: true,
     multiFrame: true, coverMode: true, eightFrame: true,
     slashColor: '#ff8080', trueGold: true,
   },
   t_true_fallen_paladin: {
-    idle:    assetUrl('transform/gold/true_fallen_paladin/idle'),
-    walk:    assetUrl('transform/gold/true_fallen_paladin/walk_down'),
-    walk2:   assetUrl('transform/gold/true_fallen_paladin/walk_side'),
-    walk3:   assetUrl('transform/gold/true_fallen_paladin/walk_up'),
-    walk4:   assetUrl('transform/gold/true_fallen_paladin/walk_side'),
-    attack:  assetUrl('transform/gold/true_fallen_paladin/attack_1'),
-    attack2: assetUrl('transform/gold/true_fallen_paladin/attack_2'),
-    attack3: assetUrl('transform/gold/true_fallen_paladin/attack_3'),
-    hit:     assetUrl('transform/gold/true_fallen_paladin/attack_3'),
+    idle:    assetUrl('wzctdAamJe'),
+    walk:    assetUrl('qbFuvtVA9u'),
+    walk2:   assetUrl('jp4p2wZowU'),
+    walk3:   assetUrl('uTgkHlHwHz'),
+    walk4:   assetUrl('wzctdAamJe'),
+    attack:  assetUrl('wfO5BlbYRQ'),
+    attack2: assetUrl('rUzaQp8hjo'),
+    attack3: assetUrl('osb6zySMtJ'),
+    hit:     assetUrl('wzctdAamJe'),
     color: '#301020', glow: '#ffd700', useImg: true,
     multiFrame: true, coverMode: true, eightFrame: true,
     slashColor: '#ffc040', trueGold: true,
@@ -3483,7 +3458,7 @@ function spriteHTML(key, opts = {}) {
   if (state === 'dead') {
     // 死亡：顯示墳墓，原角色淡出
     return `<div class="${classes}" style="width:${size}px;height:${size}px">
-      <div class="sprite-tomb" style="font-size:${Math.floor(size * 0.7)}px">墓</div>
+      <div class="sprite-tomb" style="font-size:${Math.floor(size * 0.7)}px">🪦</div>
     </div>`;
   }
 
@@ -3513,7 +3488,7 @@ function spriteEmojiHTML(spriteObj, size = 40) {
   }
   const fs = Math.floor(size * 0.75);
   const filter = `drop-shadow(0 0 4px ${s.glow || '#ffe090'}) drop-shadow(0 2px 2px rgba(0,0,0,0.8))`;
-  return `<div class="sprite-emoji-ui" style="width:${size}px;height:${size}px;font-size:${fs}px;color:${s.color || '#c0a060'};filter:${filter};display:flex;align-items:center;justify-content:center">${s.idle || '技'}</div>`;
+  return `<div class="sprite-emoji-ui" style="width:${size}px;height:${size}px;font-size:${fs}px;color:${s.color || '#c0a060'};filter:${filter};display:flex;align-items:center;justify-content:center">${s.idle || '⚔️'}</div>`;
 }
 
 // 秒数格式化为 mm:ss 或 h:mm:ss
@@ -3594,7 +3569,7 @@ function openQuickBarSettings() {
   const consumables = (GS.inventory || []).filter(i => i.itemType === 'consumable' && i.count > 0);
   list.innerHTML = GS.quickBar.map((slot, idx) => {
     const slotName = slot
-      ? (slot.type === 'skill' ? `劍 ${allSkills[slot.skillIndex]?.name || '技能'}` : `藥 ${slot.itemId}`)
+      ? (slot.type === 'skill' ? `⚔ ${allSkills[slot.skillIndex]?.name || '技能'}` : `🧪 ${slot.itemId}`)
       : '（空）';
     return `
       <div class="quickbar-setting-row" data-slot="${idx}">
@@ -3833,7 +3808,7 @@ function openQuickBarPicker(slotIdx) {
     <div class="quickbar-picker" id="quickbar-picker">
       <div class="quickbar-picker-header">
         <span>設定快捷栏 ${slotIdx + 1} 号格</span>
-        <button class="qb-picker-close" id="qb-picker-close">×</button>
+        <button class="qb-picker-close" id="qb-picker-close">✕</button>
       </div>
       <div class="qb-picker-section">
         <div class="qb-picker-title">技能</div>
@@ -3934,16 +3909,16 @@ const CLASSES = {
     sprite: SPRITE.warrior, atkType: 'melee',
     baseStats: { atk: 18, def: 12, hpMax: 260, mpMax: 80, crit: 4, critDmg: 150 },
     allSkills: [
-      { id: 'normal',   name: '普通攻擊', icon: '劍擊', cd: 0,    type: 'single', dmgMult: 1,    effect: 'slash', learnLevel: 1, category: 'basic' },
-      { id: 'charge',   name: '衝鋒斬',   icon: '刺擊', cd: 5,    type: 'single', dmgMult: 1.8,  effect: 'slash', range: 100, desc: '衝向敵人造成180%傷害', learnLevel: 1, category: 'attack' },
-      { id: 'whirl',    name: '旋風斬',   icon: '旋風', cd: 8,    type: 'aoe',    dmgMult: 1.2,  effect: 'whirlwind', aoeRadius: 50, desc: '周圍敵人受到120%傷害', learnLevel: 5, category: 'aoe' },
-      { id: 'warcry',   name: '戰吼',     icon: '戰吼', cd: 20,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '提升攻擊30%持續10秒', learnLevel: 10, category: 'buff' },
-      { id: 'shield',   name: '盾擊',     icon: '盾擊', cd: 7,    type: 'single', dmgMult: 1.3,  effect: 'slash', desc: '盾牌猛擊造成130%傷害並眩暈1秒', learnLevel: 15, category: 'control' },
-      { id: 'bash',     name: '致命一擊', icon: '爆擊', cd: 12,   type: 'single', dmgMult: 2.5,  effect: 'slash', desc: '造成250%暴擊傷害', learnLevel: 25, category: 'attack' },
-      { id: 'stomp',    name: '震地擊',   icon: '震擊', cd: 14,   type: 'aoe',    dmgMult: 1.5,  effect: 'whirlwind', aoeRadius: 60, desc: '震擊地面造成範圍傷害並減速', learnLevel: 35, category: 'aoe' },
-      { id: 'rage',     name: '狂暴',     icon: '烈焰', cd: 30,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '攻擊+50%防禦-20%持續15秒', learnLevel: 50, category: 'buff' },
-      { id: 'execute',  name: '斬殺',     icon: '劍擊', cd: 18,   type: 'single', dmgMult: 3,    effect: 'slash', desc: '目標血量低於30%時造成300%傷害', learnLevel: 65, category: 'attack' },
-      { id: 'swordstorm', name: '劍刃風暴', icon: '風暴', cd: 40, type: 'aoe',    dmgMult: 2,    effect: 'whirlwind', aoeRadius: 80, desc: '召喚劍刃風暴造成200%範圍傷害', learnLevel: 80, category: 'aoe' },
+      { id: 'normal',   name: '普通攻擊', icon: '⚔️', cd: 0,    type: 'single', dmgMult: 1,    effect: 'slash', learnLevel: 1, category: 'basic' },
+      { id: 'charge',   name: '衝鋒斬',   icon: '🗡️', cd: 5,    type: 'single', dmgMult: 1.8,  effect: 'slash', range: 100, desc: '衝向敵人造成180%傷害', learnLevel: 1, category: 'attack' },
+      { id: 'whirl',    name: '旋風斬',   icon: '🌀', cd: 8,    type: 'aoe',    dmgMult: 1.2,  effect: 'whirlwind', aoeRadius: 50, desc: '周圍敵人受到120%傷害', learnLevel: 5, category: 'aoe' },
+      { id: 'warcry',   name: '戰吼',     icon: '📣', cd: 20,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '提升攻擊30%持續10秒', learnLevel: 10, category: 'buff' },
+      { id: 'shield',   name: '盾擊',     icon: '🛡️', cd: 7,    type: 'single', dmgMult: 1.3,  effect: 'slash', desc: '盾牌猛擊造成130%傷害並眩暈1秒', learnLevel: 15, category: 'control' },
+      { id: 'bash',     name: '致命一擊', icon: '💥', cd: 12,   type: 'single', dmgMult: 2.5,  effect: 'slash', desc: '造成250%暴擊傷害', learnLevel: 25, category: 'attack' },
+      { id: 'stomp',    name: '震地擊',   icon: '💢', cd: 14,   type: 'aoe',    dmgMult: 1.5,  effect: 'whirlwind', aoeRadius: 60, desc: '震擊地面造成範圍傷害並減速', learnLevel: 35, category: 'aoe' },
+      { id: 'rage',     name: '狂暴',     icon: '🔥', cd: 30,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '攻擊+50%防禦-20%持續15秒', learnLevel: 50, category: 'buff' },
+      { id: 'execute',  name: '斬殺',     icon: '⚔️', cd: 18,   type: 'single', dmgMult: 3,    effect: 'slash', desc: '目標血量低於30%時造成300%傷害', learnLevel: 65, category: 'attack' },
+      { id: 'swordstorm', name: '劍刃風暴', icon: '🌪️', cd: 40, type: 'aoe',    dmgMult: 2,    effect: 'whirlwind', aoeRadius: 80, desc: '召喚劍刃風暴造成200%範圍傷害', learnLevel: 80, category: 'aoe' },
     ],
     skillBar: [0, 1, 2, 3, 4, 5, 6, 7],
     skillPoints: 0,
@@ -3953,16 +3928,16 @@ const CLASSES = {
     sprite: SPRITE.mage, atkType: 'ranged',
     baseStats: { atk: 22, def: 3, hpMax: 150, mpMax: 180, crit: 10, critDmg: 160 },
     allSkills: [
-      { id: 'normal',   name: '魔彈術',   icon: '魔彈',  cd: 0,    type: 'single', dmgMult: 1,    effect: 'fireball', learnLevel: 1, category: 'basic' },
-      { id: 'fireball', name: '火球術',   icon: '烈焰', cd: 4,    type: 'single', dmgMult: 2,    effect: 'fireball', range: 140, desc: '發射火球造成200%傷害', learnLevel: 1, category: 'attack' },
-      { id: 'iceSpear', name: '冰錐術',   icon: '冰錐', cd: 6,    type: 'single', dmgMult: 1.6,  effect: 'slash', range: 130, desc: '冰錐刺穿敵人造成160%傷害並減速', learnLevel: 5, category: 'control' },
-      { id: 'meteor',   name: '隕石術',   icon: '隕石', cd: 15,   type: 'aoe',    dmgMult: 2.5,  effect: 'meteor', aoeRadius: 60, desc: '天降隕石範圍250%傷害', learnLevel: 15, category: 'aoe' },
-      { id: 'lightning',name: '閃電鏈',   icon: '閃電', cd: 7,    type: 'aoe',    dmgMult: 1.4,  effect: 'fireball', aoeRadius: 80, desc: '閃電鏈跳躍攻擊', learnLevel: 10, category: 'aoe' },
-      { id: 'frostnova',name: '冰霜新星', icon: '冰霜', cd: 10,   type: 'aoe',    dmgMult: 1.2,  effect: 'slash', aoeRadius: 65, desc: '周圍敵人凍結並受到120%傷害', learnLevel: 25, category: 'control' },
-      { id: 'manashield',name:'魔法護盾', icon: '護盾', cd: 20,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '吸收30%傷害持續10秒', learnLevel: 20, category: 'buff' },
-      { id: 'firestorm',name: '烈焰風暴', icon: '炎爆', cd: 25,   type: 'aoe',    dmgMult: 1.8,  effect: 'meteor', aoeRadius: 70, desc: '召喚烈焰風暴持續燃燒', learnLevel: 40, category: 'aoe' },
-      { id: 'polymorph',name: '變形術',   icon: '變形', cd: 18,   type: 'control',dmgMult: 0.5,  effect: 'fireball', desc: '變形敵人3秒並造成少量傷害', learnLevel: 55, category: 'control' },
-      { id: 'arcane',   name: '奧術爆發', icon: '奧術', cd: 35,   type: 'single', dmgMult: 3.5,  effect: 'fireball', desc: '積蓄奧術能量造成350%傷害', learnLevel: 80, category: 'attack' },
+      { id: 'normal',   name: '魔彈術',   icon: '✦',  cd: 0,    type: 'single', dmgMult: 1,    effect: 'fireball', learnLevel: 1, category: 'basic' },
+      { id: 'fireball', name: '火球術',   icon: '🔥', cd: 4,    type: 'single', dmgMult: 2,    effect: 'fireball', range: 140, desc: '發射火球造成200%傷害', learnLevel: 1, category: 'attack' },
+      { id: 'iceSpear', name: '冰錐術',   icon: '❄️', cd: 6,    type: 'single', dmgMult: 1.6,  effect: 'slash', range: 130, desc: '冰錐刺穿敵人造成160%傷害並減速', learnLevel: 5, category: 'control' },
+      { id: 'meteor',   name: '隕石術',   icon: '☄️', cd: 15,   type: 'aoe',    dmgMult: 2.5,  effect: 'meteor', aoeRadius: 60, desc: '天降隕石範圍250%傷害', learnLevel: 15, category: 'aoe' },
+      { id: 'lightning',name: '閃電鏈',   icon: '⚡', cd: 7,    type: 'aoe',    dmgMult: 1.4,  effect: 'fireball', aoeRadius: 80, desc: '閃電鏈跳躍攻擊', learnLevel: 10, category: 'aoe' },
+      { id: 'frostnova',name: '冰霜新星', icon: '🧊', cd: 10,   type: 'aoe',    dmgMult: 1.2,  effect: 'slash', aoeRadius: 65, desc: '周圍敵人凍結並受到120%傷害', learnLevel: 25, category: 'control' },
+      { id: 'manashield',name:'魔法護盾', icon: '🔮', cd: 20,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '吸收30%傷害持續10秒', learnLevel: 20, category: 'buff' },
+      { id: 'firestorm',name: '烈焰風暴', icon: '🌋', cd: 25,   type: 'aoe',    dmgMult: 1.8,  effect: 'meteor', aoeRadius: 70, desc: '召喚烈焰風暴持續燃燒', learnLevel: 40, category: 'aoe' },
+      { id: 'polymorph',name: '變形術',   icon: '🐸', cd: 18,   type: 'control',dmgMult: 0.5,  effect: 'fireball', desc: '變形敵人3秒並造成少量傷害', learnLevel: 55, category: 'control' },
+      { id: 'arcane',   name: '奧術爆發', icon: '💠', cd: 35,   type: 'single', dmgMult: 3.5,  effect: 'fireball', desc: '積蓄奧術能量造成350%傷害', learnLevel: 80, category: 'attack' },
     ],
     skillBar: [0, 1, 2, 3, 4, 5, 6, 7],
     skillPoints: 0,
@@ -3972,16 +3947,16 @@ const CLASSES = {
     sprite: SPRITE.archer, atkType: 'ranged',
     baseStats: { atk: 18, def: 5, hpMax: 180, mpMax: 100, crit: 18, critDmg: 170 },
     allSkills: [
-      { id: 'normal',   name: '普通射擊', icon: '射擊', cd: 0,    type: 'single', dmgMult: 1,    effect: 'arrow', learnLevel: 1, category: 'basic' },
-      { id: 'multi',    name: '多重射擊', icon: '狙擊', cd: 5,    type: 'multi',  dmgMult: 0.7,  effect: 'arrow', range: 150, count: 3, desc: '射出3箭各造成70%傷害', learnLevel: 1, category: 'attack' },
-      { id: 'pierce',   name: '穿透箭',   icon: '穿透',  cd: 7,    type: 'single', dmgMult: 1.8,  effect: 'arrow', range: 180, desc: '強力一擊造成180%傷害', learnLevel: 5, category: 'attack' },
-      { id: 'arrowRain',name: '箭雨',     icon: '箭雨', cd: 14,   type: 'aoe',    dmgMult: 1.4,  effect: 'arrow', aoeRadius: 55, desc: '箭雨覆蓋區域140%傷害', learnLevel: 15, category: 'aoe' },
-      { id: 'trap',     name: '陷阱',     icon: '陷阱', cd: 10,   type: 'control',dmgMult: 1,    effect: 'arrow', desc: '設置陷阱定身敵人2秒', learnLevel: 10, category: 'control' },
-      { id: 'concshot', name: '震盪射擊', icon: '震盪', cd: 8,    type: 'single', dmgMult: 1.2,  effect: 'arrow', range: 130, desc: '擊退並造成120%傷害', learnLevel: 20, category: 'control' },
-      { id: 'critical', name: '致命瞄準', icon: '狙擊', cd: 18,   type: 'buff',   dmgMult: 0,    effect: 'arrow', desc: '下次攻擊必定暴擊,暴傷+100%', learnLevel: 30, category: 'buff' },
-      { id: 'rapid',    name: '急速射擊', icon: '急速', cd: 25,   type: 'buff',   dmgMult: 0,    effect: 'arrow', desc: '攻速+80%持續8秒', learnLevel: 45, category: 'buff' },
-      { id: 'eagle',    name: '鷹眼',     icon: '鷹眼', cd: 30,   type: 'single', dmgMult: 3,    effect: 'arrow', range: 200, desc: '遠距離狙擊造成300%傷害', learnLevel: 65, category: 'attack' },
-      { id: 'volley',   name: '箭雨連天', icon: '射擊', cd: 40,   type: 'aoe',    dmgMult: 2.2,  effect: 'arrow', aoeRadius: 70, desc: '萬箭齊發造成220%範圍傷害', learnLevel: 80, category: 'aoe' },
+      { id: 'normal',   name: '普通射擊', icon: '🏹', cd: 0,    type: 'single', dmgMult: 1,    effect: 'arrow', learnLevel: 1, category: 'basic' },
+      { id: 'multi',    name: '多重射擊', icon: '🎯', cd: 5,    type: 'multi',  dmgMult: 0.7,  effect: 'arrow', range: 150, count: 3, desc: '射出3箭各造成70%傷害', learnLevel: 1, category: 'attack' },
+      { id: 'pierce',   name: '穿透箭',   icon: '➳',  cd: 7,    type: 'single', dmgMult: 1.8,  effect: 'arrow', range: 180, desc: '強力一擊造成180%傷害', learnLevel: 5, category: 'attack' },
+      { id: 'arrowRain',name: '箭雨',     icon: '🌧️', cd: 14,   type: 'aoe',    dmgMult: 1.4,  effect: 'arrow', aoeRadius: 55, desc: '箭雨覆蓋區域140%傷害', learnLevel: 15, category: 'aoe' },
+      { id: 'trap',     name: '陷阱',     icon: '🕸️', cd: 10,   type: 'control',dmgMult: 1,    effect: 'arrow', desc: '設置陷阱定身敵人2秒', learnLevel: 10, category: 'control' },
+      { id: 'concshot', name: '震盪射擊', icon: '💫', cd: 8,    type: 'single', dmgMult: 1.2,  effect: 'arrow', range: 130, desc: '擊退並造成120%傷害', learnLevel: 20, category: 'control' },
+      { id: 'critical', name: '致命瞄準', icon: '🎯', cd: 18,   type: 'buff',   dmgMult: 0,    effect: 'arrow', desc: '下次攻擊必定暴擊,暴傷+100%', learnLevel: 30, category: 'buff' },
+      { id: 'rapid',    name: '急速射擊', icon: '💨', cd: 25,   type: 'buff',   dmgMult: 0,    effect: 'arrow', desc: '攻速+80%持續8秒', learnLevel: 45, category: 'buff' },
+      { id: 'eagle',    name: '鷹眼',     icon: '🦅', cd: 30,   type: 'single', dmgMult: 3,    effect: 'arrow', range: 200, desc: '遠距離狙擊造成300%傷害', learnLevel: 65, category: 'attack' },
+      { id: 'volley',   name: '箭雨連天', icon: '🏹', cd: 40,   type: 'aoe',    dmgMult: 2.2,  effect: 'arrow', aoeRadius: 70, desc: '萬箭齊發造成220%範圍傷害', learnLevel: 80, category: 'aoe' },
     ],
     skillBar: [0, 1, 2, 3, 4, 5, 6, 7],
     skillPoints: 0,
@@ -3991,16 +3966,16 @@ const CLASSES = {
     sprite: SPRITE.rogue, atkType: 'melee',
     baseStats: { atk: 20, def: 4, hpMax: 160, mpMax: 90, crit: 22, critDmg: 180 },
     allSkills: [
-      { id: 'normal',   name: '普通攻擊', icon: '刺擊', cd: 0,    type: 'single', dmgMult: 1,    effect: 'slash', learnLevel: 1, category: 'basic' },
-      { id: 'shadow',   name: '暗影突襲', icon: '暗影', cd: 5,    type: 'single', dmgMult: 1.9,  effect: 'shadow', range: 100, desc: '暗影位移並造成190%傷害', learnLevel: 1, category: 'attack' },
-      { id: 'poison',   name: '毒刃',     icon: '毒刃', cd: 8,    type: 'dot',    dmgMult: 0.8,  effect: 'shadow', desc: '毒素持續8秒傷害', learnLevel: 5, category: 'attack' },
-      { id: 'dodge',    name: '迴避',     icon: '急速', cd: 18,   type: 'buff',   dmgMult: 0,    effect: 'shadow', desc: '3秒內閃避所有攻擊', learnLevel: 15, category: 'buff' },
-      { id: 'backstab', name: '背刺',     icon: '背刺', cd: 10,   type: 'single', dmgMult: 2.2,  effect: 'slash', desc: '背後攻擊造成220%傷害必定暴擊', learnLevel: 10, category: 'attack' },
-      { id: 'vanish',   name: '消失',     icon: '消失', cd: 25,   type: 'buff',   dmgMult: 0,    effect: 'shadow', desc: '隱身5秒並恢復15%生命', learnLevel: 25, category: 'buff' },
-      { id: 'cripple',  name: '致殘',     icon: '致殘', cd: 12,   type: 'control',dmgMult: 1.1,  effect: 'slash', desc: '致殘敵人降低移動速度60%', learnLevel: 20, category: 'control' },
-      { id: 'envenom',  name: '劇毒',     icon: '毒刃', cd: 20,   type: 'dot',    dmgMult: 1.5,  effect: 'shadow', desc: '劇毒持續10秒高傷害', learnLevel: 40, category: 'attack' },
-      { id: 'assassinate',name:'暗殺',   icon: '暗殺', cd: 35,   type: 'single', dmgMult: 4,    effect: 'shadow', desc: '致命一擊造成400%傷害', learnLevel: 65, category: 'attack' },
-      { id: 'dance',    name: '刀刃之舞', icon: '震盪', cd: 30,   type: 'aoe',    dmgMult: 2,    effect: 'slash', aoeRadius: 60, desc: '刀刃狂舞造成200%範圍傷害', learnLevel: 80, category: 'aoe' },
+      { id: 'normal',   name: '普通攻擊', icon: '🗡️', cd: 0,    type: 'single', dmgMult: 1,    effect: 'slash', learnLevel: 1, category: 'basic' },
+      { id: 'shadow',   name: '暗影突襲', icon: '👤', cd: 5,    type: 'single', dmgMult: 1.9,  effect: 'shadow', range: 100, desc: '暗影位移並造成190%傷害', learnLevel: 1, category: 'attack' },
+      { id: 'poison',   name: '毒刃',     icon: '☠️', cd: 8,    type: 'dot',    dmgMult: 0.8,  effect: 'shadow', desc: '毒素持續8秒傷害', learnLevel: 5, category: 'attack' },
+      { id: 'dodge',    name: '迴避',     icon: '💨', cd: 18,   type: 'buff',   dmgMult: 0,    effect: 'shadow', desc: '3秒內閃避所有攻擊', learnLevel: 15, category: 'buff' },
+      { id: 'backstab', name: '背刺',     icon: '🔪', cd: 10,   type: 'single', dmgMult: 2.2,  effect: 'slash', desc: '背後攻擊造成220%傷害必定暴擊', learnLevel: 10, category: 'attack' },
+      { id: 'vanish',   name: '消失',     icon: '👻', cd: 25,   type: 'buff',   dmgMult: 0,    effect: 'shadow', desc: '隱身5秒並恢復15%生命', learnLevel: 25, category: 'buff' },
+      { id: 'cripple',  name: '致殘',     icon: '🦵', cd: 12,   type: 'control',dmgMult: 1.1,  effect: 'slash', desc: '致殘敵人降低移動速度60%', learnLevel: 20, category: 'control' },
+      { id: 'envenom',  name: '劇毒',     icon: '☠️', cd: 20,   type: 'dot',    dmgMult: 1.5,  effect: 'shadow', desc: '劇毒持續10秒高傷害', learnLevel: 40, category: 'attack' },
+      { id: 'assassinate',name:'暗殺',   icon: '💀', cd: 35,   type: 'single', dmgMult: 4,    effect: 'shadow', desc: '致命一擊造成400%傷害', learnLevel: 65, category: 'attack' },
+      { id: 'dance',    name: '刀刃之舞', icon: '💫', cd: 30,   type: 'aoe',    dmgMult: 2,    effect: 'slash', aoeRadius: 60, desc: '刀刃狂舞造成200%範圍傷害', learnLevel: 80, category: 'aoe' },
     ],
     skillBar: [0, 1, 2, 3, 4, 5, 6, 7],
     skillPoints: 0,
@@ -4010,16 +3985,16 @@ const CLASSES = {
     sprite: SPRITE.paladin, atkType: 'melee',
     baseStats: { atk: 15, def: 10, hpMax: 240, mpMax: 120, crit: 5, critDmg: 145 },
     allSkills: [
-      { id: 'normal',   name: '神聖擊',   icon: '光', cd: 0,    type: 'single', dmgMult: 1,    effect: 'holy', learnLevel: 1, category: 'basic' },
-      { id: 'holyhit',  name: '制裁',     icon: '鍛', cd: 5,    type: 'single', dmgMult: 1.7,  effect: 'holy', range: 80, desc: '神聖之力造成170%傷害', learnLevel: 1, category: 'attack' },
-      { id: 'heal',     name: '治療光環', icon: 'HP', cd: 10,   type: 'heal',   healAmt: 0.3, effect: 'heal', desc: '恢復30%最大生命', learnLevel: 5, category: 'heal' },
-      { id: 'shield',   name: '聖盾',     icon: '盾擊', cd: 25,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '8秒內減傷50%', learnLevel: 10, category: 'buff' },
-      { id: 'judgment', name: '神聖審判', icon: '衡️', cd: 12,   type: 'single', dmgMult: 2,    effect: 'holy', desc: '審判敵人造成200%神聖傷害', learnLevel: 15, category: 'attack' },
-      { id: 'holylight',name: '聖光',     icon: 'MP', cd: 18,   type: 'heal',   healAmt: 0.5, effect: 'heal', desc: '聖光恢復50%最大生命', learnLevel: 25, category: 'heal' },
-      { id: 'avenger',  name: '復仇者之盾', icon: '盾擊', cd: 15, type: 'aoe',    dmgMult: 1.3,  effect: 'holy', aoeRadius: 50, desc: '復仇之盾彈射攻擊周圍敵人', learnLevel: 20, category: 'aoe' },
-      { id: 'consecrate',name:'奉獻',    icon: '智', cd: 20,   type: 'aoe',    dmgMult: 1.1,  effect: 'holy', aoeRadius: 60, desc: '神聖領域持續傷害敵人', learnLevel: 35, category: 'aoe' },
-      { id: 'guardian', name: '守護祝福', icon: '使', cd: 30,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '防禦+50%生命+30%持續12秒', learnLevel: 55, category: 'buff' },
-      { id: 'holywrath',name: '神聖憤怒', icon: '日️', cd: 40,   type: 'aoe',    dmgMult: 2.5,  effect: 'holy', aoeRadius: 80, desc: '神聖憤怒降臨造成250%範圍傷害', learnLevel: 80, category: 'aoe' },
+      { id: 'normal',   name: '神聖擊',   icon: '✨', cd: 0,    type: 'single', dmgMult: 1,    effect: 'holy', learnLevel: 1, category: 'basic' },
+      { id: 'holyhit',  name: '制裁',     icon: '🔨', cd: 5,    type: 'single', dmgMult: 1.7,  effect: 'holy', range: 80, desc: '神聖之力造成170%傷害', learnLevel: 1, category: 'attack' },
+      { id: 'heal',     name: '治療光環', icon: '💚', cd: 10,   type: 'heal',   healAmt: 0.3, effect: 'heal', desc: '恢復30%最大生命', learnLevel: 5, category: 'heal' },
+      { id: 'shield',   name: '聖盾',     icon: '🛡️', cd: 25,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '8秒內減傷50%', learnLevel: 10, category: 'buff' },
+      { id: 'judgment', name: '神聖審判', icon: '⚖️', cd: 12,   type: 'single', dmgMult: 2,    effect: 'holy', desc: '審判敵人造成200%神聖傷害', learnLevel: 15, category: 'attack' },
+      { id: 'holylight',name: '聖光',     icon: '💛', cd: 18,   type: 'heal',   healAmt: 0.5, effect: 'heal', desc: '聖光恢復50%最大生命', learnLevel: 25, category: 'heal' },
+      { id: 'avenger',  name: '復仇者之盾', icon: '🛡️', cd: 15, type: 'aoe',    dmgMult: 1.3,  effect: 'holy', aoeRadius: 50, desc: '復仇之盾彈射攻擊周圍敵人', learnLevel: 20, category: 'aoe' },
+      { id: 'consecrate',name:'奉獻',    icon: '🔆', cd: 20,   type: 'aoe',    dmgMult: 1.1,  effect: 'holy', aoeRadius: 60, desc: '神聖領域持續傷害敵人', learnLevel: 35, category: 'aoe' },
+      { id: 'guardian', name: '守護祝福', icon: '👼', cd: 30,   type: 'buff',   dmgMult: 0,    effect: 'holy', desc: '防禦+50%生命+30%持續12秒', learnLevel: 55, category: 'buff' },
+      { id: 'holywrath',name: '神聖憤怒', icon: '☀️', cd: 40,   type: 'aoe',    dmgMult: 2.5,  effect: 'holy', aoeRadius: 80, desc: '神聖憤怒降臨造成250%範圍傷害', learnLevel: 80, category: 'aoe' },
     ],
     skillBar: [0, 1, 2, 3, 4, 5, 6, 7],
     skillPoints: 0,
@@ -4029,16 +4004,16 @@ const CLASSES = {
     sprite: SPRITE.warlock, atkType: 'ranged',
     baseStats: { atk: 19, def: 4, hpMax: 170, mpMax: 150, crit: 7, critDmg: 155 },
     allSkills: [
-      { id: 'normal',   name: '暗影箭',   icon: '月', cd: 0,    type: 'single', dmgMult: 1,    effect: 'shadow', learnLevel: 1, category: 'basic' },
-      { id: 'corrupt',  name: '腐蝕術',   icon: '毒', cd: 6,    type: 'dot',    dmgMult: 0.6,  effect: 'shadow', duration: 10, desc: '持續10秒腐蝕傷害', learnLevel: 1, category: 'attack' },
-      { id: 'drain',    name: '生命汲取', icon: '血', cd: 8,    type: 'drain',  dmgMult: 1.5,  effect: 'shadow', range: 120, desc: '造成傷害並回復生命', learnLevel: 5, category: 'attack' },
-      { id: 'summon',   name: '召喚惡魔', icon: '鬼', cd: 30,   type: 'summon', dmgMult: 0,    effect: 'shadow', desc: '召喚惡魔助戰20秒', learnLevel: 10, category: 'summon' },
-      { id: 'curse',    name: '詛咒',     icon: '暗殺', cd: 10,   type: 'debuff', dmgMult: 0,    effect: 'shadow', desc: '降低敵人防禦30%持續8秒', learnLevel: 15, category: 'control' },
-      { id: 'siphon',   name: '靈魂吸取', icon: '消失', cd: 12,   type: 'drain',  dmgMult: 2,    effect: 'shadow', range: 110, desc: '吸取靈魂造成200%傷害並回復', learnLevel: 20, category: 'attack' },
-      { id: 'bane',     name: '劇毒災禍', icon: '毒刃', cd: 18,   type: 'dot',    dmgMult: 1,    effect: 'shadow', duration: 15, desc: '劇毒災禍持續15秒傷害', learnLevel: 30, category: 'attack' },
-      { id: 'darkglow', name: '暗影爆發', icon: '月', cd: 22,   type: 'aoe',    dmgMult: 1.6,  effect: 'shadow', aoeRadius: 60, desc: '暗影能量爆發造成範圍傷害', learnLevel: 40, category: 'aoe' },
-      { id: 'sacrifice',name: '黑暗獻祭', icon: '燭️', cd: 30,   type: 'buff',   dmgMult: 0,    effect: 'shadow', desc: '消耗20%生命換取60%攻擊持續15秒', learnLevel: 55, category: 'buff' },
-      { id: 'infernal', name: '地獄火',   icon: '魔', cd: 45,   type: 'aoe',    dmgMult: 2.8,  effect: 'meteor', aoeRadius: 70, desc: '召喚地獄火砸向敵人造成280%傷害', learnLevel: 80, category: 'aoe' },
+      { id: 'normal',   name: '暗影箭',   icon: '🌑', cd: 0,    type: 'single', dmgMult: 1,    effect: 'shadow', learnLevel: 1, category: 'basic' },
+      { id: 'corrupt',  name: '腐蝕術',   icon: '🦠', cd: 6,    type: 'dot',    dmgMult: 0.6,  effect: 'shadow', duration: 10, desc: '持續10秒腐蝕傷害', learnLevel: 1, category: 'attack' },
+      { id: 'drain',    name: '生命汲取', icon: '🩸', cd: 8,    type: 'drain',  dmgMult: 1.5,  effect: 'shadow', range: 120, desc: '造成傷害並回復生命', learnLevel: 5, category: 'attack' },
+      { id: 'summon',   name: '召喚惡魔', icon: '👹', cd: 30,   type: 'summon', dmgMult: 0,    effect: 'shadow', desc: '召喚惡魔助戰20秒', learnLevel: 10, category: 'summon' },
+      { id: 'curse',    name: '詛咒',     icon: '💀', cd: 10,   type: 'debuff', dmgMult: 0,    effect: 'shadow', desc: '降低敵人防禦30%持續8秒', learnLevel: 15, category: 'control' },
+      { id: 'siphon',   name: '靈魂吸取', icon: '👻', cd: 12,   type: 'drain',  dmgMult: 2,    effect: 'shadow', range: 110, desc: '吸取靈魂造成200%傷害並回復', learnLevel: 20, category: 'attack' },
+      { id: 'bane',     name: '劇毒災禍', icon: '☠️', cd: 18,   type: 'dot',    dmgMult: 1,    effect: 'shadow', duration: 15, desc: '劇毒災禍持續15秒傷害', learnLevel: 30, category: 'attack' },
+      { id: 'darkglow', name: '暗影爆發', icon: '🌑', cd: 22,   type: 'aoe',    dmgMult: 1.6,  effect: 'shadow', aoeRadius: 60, desc: '暗影能量爆發造成範圍傷害', learnLevel: 40, category: 'aoe' },
+      { id: 'sacrifice',name: '黑暗獻祭', icon: '🕯️', cd: 30,   type: 'buff',   dmgMult: 0,    effect: 'shadow', desc: '消耗20%生命換取60%攻擊持續15秒', learnLevel: 55, category: 'buff' },
+      { id: 'infernal', name: '地獄火',   icon: '😈', cd: 45,   type: 'aoe',    dmgMult: 2.8,  effect: 'meteor', aoeRadius: 70, desc: '召喚地獄火砸向敵人造成280%傷害', learnLevel: 80, category: 'aoe' },
     ],
     skillBar: [0, 1, 2, 3, 4, 5, 6, 7],
     skillPoints: 0,
@@ -4046,13 +4021,13 @@ const CLASSES = {
 };
 
 // ==================== 地圖 ====================
-const MAP_BG_VILLAGE  = assetUrl('12_map/aadkq57bnqcoi');
-const MAP_BG_ELF      = assetUrl('12_map/aadkq6dgpaoci');
-const MAP_BG_SWAMP    = assetUrl('12_map/aadkq6ivjsmio');
-const MAP_BG_DARKFOREST = assetUrl('12_map/aadkq6irizcgg');
-const MAP_BG_DEADDESERT = assetUrl('12_map/aadkq6e5eqgcq');
-const MAP_BG_VOLCANO    = assetUrl('12_map/aadkq6mpmrkki');
-const MAP_BG_SIEGE    = assetUrl('12_map/siege');
+const MAP_BG_VILLAGE  = assetUrl('aadkq57bnqcoi_ve_miaoda');
+const MAP_BG_ELF      = assetUrl('aadkq6dgpaoci_ve_miaoda');
+const MAP_BG_SWAMP    = assetUrl('aadkq6ivjsmio_ve_miaoda');
+const MAP_BG_DARKFOREST = assetUrl('aadkq6irizcgg_ve_miaoda');
+const MAP_BG_DEADDESERT = assetUrl('aadkq6e5eqgcq_ve_miaoda');
+const MAP_BG_VOLCANO    = assetUrl('aadkq6mpmrkki_ve_miaoda');
+const MAP_BG_SIEGE    = assetUrl('eeeRmMzAbt');
 
 // 技能图标精灵图（两套）
 // Sheet1: 4列×4行 = 战士(4) + 法师(4) + 弓箭手(4) + 盗贼(4)
@@ -4166,8 +4141,36 @@ function getSkillIconPos(skill) {
   return [0, 0, 0];
 }
 
-// v2.3.4：停用 SVG 技能圖標，改用文字+漸層背景（禁 SVG）
-const SKILL_SVG_MAP = {};
+// 技能SVG图标库（暗黑风格，stroke + fill混合）
+const SKILL_SVG_MAP = {
+  // 通用
+  slash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/></svg>`,
+  fire: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2s4 4 4 8a4 4 0 01-8 0c0-2 1-3 1-3s-3 3-3 6a6 6 0 0012 0c0-5-6-11-6-11z"/></svg>`,
+  ice: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19M7 3l3 3M17 3l-3 3M7 21l3-3M17 21l-3-3M3 7l3 3M3 17l3-3M21 7l-3 3M21 17l-3-3"/></svg>`,
+  lightning: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>`,
+  poison: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c3 4 5 7 5 11a5 5 0 01-10 0c0-4 2-7 5-11z"/><circle cx="9" cy="14" r="1.2" fill="currentColor"/><circle cx="14" cy="16" r="1" fill="currentColor"/></svg>`,
+  holy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>`,
+  dark: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>`,
+  heal: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 10-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z"/></svg>`,
+  buff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`,
+  shield: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>`,
+  arrow: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/><path d="M17 7L7 17"/></svg>`,
+  dagger: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l4 4-9 9-3 3-3-3 3-3 9-9z"/><path d="M17 7l3-3M6 18l3 3"/></svg>`,
+  summon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>`,
+  whirlwind: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a7 7 0 0114 0M4 14a6 6 0 0112 0M7 20a4 4 0 0110 0"/></svg>`,
+  meteor: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="3"/><path d="M14 4l8 8-8 8-8-8 8-8z" opacity="0.3"/><path d="M22 2l-6 6"/></svg>`,
+  debuff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>`,
+  stun: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M12 2l2.4 6.4L21 10l-5.4 3.2L18 20l-6-3.6L6 20l2.4-6.8L3 10l6.6-1.6L12 2z"/></svg>`,
+  dash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`,
+  magic: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4v6M12 7h6"/><circle cx="12" cy="16" r="6"/><circle cx="12" cy="16" r="2.5" fill="currentColor"/></svg>`,
+  crit: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="12,2 15,9 22,9 16,14 18,21 12,17 6,21 8,14 2,9 9,9"/></svg>`,
+  potion_hp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6v4H9z"/><path d="M10 6v2h4V6"/><path d="M7 8h10v12a4 4 0 01-4 4h-2a4 4 0 01-4-4V8z"/><path d="M7 14h10" style="opacity:0.3"/></svg>`,
+  potion_mp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6v4H9z"/><path d="M10 6v2h4V6"/><path d="M7 8h10v12a4 4 0 01-4 4h-2a4 4 0 01-4-4V8z"/><path d="M10 18l3-4 3 2 3-3" style="opacity:0.5"/></svg>`,
+  scroll: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h14l2 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V5z"/><path d="M4 5l2-2h12l2 2"/><path d="M7 10h10M7 14h6"/></svg>`,
+  gem: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 8-9 12L3 10z"/><path d="M3 10h18"/><path d="M12 2v8"/></svg>`,
+  coin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 9h8M8 12h8M8 15h6"/></svg>`,
+  default: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M12 16v.01"/></svg>`,
+};
 
 // 暗黑天堂W 風格技能圖標圖片（替代SVG/emoji）
 // 全部統一用 CDN ID 形式，assetUrl / _extractCdnId 都能正確 fallback
@@ -5640,7 +5643,7 @@ const AUTO_ITEMS_CATALOG = [
 ];
 
 const ITEM_ICONS = {
-  // 藥水（v2.3.4：新語意路徑 assets/item/icon_*.jpg）
+  // 藥水（v2.3.0：新語意路徑 assets/item/icon_*.jpg）
   hp1: assetUrl('item/icon_potion_hp.jpg'),
   hp2: assetUrl('item/icon_potion_hp.jpg'),
   hp3: assetUrl('item/icon_potion_hp.jpg'),
@@ -5674,7 +5677,7 @@ const ITEM_ICONS = {
   ancient_book: assetUrl('item/icon_scroll.jpg'),
   monster_eye: assetUrl('item/icon_gem_ruby.jpg'),
   dragon_scale: assetUrl('item/icon_gem_ruby.jpg'),
-  // 裝備類型（v2.3.4：新語意路徑 assets/equip/icon_*.jpg）
+  // 裝備類型（v2.3.0：新語意路徑 assets/equip/icon_*.jpg）
   weapon: assetUrl('equip/icon_sword.jpg'),
   armor: assetUrl('equip/icon_armor.jpg'),
   helmet: assetUrl('equip/icon_helmet.jpg'),
@@ -5713,7 +5716,7 @@ const EQUIP_SLOTS = [
   { id: 'boots',   name: '靴子',   pos: 'feet' },
 ];
 
-// 裝備部位對應圖標（v2.3.4：新語意路徑 assets/equip/icon_*.jpg）
+// 裝備部位對應圖標（v2.3.0：新語意路徑 assets/equip/icon_*.jpg）
 const EQUIP_ICON_MAP = {
   helmet:   assetUrl('equip/icon_helmet.jpg'),
   armor:    assetUrl('equip/icon_armor.jpg'),
@@ -5732,7 +5735,7 @@ const EQUIP_ICON_MAP = {
   staff:    assetUrl('equip/icon_staff.jpg'),
 };
 
-// 道具/消耗品圖標（v2.3.4：新語意路徑 assets/item/icon_*.jpg）
+// 道具/消耗品圖標（v2.3.0：新語意路徑 assets/item/icon_*.jpg）
 const ITEM_ICON_MAP = {
   potion_hp: assetUrl('item/icon_potion_hp.jpg'),
   potion_mp: assetUrl('item/icon_potion_mp.jpg'),
@@ -6014,7 +6017,7 @@ function submitEquipToCombo(comboId, itemId, amount = 1) {
     if (!GS.equipCombosDone) GS.equipCombosDone = {};
     GS.equipCombosDone[comboId] = true;
     comboComplete = true;
-    addLog('system', `卷 裝備圖鑑：完成組合【${combo.name}】！`);
+    addLog('system', `📜 裝備圖鑑：完成組合【${combo.name}】！`);
     const rc = RARITY_CONFIG[combo.rarity] || RARITY_CONFIG.white;
     showFloatingText(`套裝完成: ${combo.name}`, rc.color || '#ffd040');
     calcCP();
@@ -6063,14 +6066,14 @@ function recordEquipToCodex(itemId) {
 
 // ==================== 宝物配置 ====================
 const TREASURE_POOL = [
-  { id: 't1', name: '生命寶珠', rarity: 'blue',  icon: '護盾', desc: '增加最大生命值',   stats: { hpMax: 100 } },
-  { id: 't2', name: '力量徽記', rarity: 'blue',  icon: '力', desc: '增加攻擊力',       stats: { atk: 15 } },
-  { id: 't3', name: '守護盾章', rarity: 'blue',  icon: '盾擊', desc: '增加防禦力',       stats: { def: 10 } },
-  { id: 't4', name: '命運之眼', rarity: 'red',   icon: '眼️', desc: '增加暴擊',         stats: { crit: 8, critDmg: 15 } },
-  { id: 't5', name: '龍晶', rarity: 'red',      icon: '鑽', desc: '全屬性提升',         stats: { atk: 20, def: 15, hpMax: 200 } },
-  { id: 't6', name: '遠古魔法書', rarity: 'purple', icon: '書', desc: '大幅提升攻擊',    stats: { atk: 50, crit: 10 } },
-  { id: 't7', name: '贤者之石', rarity: 'purple', icon: '奧術', desc: '大幅提升生存',    stats: { def: 40, hpMax: 500 } },
-  { id: 't8', name: '世界树之心', rarity: 'gold', icon: '樹', desc: '傳說中的至寶',    stats: { atk: 100, def: 60, hpMax: 1000, crit: 15, critDmg: 30 } },
+  { id: 't1', name: '生命寶珠', rarity: 'blue',  icon: '🔮', desc: '增加最大生命值',   stats: { hpMax: 100 } },
+  { id: 't2', name: '力量徽記', rarity: 'blue',  icon: '💪', desc: '增加攻擊力',       stats: { atk: 15 } },
+  { id: 't3', name: '守護盾章', rarity: 'blue',  icon: '🛡️', desc: '增加防禦力',       stats: { def: 10 } },
+  { id: 't4', name: '命運之眼', rarity: 'red',   icon: '👁️', desc: '增加暴擊',         stats: { crit: 8, critDmg: 15 } },
+  { id: 't5', name: '龍晶', rarity: 'red',      icon: '💎', desc: '全屬性提升',         stats: { atk: 20, def: 15, hpMax: 200 } },
+  { id: 't6', name: '遠古魔法書', rarity: 'purple', icon: '📕', desc: '大幅提升攻擊',    stats: { atk: 50, crit: 10 } },
+  { id: 't7', name: '贤者之石', rarity: 'purple', icon: '💠', desc: '大幅提升生存',    stats: { def: 40, hpMax: 500 } },
+  { id: 't8', name: '世界树之心', rarity: 'gold', icon: '🌳', desc: '傳說中的至寶',    stats: { atk: 100, def: 60, hpMax: 1000, crit: 15, critDmg: 30 } },
 ];
 
 // ==================== 合成配置 ====================
@@ -7238,11 +7241,11 @@ function settleWeeklyTax() {
       if (s.isPlayer) {
         if (goldShare > 0) {
           GS.resources.gold += goldShare;
-          addLog('system', `金 每週稅收結算：獲得 ${goldShare.toLocaleString()} 金幣`);
+          addLog('system', `💰 每週稅收結算：獲得 ${goldShare.toLocaleString()} 金幣`);
         }
         if (gemShare > 0) {
           GS.resources.gem += gemShare;
-          addLog('system', `鑽 每週稅收結算：獲得 ${gemShare} 鑽石`);
+          addLog('system', `💎 每週稅收結算：獲得 ${gemShare} 鑽石`);
         }
       }
     });
@@ -7254,7 +7257,7 @@ function settleWeeklyTax() {
     });
   });
 
-  addLog('system', '日 每週稅收已結算，按貢獻度分配至各國國民');
+  addLog('system', '📅 每週稅收已結算，按貢獻度分配至各國國民');
 }
 
 function calcAIPower(ai) {
@@ -7475,16 +7478,16 @@ function createAISprite(ai) {
     wrap.appendChild(imgIdle);
     const tomb = document.createElement('div');
     tomb.className = 'unit-sprite-tomb';
-    tomb.textContent = '墓';
+    tomb.textContent = '🪦';
     tomb.style.display = 'none';
     wrap.appendChild(tomb);
   } else {
     const emoji = document.createElement('div');
     emoji.className = 'unit-sprite-emoji';
-    emoji.textContent = s.idle || '技';
-    emoji.dataset.spriteIdle = s.idle || '技';
-    emoji.dataset.spriteAttack = s.attack || s.idle || '技';
-    emoji.dataset.spriteDead = '墓';
+    emoji.textContent = s.idle || '⚔️';
+    emoji.dataset.spriteIdle = s.idle || '⚔️';
+    emoji.dataset.spriteAttack = s.attack || s.idle || '⚔️';
+    emoji.dataset.spriteDead = '🪦';
     emoji.style.color = s.color || '#c0a060';
     emoji.style.fontSize = '52px';
     emoji.style.filter = filter;
@@ -7524,10 +7527,10 @@ function showPlayerInteractMenu(ai) {
   const canTrade = dist <= TRADE_DISTANCE_LIMIT;
   menu.innerHTML = `
     <div style="padding:6px 10px;font-weight:700;color:#ffd080;border-bottom:1px solid rgba(160,112,48,0.3);margin-bottom:4px">${ai.name}${ai.guildName ? ` <span style="font-size:10px;color:#a08060">[${ai.guildName}]</span>` : ''}</div>
-    <button class="pim-btn" data-action="trade" ${canTrade ? '' : 'disabled style="opacity:0.4;cursor:not-allowed"'}>盟 交易邀請</button>
-    <button class="pim-btn" data-action="whisper">訊 密語</button>
-    <button class="pim-btn" data-action="guild">盾 軍團</button>
-    <button class="pim-btn" data-action="nation">旗 國家</button>
+    <button class="pim-btn" data-action="trade" ${canTrade ? '' : 'disabled style="opacity:0.4;cursor:not-allowed"'}>🤝 交易邀請</button>
+    <button class="pim-btn" data-action="whisper">💬 密語</button>
+    <button class="pim-btn" data-action="guild">🛡 軍團</button>
+    <button class="pim-btn" data-action="nation">🏳 國家</button>
     <div style="font-size:9px;color:#807060;padding:4px 6px">距離：${Math.round(dist)} px</div>
   `;
   document.body.appendChild(menu);
@@ -7608,8 +7611,8 @@ function openTradeWindow(partnerAI) {
   panel.innerHTML = `
     <div class="trade-window" style="background:linear-gradient(180deg,#2a1c0e,#140c04);border:2px solid #a07030;border-radius:12px;padding:16px;width:640px;max-width:95vw;color:#f0e0c0;box-shadow:0 10px 40px rgba(0,0,0,0.9)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:16px;font-weight:700;color:#ffd080">衡 交易視窗</div>
-        <button id="trade-close-btn" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:18px;padding:0 8px">×</button>
+        <div style="font-size:16px;font-weight:700;color:#ffd080">⚖ 交易視窗</div>
+        <button id="trade-close-btn" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:18px;padding:0 8px">✕</button>
       </div>
       <div style="display:flex;gap:12px">
         <!-- 我方 -->
@@ -7755,7 +7758,7 @@ function showTradeItemPicker(slotIndex) {
     <div style="background:linear-gradient(180deg,#2a1c0e,#140c04);border:2px solid #a07030;border-radius:10px;padding:14px;width:420px;max-height:70vh;overflow:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div style="font-weight:700;color:#ffd080">選擇要交易的物品</div>
-        <button id="picker-close" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:16px">×</button>
+        <button id="picker-close" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:16px">✕</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
         ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
@@ -7948,8 +7951,8 @@ function completeTrade() {
   tradeState.partnerItems.forEach(s => { if (s) partnerOffer.push(s.name + (s.count > 1 ? '×' + s.count : '')); });
   if (tradeState.partnerGold) partnerOffer.push(tradeState.partnerGold.toLocaleString() + '金幣');
   if (tradeState.partnerGem) partnerOffer.push(tradeState.partnerGem + '鑽石');
-  addLog('system', `盟 與【${partnerName}】交易完成：你給予 ${myOffer.join('、') || '無'}，獲得 ${partnerOffer.join('、') || '無'}`);
-  addLog('battle', `盟 與【${partnerName}】交易完成`);
+  addLog('system', `🤝 與【${partnerName}】交易完成：你給予 ${myOffer.join('、') || '無'}，獲得 ${partnerOffer.join('、') || '無'}`);
+  addLog('battle', `🤝 與【${partnerName}】交易完成`);
   updateUI();
   updateSlotDisplay();
   closeTradeWindow();
@@ -8092,8 +8095,8 @@ function openAuctionHouse() {
   panel.innerHTML = `
     <div class="auction-window" style="background:linear-gradient(180deg,#2a1c0e,#140c04);border:2px solid #a07030;border-radius:12px;padding:16px;padding-bottom:24px;width:780px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;color:#f0e0c0;box-shadow:0 10px 40px rgba(0,0,0,0.9)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:18px;font-weight:700;color:#ffd080">衡 拍賣所</div>
-        <button id="auction-close-btn" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:20px;padding:0 8px">×</button>
+        <div style="font-size:18px;font-weight:700;color:#ffd080">⚖ 拍賣所</div>
+        <button id="auction-close-btn" style="background:transparent;border:none;color:#a08060;cursor:pointer;font-size:20px;padding:0 8px">✕</button>
       </div>
       <!-- Tab 切換 -->
       <div class="auction-tabs" style="display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid #604020">
@@ -8205,7 +8208,7 @@ function renderAuctionBrowse(container) {
 function renderAuctionItemRow(item, mode) {
   const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
   const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
-  const currencyIcon = item.currency === 'gem' ? '鑽' : '金';
+  const currencyIcon = item.currency === 'gem' ? '💎' : '💰';
   const tax = Math.floor(item.price * AUCTION_TAX_RATE);
   return `
     <div class="auction-item-row" data-id="${item.id}" data-mode="${mode}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid ${rc.color}33;border-radius:8px">
@@ -8285,7 +8288,7 @@ function buyAuctionItem(listingId) {
   }
   console.log(`[拍賣所] 掛單已移除（${beforeCount} → ${GS.auctionListings.length} 件）`);
   // 記錄
-  const msg = `金 購買了【${listing.name}】（${listing.price.toLocaleString()}${listing.currency === 'gem' ? '鑽石' : '金幣'}）`;
+  const msg = `💰 購買了【${listing.name}】（${listing.price.toLocaleString()}${listing.currency === 'gem' ? '鑽石' : '金幣'}）`;
   addLog('system', msg);
   addLog('battle', msg);
   saveAuctionData();
@@ -8353,8 +8356,8 @@ function showAuctionSellForm(item) {
       <input id="ah-sell-qty" type="number" min="1" max="${maxCount}" value="1" style="padding:5px 8px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#f0e0c0;width:80px"/>
       <span>貨幣：</span>
       <select id="ah-sell-currency" style="padding:5px 8px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#f0e0c0;width:100px">
-        <option value="gold">金 金幣</option>
-        <option value="gem">鑽 鑽石</option>
+        <option value="gold">💰 金幣</option>
+        <option value="gem">💎 鑽石</option>
       </select>
       <span>售價：</span>
       <input id="ah-sell-price" type="number" min="1" value="1000" style="padding:5px 8px;background:#0f0a05;border:1px solid #604020;border-radius:4px;color:#ffd080;width:120px"/>
@@ -8417,7 +8420,7 @@ function showAuctionSellForm(item) {
     console.log(`[拍賣所] 當前總掛單數：${GS.auctionListings.length}，我的掛單：${GS.myAuctionListings.length}`);
     saveAuctionData();
     // 記錄
-    addLog('system', `榜 已上架【${item.name}${qty > 1 ? '×' + qty : ''}】，售價 ${price.toLocaleString()}${currency === 'gem' ? '鑽石' : '金幣'}`);
+    addLog('system', `📋 已上架【${item.name}${qty > 1 ? '×' + qty : ''}】，售價 ${price.toLocaleString()}${currency === 'gem' ? '鑽石' : '金幣'}`);
     updateUI();
     renderAuctionTab('sell');
   };
@@ -8445,7 +8448,7 @@ function cancelAuctionListing(listingId) {
   GS.myAuctionListings = GS.myAuctionListings.filter(l => l.id !== listingId);
   GS.auctionListings = GS.auctionListings.filter(l => l.id !== listingId);
   saveAuctionData();
-  addLog('system', `榜 已取消掛單【${listing.name}】，物品已退回背包`);
+  addLog('system', `📋 已取消掛單【${listing.name}】，物品已退回背包`);
   updateUI();
   renderAuctionTab('my');
 }
@@ -8623,7 +8626,7 @@ function onPlayerDead() {
     p.state = 'idle';
     const isSiege = curMap?.type === 'castle_siege';
     if (isSiege) {
-      // v2.3.4：攻城戰中死亡 → 原地復活（50%血量），戰鬥繼續；以時間為主
+      // v2.3.0：攻城戰中死亡 → 原地復活（50%血量），戰鬥繼續；以時間為主
       // 把玩家移到攻城地圖內的安全位置（入口區）
       p.x = 200;
       p.y = 200;
@@ -9479,11 +9482,11 @@ function renderRankingPage() {
     if (!GS.rankings) GS.rankings = { level: [], power: [], kills: [], guild: [], nation: [] };
     if (!GS.rankings.level || GS.rankings.level.length === 0) updateRankings();
   const rankIconSVG = {
-    level: '<span style="color:#f0c040;font-weight:700;font-size:12px">等</span>',
-    power: '<span style="color:#f0c040;font-weight:700;font-size:12px">戰</span>',
-    kills: '<span style="color:#f0c040;font-weight:700;font-size:12px">殺</span>',
-    guild: '<span style="color:#f0c040;font-weight:700;font-size:12px">盟</span>',
-    nation: '<span style="color:#f0c040;font-weight:700;font-size:12px">國</span>',
+    level:  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="#f0c040" stroke-width="1.5" fill="rgba(240,192,64,0.25)"/></svg>',
+    power:  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L3 14H11L10 22L21 10H13V2Z" stroke="#f0c040" stroke-width="1.5" fill="rgba(240,192,64,0.25)"/></svg>',
+    kills:  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 3L4 6l7 7-7 7 2.5 3 8-8 4 1 3-1-1-3 1-4-4-1-8 8Z" stroke="#f0c040" stroke-width="1.2" fill="rgba(240,192,64,0.2)"/></svg>',
+    guild:  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V9L12 3L21 9V21H14V14H10V21H3Z" stroke="#f0c040" stroke-width="1.3" fill="rgba(240,192,64,0.25)"/></svg>',
+    nation: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 21V3H19C19 3 19.5 7 17 9C14.5 11 19 12 19 14C19 16 17 17 15 16C13 15 11 17 9 17C7 17 5 16 5 21Z" stroke="#f0c040" stroke-width="1.4" fill="rgba(240,192,64,0.25)"/><line x1="5" y1="3" x2="5" y2="21" stroke="#f0c040" stroke-width="1.4"/></svg>',
   };
   const tabs = [
     { key: 'level', label: '等級榜' },
@@ -9833,7 +9836,7 @@ function renderWarDeclareTab(nation) {
         <span style="font-size:10px;color:${remainDeclare > 0 ? '#80ff90' : '#ff8080'}">今日剩餘 ${remainDeclare}/${dailyLimit} 次</span>
       </div>
       <div style="font-size:10px;color:var(--parchment-dark);line-height:1.5">
-        ${isKing ? '王 你是國王，每天可發動 2 次攻城戰' : (isLeader ? '劍 你是軍團長，每天可發動 1 次攻城戰' : '✗ 僅國王與軍團長可宣戰')}
+        ${isKing ? '👑 你是國王，每天可發動 2 次攻城戰' : (isLeader ? '⚔ 你是軍團長，每天可發動 1 次攻城戰' : '❌ 僅國王與軍團長可宣戰')}
       </div>
     </div>
     <div class="bag-section-title">可宣戰城堡</div>
@@ -9871,7 +9874,7 @@ function renderWarDeclareTab(nation) {
             <button class="castle-card-btn declare-war-btn" onclick="event.stopPropagation(); window.declareSiegeWar && window.declareSiegeWar('${c.id}')"
                     style="width:100%;padding:6px;font-size:11px;${disabled ? 'opacity:0.5;cursor:default' : ''}"
                     ${disabled ? 'disabled' : ''}>
-              ${isWarDeclared ? '劍 已宣戰' : (onCool ? `冷卻 ${formatTime(remain)}` : (isMine ? '己方城堡' : (canDeclare && remainDeclare > 0 ? '劍 宣戰攻城' : '無法宣戰')))}
+              ${isWarDeclared ? '⚔ 已宣戰' : (onCool ? `冷卻 ${formatTime(remain)}` : (isMine ? '己方城堡' : (canDeclare && remainDeclare > 0 ? '⚔ 宣戰攻城' : '無法宣戰')))}
             </button>
           </div>
         `;
@@ -9917,13 +9920,13 @@ function renderCastleTab(nation) {
         <button class="castle-card-btn" style="flex:1;padding:5px;font-size:10px;background:linear-gradient(180deg,#206040,#103020);border:1px solid #40a070;color:#80ffc0;cursor:pointer">稅收</button>
       </div>`;
     } else if (isActiveSiege) {
-      btnHtml = `<button class="castle-card-btn" onclick="event.stopPropagation(); window.enterSiegeBattle && window.enterSiegeBattle('${c.id}')" style="width:100%;padding:6px;font-size:11px;font-weight:700;background:linear-gradient(180deg,#b02020,#700808);border:1px solid #e04040;color:#ffe0e0;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.6)">劍 進入攻城戰場</button>`;
+      btnHtml = `<button class="castle-card-btn" onclick="event.stopPropagation(); window.enterSiegeBattle && window.enterSiegeBattle('${c.id}')" style="width:100%;padding:6px;font-size:11px;font-weight:700;background:linear-gradient(180deg,#b02020,#700808);border:1px solid #e04040;color:#ffe0e0;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.6)">⚔ 進入攻城戰場</button>`;
     } else if (!canDeclare) {
       btnHtml = `<button class="castle-card-btn" style="width:100%;padding:5px;font-size:10px;opacity:0.5" disabled>僅軍團長可宣戰</button>`;
     } else if (remainDeclare <= 0) {
       btnHtml = `<button class="castle-card-btn" style="width:100%;padding:5px;font-size:10px;opacity:0.5" disabled>今日次數已用完</button>`;
     } else {
-      btnHtml = `<button class="castle-card-btn declare-war-btn" onclick="event.stopPropagation(); window.declareSiegeWar && window.declareSiegeWar('${c.id}')" style="width:100%;padding:6px;font-size:11px;font-weight:700;background:linear-gradient(180deg,#d4a020,#8a6520);border:1px solid #f0c040;color:#fff;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.6)">劍 宣戰攻城</button>`;
+      btnHtml = `<button class="castle-card-btn declare-war-btn" onclick="event.stopPropagation(); window.declareSiegeWar && window.declareSiegeWar('${c.id}')" style="width:100%;padding:6px;font-size:11px;font-weight:700;background:linear-gradient(180deg,#d4a020,#8a6520);border:1px solid #f0c040;color:#fff;cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,0.6)">⚔ 宣戰攻城</button>`;
     }
     // 城主軍團名
     const ownerLegionName = c.ownerGuildId ? (AI_GUILDS.find(g => g.id === c.ownerGuildId)?.name || c.ownerName || '未知軍團') : 'NPC無主';
@@ -9936,7 +9939,7 @@ function renderCastleTab(nation) {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px">
           <div style="flex:1;min-width:0">
             <div style="font-weight:700;color:var(--gold-bright);font-size:15px;text-shadow:0 1px 2px rgba(0,0,0,0.8);display:flex;align-items:center;gap:6px">
-              城 ${c.name}
+              🏰 ${c.name}
               <span style="font-size:10px;font-weight:600;color:var(--parchment-dark);padding:1px 5px;border:1px solid var(--gold-dark);border-radius:10px">Lv.${c.level}</span>
             </div>
             <div style="font-size:10px;color:var(--parchment-dark);margin-top:2px">所屬地區：${c.region || '—'}</div>
@@ -9951,7 +9954,7 @@ function renderCastleTab(nation) {
         <!-- 城主軍團資訊 -->
         <div style="padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid rgba(240,192,64,0.15);border-radius:6px;margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px">
-            <span style="color:var(--parchment-dark)">盾 城主軍團</span>
+            <span style="color:var(--parchment-dark)">🛡 城主軍團</span>
             <span style="color:var(--parchment-light);font-weight:600">${ownerLegionName}</span>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-top:4px">
@@ -9959,14 +9962,14 @@ function renderCastleTab(nation) {
             <span style="color:var(--parchment-light)">${hasOwner ? occupyDays + ' 天' : '—'}</span>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-top:4px">
-            <span style="color:var(--parchment-dark)">金 每日稅收</span>
+            <span style="color:var(--parchment-dark)">💰 每日稅收</span>
             <span style="color:#ffd060;font-weight:600">${taxIncome.toLocaleString()} 金幣</span>
           </div>
         </div>
         <!-- 城防血量 -->
         <div style="margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--parchment-dark);margin-bottom:3px">
-            <span>城 城防值</span>
+            <span>🏯 城防值</span>
             <span>${c.hp.toLocaleString()} / ${c.hpMax.toLocaleString()}</span>
           </div>
           <div style="height:6px;background:rgba(0,0,0,0.5);border-radius:3px;overflow:hidden">
@@ -9974,7 +9977,7 @@ function renderCastleTab(nation) {
           </div>
         </div>
         <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px">
-          盾 守軍 ${c.defenders} 人 · 推薦等級 ${c.recLevel || '--'}
+          🛡 守軍 ${c.defenders} 人 · 推薦等級 ${c.recLevel || '--'}
         </div>
         ${btnHtml}
       </div>
@@ -9984,11 +9987,11 @@ function renderCastleTab(nation) {
   return `
     <div style="margin-bottom:10px;padding:10px 12px;background:linear-gradient(135deg, rgba(60,40,20,0.6), rgba(30,20,10,0.4));border:1px solid var(--gold-dark);border-radius:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:700;color:var(--gold-bright)">城 城堡列表</span>
+        <span style="font-size:12px;font-weight:700;color:var(--gold-bright)">🏰 城堡列表</span>
         <span style="font-size:10px;color:${remainDeclare > 0 ? '#80ff90' : '#ff8080'};font-weight:600">今日剩餘 ${remainDeclare}/${dailyLimit} 次</span>
       </div>
       <div style="font-size:10px;color:var(--parchment-dark);line-height:1.4">
-        ${isKing ? '王 你是國王' : (isLeader ? '劍 你是軍團長' : (myLegion ? '普通團員' : '未加入軍團'))} · 對無主或敵方城堡宣戰，20分鐘內佔領取勝
+        ${isKing ? '👑 你是國王' : (isLeader ? '⚔ 你是軍團長' : (myLegion ? '普通團員' : '未加入軍團'))} · 對無主或敵方城堡宣戰，20分鐘內佔領取勝
       </div>
     </div>
     <div style="display:flex;flex-direction:column">
@@ -10141,7 +10144,7 @@ function renderNobilityTab(nation) {
           <div style="font-size:11px;color:${isVacant ? '#666' : 'var(--parchment-light)'};margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${entry.name || '空缺'}</div>
           ${!isVacant ? `
             <div style="display:flex;gap:8px;margin-top:2px;font-size:9px;color:var(--parchment-dark)">
-              <span>劍 ${(entry.power || 0).toLocaleString()}</span>
+              <span>⚔ ${(entry.power || 0).toLocaleString()}</span>
               <span>★ ${(entry.contribution || 0).toLocaleString()}</span>
             </div>` : ''}
         </div>
@@ -10195,7 +10198,7 @@ function renderNobilityTab(nation) {
           <div style="font-size:9px;color:#ffd040;font-weight:700;letter-spacing:2px">NO.1 · 最高統治者</div>
           <div style="font-size:18px;font-weight:900;color:#ffd040;text-shadow:0 2px 8px rgba(255,180,20,0.5), 0 1px 3px #000;letter-spacing:2px">國 王</div>
           <div style="font-size:13px;font-weight:700;color:var(--parchment-light);margin-top:2px">${king?.name || '空缺'}</div>
-          ${king && !king.isVacant ? `<div style="display:flex;gap:10px;margin-top:3px;font-size:10px;color:var(--parchment-dark)">劍 ${(king.power||0).toLocaleString()} · ★ ${(king.contribution||0).toLocaleString()}</div>` : ''}
+          ${king && !king.isVacant ? `<div style="display:flex;gap:10px;margin-top:3px;font-size:10px;color:var(--parchment-dark)">⚔ ${(king.power||0).toLocaleString()} · ★ ${(king.contribution||0).toLocaleString()}</div>` : ''}
         </div>
       </div>
     </div>
@@ -10492,7 +10495,7 @@ function renderNationInfoTab(nation) {
       ${enemies.map(n => `
         <div style="display:flex;justify-content:space-between;padding:5px 8px;background:rgba(80,20,20,0.2);border-radius:4px;border:1px solid rgba(255,80,80,0.2)">
           <span style="font-size:10px;color:var(--parchment-light)">${n.flag} ${n.name}</span>
-          <span style="font-size:10px;color:#ff6060;font-weight:600">劍 敌对</span>
+          <span style="font-size:10px;color:#ff6060;font-weight:600">⚔ 敌对</span>
         </div>
       `).join('')}
     </div>
@@ -10760,7 +10763,7 @@ function renderGuildPageEnhanced() {
           <span>團員數量</span><span>${members.length} / ${maxMembers}</span>
         </div>
         <div class="guild-info-row">
-          <span>公会資金</span><span style="color:#f0c040">金 ${(myGuild.funds || 0).toLocaleString()} 金幣</span>
+          <span>公会資金</span><span style="color:#f0c040">💰 ${(myGuild.funds || 0).toLocaleString()} 金幣</span>
         </div>
         <div class="guild-info-row">
           <span>占領城堡</span><span>${myGuild.castles?.length ? myGuild.castles.length + ' 座' : '無'}</span>
@@ -10768,27 +10771,27 @@ function renderGuildPageEnhanced() {
       </div>
 
       <div class="guild-notice-card">
-        <div class="guild-notice-title">卷 公会公告</div>
+        <div class="guild-notice-title">📜 公会公告</div>
         <div class="guild-notice-text" id="guild-notice-display">${myGuild.notice || '暫無公告，團結一致，共創輝煌！'}</div>
         ${isLeader ? `
           <div style="margin-top:6px;display:flex;gap:6px">
-            <button class="guild-notice-edit-btn" id="guild-notice-edit">筆️ 編輯公告</button>
+            <button class="guild-notice-edit-btn" id="guild-notice-edit">✏️ 編輯公告</button>
           </div>
         ` : ''}
       </div>
 
       ${isLeader ? `
-        <div class="bag-section-title" style="margin-top:14px">王 会长管理</div>
+        <div class="bag-section-title" style="margin-top:14px">👑 会长管理</div>
         <div class="guild-manager-grid">
           <button class="guild-manager-btn" id="guild-levelup-btn">
             <div class="guild-manager-icon">⬆️</div>
             <div class="guild-manager-text">
               <div>升級公会</div>
-              <div style="font-size:9px;opacity:0.75">金 ${(gLevel * 5000).toLocaleString()} 金幣</div>
+              <div style="font-size:9px;opacity:0.75">💰 ${(gLevel * 5000).toLocaleString()} 金幣</div>
             </div>
           </button>
           <button class="guild-manager-btn" id="guild-transfer-btn">
-            <div class="guild-manager-icon">王</div>
+            <div class="guild-manager-icon">👑</div>
             <div class="guild-manager-text">
               <div>轉讓会长</div>
               <div style="font-size:9px;opacity:0.75">選擇繼任者</div>
@@ -10799,7 +10802,7 @@ function renderGuildPageEnhanced() {
 
       <div style="margin-top:16px;text-align:center">
         <button class="guild-leave-btn" id="guild-leave-btn">
-          ${isLeader ? '毀 解散公會' : '門 退出'}
+          ${isLeader ? '🏚️ 解散公會' : '🚪 退出'}
         </button>
       </div>
     ` : ''}
@@ -10939,7 +10942,7 @@ function refreshTransformUnlocks() {
     }
   });
   newlyUnlocked.forEach(t => {
-    addLog('system', `光 解锁新變身：${t.name}（${t.rarityName}）`);
+    addLog('system', `✨ 解锁新變身：${t.name}（${t.rarityName}）`);
   });
 }
 
@@ -11033,8 +11036,8 @@ function buildSpriteHTML(spriteObj, kind, lean) {
   const idleSrc = isImg ? s.idle : '';
   const multiFrame = !!s.multiFrame;
   const coverMode = !!s.coverMode;
-  const emojiIdle = s.idle || '技';
-  const emojiAttack = s.attack || s.idle || '技';
+  const emojiIdle = s.idle || '⚔️';
+  const emojiAttack = s.attack || s.idle || '⚔️';
   // lean 模式：AI/怪物/召唤只用 1 张图（idle）+ CSS 动画，大幅减少 DOM
   // 只有玩家/英雄/变身用完整8帧结构
   // v2.2.2：有方向圖的單位疊加方向層
@@ -11104,22 +11107,22 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${attackSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
         <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${attack2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
         <img class="unit-sprite-img sprite-frame-hit" src="${hitSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <div class="unit-sprite-tomb">墓</div>
+        <div class="unit-sprite-tomb">🪦</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>
       ` : `
-        <div class="unit-sprite-emoji" data-sprite-idle="${emojiIdle}" data-sprite-attack="${emojiAttack}" data-sprite-dead="墓" style="color:${color};font-size:${fontSize}px;filter:${baseFilter}">${emojiIdle}</div>
+        <div class="unit-sprite-emoji" data-sprite-idle="${emojiIdle}" data-sprite-attack="${emojiAttack}" data-sprite-dead="🪦" style="color:${color};font-size:${fontSize}px;filter:${baseFilter}">${emojiIdle}</div>
       `}
     </div>
     <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:-1;overflow:visible">
       <div class="aura-glow-outer"></div>
       <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <div class="aura-lightning">
-        <div class="bolt bolt-1" style="clip-path: polygon(50% 0%, 70% 25%, 45% 38%, 80% 62%, 55% 75%, 88% 100%, 30% 100%, 45% 79%, 20% 62%, 55% 42%, 25% 25%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-        <div class="bolt bolt-2" style="clip-path: polygon(45% 0%, 75% 21%, 50% 33%, 88% 54%, 60% 67%, 95% 100%, 25% 100%, 38% 75%, 12% 58%, 50% 40%, 20% 21%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-        <div class="bolt bolt-3" style="clip-path: polygon(55% 0%, 30% 23%, 63% 35%, 25% 57%, 60% 69%, 20% 100%, 80% 100%, 70% 77%, 88% 60%, 50% 42%, 80% 23%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-        <div class="bolt bolt-4" style="clip-path: polygon(40% 0%, 70% 18%, 38% 33%, 75% 50%, 45% 65%, 80% 100%, 25% 100%, 35% 73%, 15% 55%, 50% 37%, 25% 18%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-              </div>
+        <svg class="bolt bolt-1" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="20,0 28,30 18,45 32,75 22,90 35,120 12,120 18,95 8,75 22,50 10,30"/></svg>
+        <svg class="bolt bolt-2" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="18,0 30,25 20,40 35,65 24,80 38,120 10,120 15,90 5,70 20,48 8,25"/></svg>
+        <svg class="bolt bolt-3" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="22,0 12,28 25,42 10,68 24,82 8,120 32,120 28,92 35,72 20,50 32,28"/></svg>
+        <svg class="bolt bolt-4" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="16,0 28,22 15,40 30,60 18,78 32,120 10,120 14,88 6,66 20,44 10,22"/></svg>
+      </div>
     </div>
     <div class="unit-shadow"></div>
   `;
@@ -11275,11 +11278,11 @@ const CLASS_STAT_PREFS = {
 // 職業 → 對應真•系列金變 映射
 const CLASS_TRANSFORM_MAP = {
   warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
-  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_fallen_paladin/portrait.jpg' },
-  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_assassin/portrait.jpg' },
-  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_archer/portrait.jpg' },
-  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/transform/gold/true_death_mage/portrait.jpg' },
-  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_sorcerer/portrait.jpg' },
+  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
+  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/class/assassin/portrait.jpg' },
+  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/class/archer/portrait.jpg' },
+  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/class/mage/portrait.jpg' },
+  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/class/warlock/portrait.jpg' },
 };
 
 // 職業詳細資訊（繁中）
@@ -11359,7 +11362,7 @@ function initCC2UI() {
       btn.dataset.classId = cid;
       btn.style.cursor = 'pointer';
       btn.title = detail.name + ' — 點擊選擇此職業';
-      // v2.3.4：使用職業頭像 icon，加上邊框強化可點擊性
+      // v2.3.0：使用職業頭像 icon，加上邊框強化可點擊性
       const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
       if (sp.useImg && sp.idle) {
         btn.innerHTML = `<img src="${portraitUrl}" alt="${detail.name}" 
@@ -11433,7 +11436,7 @@ function updateCC2Portrait() {
   if (!portraitEl) return;
   const cid = charCreateState.classId;
   const detail = CLASS_DETAIL[cid];
-  // v2.3.4：使用職業立繪真圖（portrait.jpg），不再用精靈圖當大立繪
+  // v2.3.0：使用職業立繪真圖（portrait.jpg），不再用精靈圖當大立繪
   const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
   
   portraitEl.innerHTML = `
@@ -11495,7 +11498,7 @@ function updateCC2TransformPreview() {
   const poolTf = TRANSFORM_POOL.find(t => t.id === tf.id);
   if (descEl) descEl.textContent = poolTf?.desc || '最強變身形態，全屬性大幅提升';
   
-  // v2.3.4：變身預覽使用 portrait 立繪真圖
+  // v2.3.0：變身預覽使用 portrait 立繪真圖
   if (spriteEl) {
     const portraitUrl = tf.portrait || (sp && sp.idle);
     if (portraitUrl) {
@@ -11693,7 +11696,7 @@ function confirmCC2CharCreate() {
     setTimeout(() => {
       try { initGlobalAIPool(); } catch(e) {
         console.error('[AI System] AI初始化失敗，已跳過：', e);
-        addLog('system', '! AI玩家系統初始化異常，已跳過');
+        addLog('system', '⚠ AI玩家系統初始化異常，已跳過');
       }
     }, 1000);
     
@@ -11797,7 +11800,7 @@ function showNationSelect() {
   });
 }
 
-// v2.3.4：舊創角模態 class-select-modal 已移除，統一使用 char-create-screen（羊皮紙樣式）
+// v2.3.0：舊創角模態 class-select-modal 已移除，統一使用 char-create-screen（羊皮紙樣式）
 
 // 金/紫變身新精靈圖（帶閃電冒煙效果）
 // ==================== 玩家渲染 ====================
@@ -12015,11 +12018,11 @@ function updatePlayerSprite() {
           <div class="aura-glow-outer"></div>
           <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
           <div class="aura-lightning">
-            <div class="bolt bolt-1" style="clip-path: polygon(50% 0%, 70% 25%, 45% 38%, 80% 62%, 55% 75%, 88% 100%, 30% 100%, 45% 79%, 20% 62%, 55% 42%, 25% 25%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-            <div class="bolt bolt-2" style="clip-path: polygon(45% 0%, 75% 21%, 50% 33%, 88% 54%, 60% 67%, 95% 100%, 25% 100%, 38% 75%, 12% 58%, 50% 40%, 20% 21%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-            <div class="bolt bolt-3" style="clip-path: polygon(55% 0%, 30% 23%, 63% 35%, 25% 57%, 60% 69%, 20% 100%, 80% 100%, 70% 77%, 88% 60%, 50% 42%, 80% 23%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-            <div class="bolt bolt-4" style="clip-path: polygon(40% 0%, 70% 18%, 38% 33%, 75% 50%, 45% 65%, 80% 100%, 25% 100%, 35% 73%, 15% 55%, 50% 37%, 25% 18%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
-                      </div>
+            <svg class="bolt bolt-1" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="20,0 28,30 18,45 32,75 22,90 35,120 12,120 18,95 8,75 22,50 10,30"/></svg>
+            <svg class="bolt bolt-2" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="18,0 30,25 20,40 35,65 24,80 38,120 10,120 15,90 5,70 20,48 8,25"/></svg>
+            <svg class="bolt bolt-3" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="22,0 12,28 25,42 10,68 24,82 8,120 32,120 28,92 35,72 20,50 32,28"/></svg>
+            <svg class="bolt bolt-4" viewBox="0 0 40 120" preserveAspectRatio="none"><polygon points="16,0 28,22 15,40 30,60 18,78 32,120 10,120 14,88 6,66 20,44 10,22"/></svg>
+          </div>
         </div>`;
       spriteWrap.innerHTML = auraHTML + `
         <img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${baseFilter}" alt=""/>
@@ -12031,7 +12034,7 @@ function updatePlayerSprite() {
         <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
         <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-3" src="${s.attack3 || s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
         <img class="unit-sprite-img sprite-frame-hit" src="${s.hit || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <div class="unit-sprite-tomb">墓</div>
+        <div class="unit-sprite-tomb">🪦</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>
       `;
@@ -12053,10 +12056,10 @@ function updatePlayerSprite() {
     // emoji 模式
     const emojiEl = unit.querySelector('.unit-sprite-emoji');
     if (emojiEl) {
-      emojiEl.textContent = s.idle || '技';
-      emojiEl.dataset.spriteIdle = s.idle || '技';
-      emojiEl.dataset.spriteAttack = s.attack || s.idle || '技';
-      emojiEl.dataset.spriteDead = '墓';
+      emojiEl.textContent = s.idle || '⚔️';
+      emojiEl.dataset.spriteIdle = s.idle || '⚔️';
+      emojiEl.dataset.spriteAttack = s.attack || s.idle || '⚔️';
+      emojiEl.dataset.spriteDead = '🪦';
       emojiEl.style.color = s.color || '#c0a060';
       emojiEl.style.filter = `drop-shadow(0 0 4px ${s.glow || '#ffe090'}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
     }
@@ -12408,7 +12411,7 @@ function renderNPCs(map) {
     elDiv.style.left = npc.x + 'px';
     elDiv.style.top = (npc.y - 64) + 'px';
     const spriteKey = npcSpriteMap[npc.id] || 'npc_shop';
-    const sp = SPRITE[spriteKey] || { idle: npc.icon || '師', color: '#c0a060', glow: '#ffe090' };
+    const sp = SPRITE[spriteKey] || { idle: npc.icon || '🧙', color: '#c0a060', glow: '#ffe090' };
     const isImg = !!sp.useImg;
     const multiFrame = !!sp.multiFrame;
     const filter = `drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
@@ -12438,7 +12441,7 @@ function renderNPCs(map) {
         <img class="npc-sprite-img" src="${sp.idle}" alt="${npc.name}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" onerror="handleImgError(this)"/>
       `;
     } else {
-      spriteHTML = `<div style="font-size:32px;line-height:48px;filter:${filter};color:${sp.color || '#c0a060'}">${npc.icon || '師'}</div>`;
+      spriteHTML = `<div style="font-size:32px;line-height:48px;filter:${filter};color:${sp.color || '#c0a060'}">${npc.icon || '🧙'}</div>`;
     }
     elDiv.innerHTML = `
       <div class="npc-sprite">
@@ -12464,7 +12467,7 @@ function renderNPCs(map) {
             GS.player.exp += exp;
             GS.quest.current = 0; GS.quest.total = 5;
             el.questCurrent.textContent = '0'; el.questTotal.textContent = '5';
-            addLog('system', `✓ 完成任務「${GS.quest.name}」，獲得 ${gold} 金幣、${exp} 經驗`);
+            addLog('system', `✅ 完成任務「${GS.quest.name}」，獲得 ${gold} 金幣、${exp} 經驗`);
             updateUI();
           }
         } else {
@@ -12483,16 +12486,16 @@ function renderNPCs(map) {
           GS.resources.gold -= 100;
           GS.player.hp = getTotalHpMax();
           GS.player.mp = (CLASSES[GS.player.classId]?.mpMax || 100);
-          addLog('system', '棧 在旅館休息，體力魔力完全恢復');
+          addLog('system', '🏨 在旅館休息，體力魔力完全恢復');
           updateUI();
           renderPlayer();
         }
       }
       else if (npc.id === 'bulletin') {
-        alert(`榜 村莊佈告欄\n\n• 米德加特原野出現大量哥布林，冒險者請注意安全\n• 鐵匠鋪現已開放強化業務\n• 公會招募中，詳情請至國家管理處查詢\n• 深淵蝙蝠王出沒幽暗洞窟，請高級冒險者前往討伐`);
+        alert(`📋 村莊佈告欄\n\n• 米德加特原野出現大量哥布林，冒險者請注意安全\n• 鐵匠鋪現已開放強化業務\n• 公會招募中，詳情請至國家管理處查詢\n• 深淵蝙蝠王出沒幽暗洞窟，請高級冒險者前往討伐`);
       }
       else if (npc.id === 'dungeon_master') {
-        alert(`鑰️ 副本管理員\n\n• 試煉之塔（Lv.20+）\n• 無限之塔（Lv.40+）\n• 夢幻之島（Lv.60+）\n\n（副本功能即將開放）`);
+        alert(`🗝️ 副本管理員\n\n• 試煉之塔（Lv.20+）\n• 無限之塔（Lv.40+）\n• 夢幻之島（Lv.60+）\n\n（副本功能即將開放）`);
       }
       else if (npc.id === 'main_quest') {
         const mq = GS.mainQuest || { chapter: 1, step: 0 };
@@ -12511,9 +12514,9 @@ function renderNPCs(map) {
         const curTitle = titles[mq.chapter - 1] || titles[0];
         const curStep = steps[mq.step] || steps[steps.length - 1];
         if (mq.step === 0) {
-          if (confirm(`王 ${npc.name}：年輕的冒險者，你終於來了。\n\n【主線】${curTitle}\n目標：${curStep}\n\n是否接受這個神聖的使命？`)) {
+          if (confirm(`👑 ${npc.name}：年輕的冒險者，你終於來了。\n\n【主線】${curTitle}\n目標：${curStep}\n\n是否接受這個神聖的使命？`)) {
             GS.mainQuest = { chapter: 1, step: 1 };
-            addLog('system', `卷 接受主線任務：${curTitle}`);
+            addLog('system', `📜 接受主線任務：${curTitle}`);
           }
         } else {
           alert(`主線進度：${curTitle}\n當前任務：${curStep}\n\n（主線任務系統逐步開放中）`);
@@ -12546,7 +12549,7 @@ function renderMapModal() {
       const warActive = GS.siegeWar && GS.siegeWar.status === 'active' && GS.siegeWar.castleId === map.castle && GS.siegeWar.endTime > Date.now();
       const current = GS.currentMap === map.id;
       const isSiege = true;
-      // v2.3.4：只有「等級不夠」才鎖定；宣戰狀態只影響是否顯示「戰鬥中」標籤
+      // v2.3.0：只有「等級不夠」才鎖定；宣戰狀態只影響是否顯示「戰鬥中」標籤
       // 玩家隨時可以進出攻城地圖（類似一般戰鬥地圖），戰鬥邏輯僅在戰爭期間生效
       const locked = !lvUnlocked;
       const card = buildMapCard(map, current, false, locked, isSiege);
@@ -12714,7 +12717,7 @@ function spawnMapBoss(map, slot = 'boss') {
     // 添加BOSS皇冠頭銜
     const nameTag = elDiv.querySelector('.unit-name');
     if (nameTag) {
-      nameTag.innerHTML = '王 ' + nameTag.textContent;
+      nameTag.innerHTML = '👑 ' + nameTag.textContent;
       nameTag.style.fontSize = '13px';
       nameTag.style.color = '#ffb040';
       nameTag.style.textShadow = '0 0 6px rgba(255,150,40,0.9), 0 1px 2px #000';
@@ -12724,7 +12727,7 @@ function spawnMapBoss(map, slot = 'boss') {
     updateMonsterRender(m);
   }
   bossState[bsKey] = { respawnAt: 0, spawned: true, uid: m.uid, slot: slot };
-  addLog('system', `!️ 【BOSS】${boss.name} 出現了！`);
+  addLog('system', `⚠️ 【BOSS】${boss.name} 出現了！`);
 }
 
 function onBossKilled(mapId, boss, slot = 'boss') {
@@ -14435,7 +14438,7 @@ function updateMonsters(dt) {
             }
             spawnEffect('fire', warn.x, warn.y, { particles: 20, shake: 10 });
             spawnEffect('whirlwind', warn.x, warn.y, { shake: 6 });
-            addLog('system', `!️ BOSS【${m.name}】釋放【${warn.name}】！`);
+            addLog('system', `⚠️ BOSS【${m.name}】釋放【${warn.name}】！`);
           } else if (warn.type === 'charge') {
             const tx = warn.x, ty = warn.y;
             // 衝鋒：沿直線傷害
@@ -14450,7 +14453,7 @@ function updateMonsters(dt) {
               const sy = m.y + (ty - m.y) * f;
               spawnEffect('fire', sx, sy, { particles: 3 });
             }
-            addLog('system', `!️ BOSS【${m.name}】發動【${warn.name}】！`);
+            addLog('system', `⚠️ BOSS【${m.name}】發動【${warn.name}】！`);
           } else if (warn.type === 'summon') {
             // 召喚小怪
             const map = getAllMaps()[GS.currentMap];
@@ -14467,11 +14470,11 @@ function updateMonsters(dt) {
               }
             }
             spawnEffect('dark', m.x, m.y - 20, { particles: 20, shake: 6 });
-            addLog('system', `!️ BOSS【${m.name}】【${warn.name}】！`);
+            addLog('system', `⚠️ BOSS【${m.name}】【${warn.name}】！`);
           } else if (warn.type === 'rage') {
             bs.rageUntil = Date.now() + warn.duration * 1000;
             spawnEffect('fire', m.x, m.y - 30, { isCrit: true, shakeIntensity: 12 });
-            addLog('system', `炎 BOSS【${m.name}】進入【${warn.name}】狀態！攻擊與速度大幅提升！`);
+            addLog('system', `🔥 BOSS【${m.name}】進入【${warn.name}】狀態！攻擊與速度大幅提升！`);
           }
           // 清理預警
           if (warnEl) warnEl.remove();
@@ -14740,7 +14743,7 @@ function onMonsterDead(m) {
   drops.forEach(item => {
     addToInventory(item, 1);
     showDamage(m.x, m.y - 70, `+${item.name}`, 'heal');
-    addLog('loot', `禮 獲得 ${RARITY_CONFIG[item.rarity].name}【${item.name}】`);
+    addLog('loot', `🎁 獲得 ${RARITY_CONFIG[item.rarity].name}【${item.name}】`);
   });
 
   while (GS.player.exp >= GS.player.expMax) {
@@ -14753,7 +14756,7 @@ function onMonsterDead(m) {
     GS.player.atk += Math.floor(cls.baseStats.atk * 0.06);
     GS.player.def += Math.floor(cls.baseStats.def * 0.05);
     GS.player.hp = GS.player.hpMax;
-    addLog('system', `賀 升級！達到 Lv.${GS.player.level}`);
+    addLog('system', `🎉 升級！達到 Lv.${GS.player.level}`);
     if (window.AudioSystem) AudioSystem.sfxLevelUp();
     // 刷新變身解锁状态（等級提升可能解锁新變身）
 
@@ -16231,7 +16234,7 @@ function updateSlotDisplay() {
       const rarity = hero.rarity || 'white';
       heroSlot.className = 'log-bar-slot hero-slot rarity-badge rarity-' + rarity;
       // 重新構建內容（保留標籤）
-      const heroSprite = hero.sprite || (hero.spriteKey ? SPRITE[hero.spriteKey] : null) || { idle: '劍️', color: '#c0a060' };
+      const heroSprite = hero.sprite || (hero.spriteKey ? SPRITE[hero.spriteKey] : null) || { idle: '⚔️', color: '#c0a060' };
       heroSlot.innerHTML = `
         <div class="slot-filled">${spriteEmojiHTML(heroSprite, 44)}</div>
         <div class="log-bar-slot-label">英雄</div>
@@ -16256,7 +16259,7 @@ function updateSlotDisplay() {
     } else if (pet.spriteKey && SPRITE[pet.spriteKey]) {
       petSpriteHtml = spriteEmojiHTML(SPRITE[pet.spriteKey], 40);
     } else {
-      petSpriteHtml = `<div style="font-size:22px;line-height:1">${pet.icon || '爪'}</div>`;
+      petSpriteHtml = `<div style="font-size:22px;line-height:1">${pet.icon || '🐾'}</div>`;
     }
     petSlot.innerHTML = `
       <div class="slot-filled">${petSpriteHtml}</div>
@@ -16343,12 +16346,12 @@ function generateAIReply(playerMsg, channel, ai) {
   const mapType = MAPS[GS.currentMap]?.type || 'safe';
   // 不同 AI 性格
   const personalities = [
-    { type: '熱血', prefix: ['', '哈哈 ', '對啊 ', '其實 ', '衝啊！'], emoji: '劍' },
-    { type: '內斂', prefix: ['', '嗯 ', '...', '也就那樣 ', ''] , emoji: '葉' },
-    { type: '傲嬌', prefix: ['', '切 ', '哼 ', '隨便啦 ', '才不是'] , emoji: '怒' },
-    { type: '開朗', prefix: ['', '加油！', '一起吧！', '太好了', '萬歲！'] , emoji: '光' },
-    { type: '商人', prefix: ['', '要不要交易？', '便宜賣你', '這價格很划算'] , emoji: '金' },
-    { type: '老司機', prefix: ['', '聽我說', '當年啊', '年輕時', '我跟你講'] , emoji: '紳' },
+    { type: '熱血', prefix: ['', '哈哈 ', '對啊 ', '其實 ', '衝啊！'], emoji: '⚔' },
+    { type: '內斂', prefix: ['', '嗯 ', '...', '也就那樣 ', ''] , emoji: '🍃' },
+    { type: '傲嬌', prefix: ['', '切 ', '哼 ', '隨便啦 ', '才不是'] , emoji: '💢' },
+    { type: '開朗', prefix: ['', '加油！', '一起吧！', '太好了', '萬歲！'] , emoji: '✨' },
+    { type: '商人', prefix: ['', '要不要交易？', '便宜賣你', '這價格很划算'] , emoji: '💰' },
+    { type: '老司機', prefix: ['', '聽我說', '當年啊', '年輕時', '我跟你講'] , emoji: '🎩' },
   ];
   const pIdx = (ai.uid.charCodeAt(2) + ai.uid.charCodeAt(4)) % personalities.length;
   const personality = personalities[pIdx];
@@ -16403,10 +16406,10 @@ function generateAIReply(playerMsg, channel, ai) {
 // 國家國旗
 function getNationFlag(nation) {
   const flags = {
-    '紅國': '紅', '藍國': '藍', '綠國': '綠', '黃國': '黃',
-    'red': '紅', 'blue': '藍', 'green': '綠', 'yellow': '黃',
+    '紅國': '🔴', '藍國': '🔵', '綠國': '🟢', '黃國': '🟡',
+    'red': '🔴', 'blue': '🔵', 'green': '🟢', 'yellow': '🟡',
   };
-  return flags[nation] || '白';
+  return flags[nation] || '⚪';
 }
 
 // 觸發系統事件時的 AI 聊天反應
@@ -16752,11 +16755,11 @@ function announceGachaResults(results, label) {
     const rc = RARITY_CONFIG[r.rarity];
     let prefix, color, icon, weight;
     if (r.rarity === 'gold') {
-      prefix = '王 恭喜'; color = '#ffcc40'; icon = '王'; weight = '900';
+      prefix = '👑 恭喜'; color = '#ffcc40'; icon = '👑'; weight = '900';
     } else if (r.rarity === 'purple') {
       prefix = '★ 恭喜'; color = '#c060ff'; icon = '★'; weight = '800';
     } else {
-      prefix = '劍 恭喜'; color = '#e05050'; icon = '劍'; weight = '700';
+      prefix = '⚔ 恭喜'; color = '#e05050'; icon = '⚔'; weight = '700';
     }
     const msg = `${prefix}【${GS.player.name}】召喚出${rc.name}【${r.name}】！`;
     // 發送到戰鬥頻道 + 一般頻道（帶特殊樣式）
@@ -16906,8 +16909,8 @@ function showGachaResults(results, poolType) {
   // 標題
   const title = document.createElement('div');
   title.className = 'gacha-result-title';
-  if (topRarity === 'gold') title.innerHTML = '光 神話降臨 光';
-  else if (topRarity === 'purple') title.innerHTML = '星 傳說召喚 星';
+  if (topRarity === 'gold') title.innerHTML = '✨ 神話降臨 ✨';
+  else if (topRarity === 'purple') title.innerHTML = '⭐ 傳說召喚 ⭐';
   else if (topRarity === 'red') title.innerHTML = '史詩收穫';
   else title.innerHTML = '召喚結果';
   el.gachaResult.appendChild(title);
@@ -16929,10 +16932,10 @@ function showGachaResults(results, poolType) {
 
     let spriteHTML;
     if (poolType === 'hero') {
-      const hSprite = item.sprite || (item.spriteKey ? SPRITE[item.spriteKey] : null) || { idle: '劍️', color: '#c0a060' };
+      const hSprite = item.sprite || (item.spriteKey ? SPRITE[item.spriteKey] : null) || { idle: '⚔️', color: '#c0a060' };
       spriteHTML = `<div class="gacha-sprite">${spriteEmojiHTML(hSprite, 64)}</div>`;
     } else if (poolType === 'pet') {
-      const petSprite = SPRITE[item.spriteKey] || { idle: '爪', color: '#c0a060', glow: '#ffe090' };
+      const petSprite = SPRITE[item.spriteKey] || { idle: '🐾', color: '#c0a060', glow: '#ffe090' };
       spriteHTML = `<div class="gacha-sprite gacha-pet-sprite">${spriteEmojiHTML(petSprite, 56)}</div>`;
     } else if (poolType === 'transform') {
       const iconUrl = getTransformIcon(item.spriteKey);
@@ -17273,7 +17276,7 @@ function renderCodexPage() {
     return `
       <div class="codex-card rarity-${rarity} ${owned ? '' : 'locked'}" data-id="${item.id}" data-type="${type}">
         <div class="codex-card-inner">
-          <div class="codex-card-sprite">${owned ? sprite : '<div style="font-size:36px;filter:grayscale(1) brightness(0.4)">?</div>'}</div>
+          <div class="codex-card-sprite">${owned ? sprite : '<div style="font-size:36px;filter:grayscale(1) brightness(0.4)">❓</div>'}</div>
           <div class="codex-card-name">${owned ? item.name : '???'}</div>
         </div>
         ${owned && count > 1 ? `<div class="codex-card-count">×${count}</div>` : ''}
@@ -17451,8 +17454,8 @@ function renderCodexPage() {
           const spriteHtml = own
             ? (hasImg
                ? `<img src="${sprite.idle}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.6))"/>`
-               : `<div style="font-size:36px;color:${sprite?.color || '#ccc'};filter:drop-shadow(0 0 4px ${sprite?.glow || 'rgba(0,0,0,0.5)'})">${sprite?.idle || '鬼'}</div>`)
-            : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:36px;color:#444">?</div>`;
+               : `<div style="font-size:36px;color:${sprite?.color || '#ccc'};filter:drop-shadow(0 0 4px ${sprite?.glow || 'rgba(0,0,0,0.5)'})">${sprite?.idle || '👹'}</div>`)
+            : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:36px;color:#444">❓</div>`;
           return `
             <div class="codex-card rarity-${m.rarity} ${own ? '' : 'locked'}" data-id="${m.id}" data-type="monster">
               <div class="codex-card-inner">
@@ -17475,7 +17478,7 @@ function renderCodexPage() {
   if (rewards) {
     const count = getCollectionCount(codexTab);
     rewardHtml = `<div style="margin-bottom:10px;padding:10px 12px;background:linear-gradient(135deg, rgba(60,40,20,0.6), rgba(30,20,10,0.4));border:1px solid var(--gold-dark);border-radius:8px">
-      <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:6px">藏 蒐藏獎勵</div>
+      <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:6px">📚 蒐藏獎勵</div>
       <div style="display:flex;flex-direction:column;gap:4px">
         ${rewards.map(r => {
           const achieved = count >= r.count;
@@ -17650,7 +17653,7 @@ function renderCollectionPage() {
             : `${s.owned} / ${s.total} · ${s.catName}${RARITY_CONFIG[s.rarity]?.name || ''}`;
           return `
             <div class="collection-set-card ${s.achieved ? 'achieved' : ''} rarity-${s.rarity || 'white'}">
-              <div class="cset-icon">${s.achieved ? '杯' : '鎖'}</div>
+              <div class="cset-icon">${s.achieved ? '🏆' : '🔒'}</div>
               <div class="cset-name">${s.name}</div>
               <div class="cset-stat">${statStr}</div>
               <div class="cset-req">${reqText}</div>
@@ -18057,7 +18060,7 @@ function bindCodexOverlayEvents() {
       const itemId = slot.dataset.itemId;
       const result = submitEquipToCombo(comboId, itemId, 1);
       if (result.success) {
-        if (result.comboComplete) addLog('system', `光 組合完成！屬性加成已生效`);
+        if (result.comboComplete) addLog('system', `✨ 組合完成！屬性加成已生效`);
         overlay.innerHTML = renderCodexFullPage();
         bindCodexOverlayEvents();
         updateUI();
@@ -18073,7 +18076,7 @@ function bindCodexOverlayEvents() {
       const comboId = btn.dataset.quickSubmit;
       const result = quickSubmitCombo(comboId);
       if (result.totalSubmitted > 0) {
-        if (result.completed) addLog('system', `光 組合完成！屬性加成已生效`);
+        if (result.completed) addLog('system', `✨ 組合完成！屬性加成已生效`);
         overlay.innerHTML = renderCodexFullPage();
         bindCodexOverlayEvents();
         updateUI();
@@ -18207,7 +18210,7 @@ function showSynthResultOverlay(success, item, nextRarity) {
       : (item.spriteKey ? `<img src="${getTransformIcon(item.spriteKey)}" style="width:100px;height:100px;object-fit:cover;border-radius:8px"/>` : ''))) : '';
   modal.innerHTML = `
     <div class="synth-result-inner ${success ? 'success' : 'fail'}">
-      <div class="synth-result-title">${success ? '賀 合成成功！' : '傷 合成失敗'}</div>
+      <div class="synth-result-title">${success ? '🎉 合成成功！' : '💔 合成失敗'}</div>
       ${success && item ? `
         <div class="synth-result-sprite rarity-${nextRarity}">${sprite}</div>
         <div class="synth-result-name">${item.name}</div>
@@ -18671,7 +18674,7 @@ function renderSynthPageHTML() {
         <div class="synth-mat-info">擁有：${matCount} 張</div>
       </div>
 
-      <div class="synth-arrow">→</div>
+      <div class="synth-arrow">➜</div>
 
       <div class="synth-result">
         <div class="synth-mat-title">結果（${canSynth ? RARITY_CONFIG[nextRarity].name : '最高品質'}）</div>
@@ -18805,7 +18808,7 @@ function showSynthResult(success, item, nextRarity) {
 
   modal.innerHTML = `
     <div class="synth-result-inner ${success ? 'success' : 'fail'}">
-      <div class="synth-result-title">${success ? '賀 合成成功！' : '傷 合成失敗'}</div>
+      <div class="synth-result-title">${success ? '🎉 合成成功！' : '💔 合成失敗'}</div>
       ${success && item ? `
         <div class="synth-result-sprite rarity-${nextRarity}">${sprite}</div>
         <div class="synth-result-name">${item.name}</div>
@@ -18879,7 +18882,7 @@ function equipPet(petId) {
   const pet = GS.ownedPets.find(p => p.id === petId);
   if (pet) {
     addLog('system', `守護寵物：${pet.name}`);
-    const petSprite = SPRITE[pet.spriteKey] || { idle: '爪', color: '#c0a060', glow: '#ffe090' };
+    const petSprite = SPRITE[pet.spriteKey] || { idle: '🐾', color: '#c0a060', glow: '#ffe090' };
     const rarity = pet.rarity || 'white';
     const rarityGlow = {
       white: 'rgba(255,255,255,0.3)',
@@ -18980,12 +18983,12 @@ function renderHeroPage() {
   const weightPct = Math.min(100, Math.floor(weight / weightMax * 100));
 
   const tabs = [
-    { key: 'stats',     name: '屬性', icon: '資' },
-    { key: 'equip',     name: '裝備', icon: '劍擊' },
-    { key: 'transform', name: '變身', icon: '光' },
-    { key: 'skills',    name: '技能', icon: '典' },
-    { key: 'heroes',    name: '英雄', icon: '盾擊' },
-    { key: 'pets',      name: '守護', icon: '爪' },
+    { key: 'stats',     name: '屬性', icon: '📊' },
+    { key: 'equip',     name: '裝備', icon: '⚔️' },
+    { key: 'transform', name: '變身', icon: '✨' },
+    { key: 'skills',    name: '技能', icon: '📖' },
+    { key: 'heroes',    name: '英雄', icon: '🛡️' },
+    { key: 'pets',      name: '守護', icon: '🐾' },
   ];
   const activeTab = GS.heroPageTab || 'stats';
 
@@ -19252,7 +19255,7 @@ function renderTransformPanel() {
                 ${equipped ? '<div class="card-top-tag">已變身</div>' : ''}
                 <div class="tf-card-icon">
                   <img src="${getTransformIcon(t.spriteKey)}" style="width:100%;height:100%;object-fit:contain"/>
-                  ${classLocked ? `<div class="tf-class-lock" title="僅限${classRestrictName}使用"><span>鎖</span><em>${classRestrictName}專用</em></div>` : ''}
+                  ${classLocked ? `<div class="tf-class-lock" title="僅限${classRestrictName}使用"><span>🔒</span><em>${classRestrictName}專用</em></div>` : ''}
                 </div>
                 <div class="tf-card-name">${t.name}${!t.classRestriction ? ' <span style="font-size:9px;color:#f0c060">(通用)</span>' : ''}</div>
                 <div class="tf-card-rarity" style="color:${rc.color}">${rc.name}</div>
@@ -19327,7 +19330,7 @@ function renderTransformCardsForRarity(rarityTier) {
           <div class="arch-sprite-frame rarity-${t.rarity}" style="width:52px;height:68px">
             <div class="transform-card-icon" style="filter:${filter};display:flex;align-items:flex-end;justify-content:center;width:100%;height:100%">${spriteEmojiHTML(cls.sprite, 40)}</div>
           </div>
-          ${classLocked ? `<div class="transform-class-lock" title="僅限${classRestrictName}使用"><span>鎖</span><em>${classRestrictName}專用</em></div>` : ''}
+          ${classLocked ? `<div class="transform-class-lock" title="僅限${classRestrictName}使用"><span>🔒</span><em>${classRestrictName}專用</em></div>` : ''}
         </div>
         <div class="transform-card-name">${t.name}</div>
         <div class="transform-card-rarity" style="color:${rarityTier.color};font-size:10px;margin:2px 0">${t.rarityName} · Lv.${t.tier}解鎖</div>
@@ -19335,7 +19338,7 @@ function renderTransformCardsForRarity(rarityTier) {
         ${equipped ? '<div class="transform-card-equipped-tag">裝備中</div>' : ''}
         ${classLocked ? `<div class="transform-class-locked-tip">${classRestrictName}專用</div>` : locked ? `
           <button class="transform-unlock-btn ${canUnlock ? '' : 'disabled'}" data-unlock-id="${t.id}">
-            ${p.level < t.tier ? `需 Lv.${t.tier}` : `開 ${t.cost}鑽`}
+            ${p.level < t.tier ? `需 Lv.${t.tier}` : `🔓 ${t.cost}鑽`}
           </button>
         ` : (equipped ? '' : '<button class="transform-equip-btn" data-equip-id="' + t.id + '">裝備</button>')}
       </div>
@@ -19407,7 +19410,7 @@ function renderSkillsPanel() {
                     <button class="skill-equip-btn" data-equip-skill="${idx}">裝備到技能欄</button>
                     <button class="skill-upgrade-btn" data-upgrade-skill="${idx}">升級 (500金)</button>
                   </div>` : ''}
-                ${!unlocked ? `<div style="color:#888;font-size:10px;margin-top:4px">鎖 达到 ${s.learnLevel} 級解锁</div>` : ''}
+                ${!unlocked ? `<div style="color:#888;font-size:10px;margin-top:4px">🔒 达到 ${s.learnLevel} 級解锁</div>` : ''}
               </div>
             </div>`;
         }).join('')}
@@ -19480,7 +19483,7 @@ function renderHeroesPanel() {
 
   if (ownedCount === 0) {
     return `<div style="text-align:center;padding:40px 20px;color:var(--parchment-dark)">
-      <div style="font-size:40px;margin-bottom:10px">刃️</div>
+      <div style="font-size:40px;margin-bottom:10px">🗡️</div>
       <div style="font-size:13px;margin-bottom:8px">尚未獲得英雄</div>
       <div style="font-size:11px;opacity:0.7">前往「召喚」页面抽取英雄吧！</div>
     </div>`;
@@ -19545,7 +19548,7 @@ function renderHeroesPanel() {
     </div>
     <div style="margin-top:10px;text-align:center">
       <button class="shop-item-buy" style="width:auto;padding:5px 16px;font-size:11px" id="hero-synth-btn">
-        藥 英雄合成
+        🧪 英雄合成
       </button>
     </div>
   `;
@@ -19571,7 +19574,7 @@ function renderPetsPanel() {
 
   if (ownedCount === 0) {
     return `<div style="text-align:center;padding:40px 20px;color:var(--parchment-dark)">
-      <div style="font-size:40px;margin-bottom:10px">爪</div>
+      <div style="font-size:40px;margin-bottom:10px">🐾</div>
       <div style="font-size:13px;margin-bottom:8px">尚未獲得守護寵物</div>
       <div style="font-size:11px;opacity:0.7">前往「召喚」页面抽取宠物吧！</div>
     </div>`;
@@ -19606,7 +19609,7 @@ function renderPetsPanel() {
               <div class="tf-card rarity-badge rarity-${pet.rarity || 'white'} ${equipped ? 'equipped' : ''}" data-pet-id="${pet.id}">
                 ${equipped ? '<div class="card-top-tag">守護中</div>' : ''}
                 <div class="tf-card-icon">
-                  ${hasImg ? `<img src="${SPRITE[spKey].idle}" style="width:100%;height:100%;object-fit:contain"/>` : `<div style="font-size:20px;padding-top:4px">${SPRITE[spKey]?.idle || '爪'}</div>`}
+                  ${hasImg ? `<img src="${SPRITE[spKey].idle}" style="width:100%;height:100%;object-fit:contain"/>` : `<div style="font-size:20px;padding-top:4px">${SPRITE[spKey]?.idle || '🐾'}</div>`}
                 </div>
                 <div class="tf-card-name" style="font-size:9px">${pet.name}</div>
                 <div style="font-size:8px;color:${rc.color};margin:1px 0">${rc.name}</div>
@@ -19619,7 +19622,7 @@ function renderPetsPanel() {
     </div>
     <div style="margin-top:10px;text-align:center">
       <button class="shop-item-buy" style="width:auto;padding:5px 16px;font-size:11px" id="pet-synth-btn">
-        藥 守護合成
+        🧪 守護合成
       </button>
     </div>
   `;
@@ -19627,12 +19630,12 @@ function renderPetsPanel() {
 
 // ==================== 背包页面（新分类系统）====================
 const BAG_CATEGORIES = [
-  { key: 'all',       name: '全部',    icon: '包' },
-  { key: 'equipment', name: '裝備',    icon: '劍擊' },
-  { key: 'consumable',name: '消耗品',  icon: '藥' },
-  { key: 'card',      name: '卡牌',    icon: '牌' },
-  { key: 'treasure',  name: '寶物',    icon: '鑽' },
-  { key: 'material',  name: '材料',    icon: '修' },
+  { key: 'all',       name: '全部',    icon: '📦' },
+  { key: 'equipment', name: '裝備',    icon: '⚔️' },
+  { key: 'consumable',name: '消耗品',  icon: '🧪' },
+  { key: 'card',      name: '卡牌',    icon: '🃏' },
+  { key: 'treasure',  name: '寶物',    icon: '💎' },
+  { key: 'material',  name: '材料',    icon: '🔧' },
 ];
 
 function renderBagPage() {
@@ -19733,8 +19736,8 @@ function renderBagPage() {
         物品：${items.length}/${20 + Math.floor((GS.player.level || 1) * 0.5)} 格
       </div>
       <div style="display:flex;gap:6px">
-        <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #608040, #3a5a20);border:1px solid #80a060;color:#d0ffb0;border-radius:4px;cursor:pointer;font-weight:600" data-one-click-equip>劍 一鍵穿戴</button>
-        <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #8b6520, #5a3a10);border:1px solid var(--gold-dark);color:var(--gold-bright);border-radius:4px;cursor:pointer;font-weight:600">雷 一鍵使用</button>
+        <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #608040, #3a5a20);border:1px solid #80a060;color:#d0ffb0;border-radius:4px;cursor:pointer;font-weight:600" data-one-click-equip>⚔ 一鍵穿戴</button>
+        <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #8b6520, #5a3a10);border:1px solid var(--gold-dark);color:var(--gold-bright);border-radius:4px;cursor:pointer;font-weight:600">⚡ 一鍵使用</button>
       </div>
     </div>
   `;
@@ -19949,9 +19952,9 @@ function renderEnhancePage() {
           ${isSafe ? '<span style="margin-left:6px;font-size:9px;color:#80ff90;font-weight:700;padding:1px 6px;border:1px solid #50c878;border-radius:10px;background:rgba(80,200,120,0.15)">安定</span>' : ''}
           ${enhanceState.boostScrollUsed ? '<span style="margin-left:6px;font-size:9px;color:#60c0ff;font-weight:700;padding:1px 6px;border:1px solid #6080aa;border-radius:10px;background:rgba(80,160,255,0.15)">提升+10%</span>' : ''}
         </div>
-        ${!isSafe && canEnhance ? `<div style="font-size:9px;color:#ff8080;margin-bottom:8px">! 超過安定值，失敗等級將歸 0</div>` : ''}
+        ${!isSafe && canEnhance ? `<div style="font-size:9px;color:#ff8080;margin-bottom:8px">⚠ 超過安定值，失敗等級將歸 0</div>` : ''}
         <button class="enhance-do-btn" id="enhance-do-btn" style="width:100%;padding:12px;font-size:15px;font-weight:900;background:linear-gradient(180deg,#d4a020,#8a6520);border:2px solid #f0c040;color:#fff;border-radius:8px;cursor:pointer;text-shadow:0 1px 3px rgba(0,0,0,0.8);box-shadow:0 2px 12px rgba(240,192,64,0.4), inset 0 1px 0 rgba(255,220,120,0.4);letter-spacing:2px" ${!canEnhance || scrollCount < 1 ? 'disabled style="opacity:0.4;cursor:not-allowed"' : ''}>
-          鍛 開始強化
+          ⚒ 開始強化
         </button>
         ${!item ? '<div style="font-size:10px;color:var(--parchment-dark);margin-top:6px">請先選擇要強化的裝備</div>' : ''}
         ${item && scrollCount < 1 ? '<div style="font-size:10px;color:#ff8080;margin-top:6px">缺少強化卷，請至商店購買</div>' : ''}
@@ -20103,13 +20106,13 @@ function doEnhance() {
       // 同步更新名稱前綴 +N
       if (!item._baseName) item._baseName = item.name;
       item.name = `+${nextLevel} ${item._baseName}`;
-      addLog('system', `光 【${item.name}】強化成功！`);
+      addLog('system', `✨ 【${item.name}】強化成功！`);
       showEnhanceResult(true, item);
       console.log('[強化Debug] 強化成功！item.enhanceLevel =', item.enhanceLevel, '；item.name =', item.name);
       console.log('[強化Debug] 背包中同一物件 =', bagIdx >= 0 ? GS.inventory[bagIdx] : null);
     } else {
       // 失敗：超過安定值後裝備直接消失（損毀）
-      addLog('system', `爆 【${item.name}】強化失敗，裝備已損毀！`);
+      addLog('system', `💥 【${item.name}】強化失敗，裝備已損毀！`);
       // 從背包移除該裝備
       if (bagIdx >= 0) GS.inventory.splice(bagIdx, 1);
       // 若已穿戴，也要從裝備欄移除
@@ -20134,7 +20137,7 @@ function showEnhanceResult(success, item, msg) {
   if (!modal || !inner) return;
   const lvl = item.enhanceLevel || 0;
   inner.innerHTML = `
-    <div style="font-size:28px;margin-bottom:8px">${success ? '光' : '爆'}</div>
+    <div style="font-size:28px;margin-bottom:8px">${success ? '✨' : '💥'}</div>
     <div style="font-size:18px;font-weight:900;color:${success ? '#ffd040' : '#ff7070'};margin-bottom:8px;text-shadow:0 2px 6px rgba(0,0,0,0.8)">${success ? '強化成功！' : '強化失敗'}</div>
     <div style="font-size:14px;color:var(--parchment-light);margin-bottom:4px">${item.name}</div>
     <div style="font-size:22px;font-weight:900;color:${success ? '#80ff90' : '#ff9090'};margin-bottom:12px;text-shadow:0 1px 3px #000">+${lvl}</div>
@@ -20254,9 +20257,9 @@ function doSynthesis(rarity, poolType) {
     const base = candidates[Math.floor(Math.random() * candidates.length)];
     const { card: newCard } = addCardToCollection(base, poolType);
     const rc = RARITY_CONFIG[nextRarity];
-    alert(`賀 合成成功！\n獲得【${rc.name}】${newCard.name}！\n\n成功率：${(finalRate * 100).toFixed(2)}%`);
+    alert(`🎉 合成成功！\n獲得【${rc.name}】${newCard.name}！\n\n成功率：${(finalRate * 100).toFixed(2)}%`);
   } else {
-    alert(`傷 合成失敗\n消耗了 ${SYNTHESIS_COST} 張${RARITY_CONFIG[rarity].name}卡牌${tickets > 0 ? ' 和 ' + tickets + '張強化券' : ''}\n\n成功率：${(finalRate * 100).toFixed(2)}%`);
+    alert(`💔 合成失敗\n消耗了 ${SYNTHESIS_COST} 張${RARITY_CONFIG[rarity].name}卡牌${tickets > 0 ? ' 和 ' + tickets + '張強化券' : ''}\n\n成功率：${(finalRate * 100).toFixed(2)}%`);
   }
 
   updateUI();
@@ -20435,9 +20438,9 @@ function renderGachaPage() {
       <div class="gacha-banner-desc">${t.desc}</div>
     </div>
     <div class="gacha-pool-tabs">
-      <button class="gacha-pool-tab ${activeTab === 'hero' ? 'active' : ''}" data-gacha-pool="hero">劍 英雄池</button>
-      <button class="gacha-pool-tab ${activeTab === 'pet' ? 'active' : ''}" data-gacha-pool="pet">爪 守護池</button>
-      <button class="gacha-pool-tab ${activeTab === 'transform' ? 'active' : ''}" data-gacha-pool="transform">炎 變身池</button>
+      <button class="gacha-pool-tab ${activeTab === 'hero' ? 'active' : ''}" data-gacha-pool="hero">⚔ 英雄池</button>
+      <button class="gacha-pool-tab ${activeTab === 'pet' ? 'active' : ''}" data-gacha-pool="pet">🐾 守護池</button>
+      <button class="gacha-pool-tab ${activeTab === 'transform' ? 'active' : ''}" data-gacha-pool="transform">🔥 變身池</button>
     </div>
     <div class="rarity-bar">
       <div class="rarity-item white">普通<br>50%</div>
@@ -20450,26 +20453,26 @@ function renderGachaPage() {
     <div class="gacha-buttons">
       <button class="gacha-btn-main gold-pull ${goldDisabled ? 'disabled' : ''}" id="gacha-single" ${goldDisabled ? 'disabled' : ''}>
         <span>${goldDisabled ? '今日已額滿' : '金幣抽'}</span>
-        <span class="gacha-cost">金 ${goldSingleCost.toLocaleString()} · 剩 ${goldRemaining}/${goldMax}</span>
+        <span class="gacha-cost">💰 ${goldSingleCost.toLocaleString()} · 剩 ${goldRemaining}/${goldMax}</span>
       </button>
       <button class="gacha-btn-main ten-pull" id="gacha-ten">
         <span>十連 <span class="gacha-bonus-tag">+1</span></span>
-        <span class="gacha-cost">鑽 ${costTen}</span>
+        <span class="gacha-cost">💎 ${costTen}</span>
       </button>
       <button class="gacha-btn-main big-pull" id="gacha-big">
         <span>30+5 <span class="gacha-bonus-tag blue-tag">保底藍</span></span>
-        <span class="gacha-cost">鑽 ${costBig}</span>
+        <span class="gacha-cost">💎 ${costBig}</span>
       </button>
     </div>
     <div style="font-size:10px;color:var(--parchment-dark);text-align:center;line-height:1.6;margin-bottom:10px">
       ${goldDisabled
-        ? `! 今日金幣抽已用完，明日6:00重置<br>`
+        ? `⚠ 今日金幣抽已用完，明日6:00重置<br>`
         : `今日剩餘金幣抽：${goldRemaining}/${goldMax} 次，下次重置：${resetText}<br>`
       }
       十連抽必得綠色及以上 · 30+5抽必得稀有及以上<br>
-      擁有鑽石：<span style="color:#80d4ff;font-weight:700">鑽 ${GS.resources.gem.toLocaleString()}</span>
+      擁有鑽石：<span style="color:#80d4ff;font-weight:700">💎 ${GS.resources.gem.toLocaleString()}</span>
       &nbsp;|&nbsp;
-      擁有金幣：<span style="color:#f0c040;font-weight:700">金 ${GS.resources.gold.toLocaleString()}</span>
+      擁有金幣：<span style="color:#f0c040;font-weight:700">💰 ${GS.resources.gold.toLocaleString()}</span>
     </div>
 
     <!-- 圖鑑網格 -->
@@ -20486,7 +20489,7 @@ function renderGachaPage() {
         } else if (activeTab === 'hero') {
           spriteHtml = spriteEmojiHTML(item.sprite, 32);
         } else {
-          spriteHtml = `<div style="font-size:28px;filter:${owned ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.6))' : 'grayscale(1) opacity(0.3)'}">${item.icon || '?'}</div>`;
+          spriteHtml = `<div style="font-size:28px;filter:${owned ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.6))' : 'grayscale(1) opacity(0.3)'}">${item.icon || '❓'}</div>`;
         }
         return `
         <div class="gacha-col-item rarity-${item.rarity} ${owned ? 'owned' : 'locked'}">
@@ -20603,10 +20606,10 @@ function renderShopPage() {
 
 function renderDungeonPage() {
   const dungeons = [
-    { name: '哥布林巢穴', level: 10, icon: '洞️', status: '開放' },
-    { name: '亡者密室', level: 25, icon: '暗殺', status: '開放' },
-    { name: '沙漠遗迹', level: 40, icon: '殿️', status: '未解锁' },
-    { name: '龍焰洞窟', level: 60, icon: '龍', status: '未解锁' },
+    { name: '哥布林巢穴', level: 10, icon: '🕳️', status: '開放' },
+    { name: '亡者密室', level: 25, icon: '💀', status: '開放' },
+    { name: '沙漠遗迹', level: 40, icon: '🏛️', status: '未解锁' },
+    { name: '龍焰洞窟', level: 60, icon: '🐉', status: '未解锁' },
   ];
   return `
     <div class="bag-section-title" style="margin-bottom:10px">副本列表</div>
@@ -20746,7 +20749,7 @@ function bindPageEvents(page) {
         const upgradeMult = 1.15;
         if (skill.dmgMult) skill.dmgMult = Math.round(skill.dmgMult * upgradeMult * 100) / 100;
         if (skill.healAmt) skill.healAmt = Math.round(skill.healAmt * upgradeMult * 100) / 100;
-        addLog('system', `光 ${skill.name} 升至 Lv.${skill.level}！`);
+        addLog('system', `✨ ${skill.name} 升至 Lv.${skill.level}！`);
         updateUI();
         updateSkillBar();
         el.pageContent.innerHTML = renderHeroPage();
@@ -20961,7 +20964,7 @@ function bindPageEvents(page) {
         const itemId = slot.dataset.itemId;
         const result = submitEquipToCombo(comboId, itemId, 1);
         if (result.success) {
-          if (result.comboComplete) addLog('system', `光 組合完成！屬性加成已生效`);
+          if (result.comboComplete) addLog('system', `✨ 組合完成！屬性加成已生效`);
           el.pageContent.innerHTML = renderCollectionPage();
           bindPageEvents('codex');
           updateUI();
@@ -20977,7 +20980,7 @@ function bindPageEvents(page) {
         const comboId = btn.dataset.quickSubmit;
         const result = quickSubmitCombo(comboId);
         if (result.totalSubmitted > 0) {
-          if (result.completed) addLog('system', `光 組合完成！屬性加成已生效`);
+          if (result.completed) addLog('system', `✨ 組合完成！屬性加成已生效`);
           el.pageContent.innerHTML = renderCollectionPage();
           bindPageEvents('codex');
           updateUI();
@@ -21658,10 +21661,10 @@ function renderCastlePage() {
 
   return `
     <div style="text-align:center;padding:12px;border-bottom:1px solid var(--gold-dark);margin-bottom:10px">
-      <div style="font-size:22px;margin-bottom:4px">城</div>
+      <div style="font-size:22px;margin-bottom:4px">🏰</div>
       <div class="nation-name">城堡列表</div>
       <div style="font-size:10px;color:var(--parchment-dark);margin-top:2px">
-        ${isLeader ? '王 你是會長，可對无主或敌國城堡宣戰' : '占领城堡的公會會長可收取區域税收'}
+        ${isLeader ? '👑 你是會長，可對无主或敌國城堡宣戰' : '占领城堡的公會會長可收取區域税收'}
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:10px;padding:4px 2px">
@@ -21690,7 +21693,7 @@ function renderCastlePage() {
               </div>
               <div style="text-align:right">
                 <div style="font-size:10px;color:${isMine ? '#80ff90' : (isAIOwned ? '#ff8080' : '#f0c040')};font-weight:600">
-                  ${isMine ? '城 我方占领' : (isAIOwned ? '劍 敌方占领' : '免 无主之地')}
+                  ${isMine ? '🏰 我方占领' : (isAIOwned ? '⚔ 敌方占领' : '🆓 无主之地')}
                 </div>
                 <div style="font-size:9px;color:var(--parchment-dark);margin-top:1px">${c.ownerName}</div>
               </div>
@@ -21703,14 +21706,14 @@ function renderCastlePage() {
             </div>
             ${isMine ? `
               <button class="castle-card-btn" data-siege="${c.id}" data-action="collect" style="width:100%;padding:6px;font-size:11px">
-                金 领取税收（${GS.castleTreasuries?.[c.id] || 0} 金幣）
+                💰 领取税收（${GS.castleTreasuries?.[c.id] || 0} 金幣）
               </button>
             ` : `
               <button class="castle-card-btn ${onCool || !isLeader || isWarDeclared ? '' : 'declare-war-btn'}" 
                       data-siege="${c.id}" data-action="declare"
                       style="width:100%;padding:6px;font-size:11px;${onCool || !isLeader || isWarDeclared ? 'opacity:0.5;cursor:default' : ''}"
                       ${onCool || !isLeader || isWarDeclared ? 'disabled' : ''}>
-                ${isWarDeclared ? '劍 已宣戰' : (onCool ? `冷卻中 ${formatTime(remain)}` : (isLeader ? '劍 宣戰攻城' : '仅會長可宣戰'))}
+                ${isWarDeclared ? '⚔ 已宣戰' : (onCool ? `冷卻中 ${formatTime(remain)}` : (isLeader ? '⚔ 宣戰攻城' : '仅會長可宣戰'))}
               </button>
             `}
           </div>
@@ -21718,7 +21721,7 @@ function renderCastlePage() {
       }).join('')}
     </div>
     <div style="margin-top:14px;font-size:11px;color:var(--parchment);line-height:1.6;padding:10px;border:1px solid rgba(240,192,64,0.2);border-radius:6px;background:rgba(0,0,0,0.2)">
-      <div style="color:var(--gold-bright);font-weight:700;margin-bottom:4px">燈 攻城战规则</div>
+      <div style="color:var(--gold-bright);font-weight:700;margin-bottom:4px">💡 攻城战规则</div>
       • 公会会长可对无主或敌方城堡宣戰<br>
       • 宣戰后传送至攻城战场，限时 20 分鐘<br>
       • 击破城门 → 消灭守军 → 击败城主即占领成功<br>
@@ -21919,7 +21922,7 @@ function bindMenuPageEvents(page) {
         skillLevels: {},
         isPlayerLegion: true,
       });
-      addLog('system', `城 創建了軍團：${name.trim()}`);
+      addLog('system', `🏰 創建了軍團：${name.trim()}`);
       updateUI();
       el.pageContent.innerHTML = renderMenuPage('nation');
       bindMenuPageEvents('nation');
@@ -21994,8 +21997,8 @@ function bindMenuPageEvents(page) {
         GS.siegeWarDeclareCount = (GS.siegeWarDeclareCount || 0) + 1;
 
         console.log('[Siege] 宣战成功！siegeWar=', GS.siegeWar, '剩余次数:', dailyLimit - GS.siegeWarDeclareCount);
-        addLog('system', `劍 宣戰成功！前往【${castle.name}】攻城戰場，20分鐘內佔領取勝！`);
-        addLog('siege', `劍️ 宣戰成功！目標：${castle.name}`);
+        addLog('system', `⚔ 宣戰成功！前往【${castle.name}】攻城戰場，20分鐘內佔領取勝！`);
+        addLog('siege', `⚔️ 宣戰成功！目標：${castle.name}`);
         showFloatingText('宣戰成功！', '#ff8040');
         el.pageContent.innerHTML = renderMenuPage('nation');
         bindMenuPageEvents('nation');
@@ -22011,7 +22014,7 @@ function bindMenuPageEvents(page) {
         if (amount <= 0) { alert('暂无可领取的税收'); return; }
         GS.resources.gold += amount;
         GS.castleTreasuries[cid] = 0;
-        addLog('system', `金 领取城堡税收 ${amount.toLocaleString()} 金幣`);
+        addLog('system', `💰 领取城堡税收 ${amount.toLocaleString()} 金幣`);
         updateUI();
         el.pageContent.innerHTML = renderMenuPage('nation');
         bindMenuPageEvents('nation');
@@ -22086,7 +22089,7 @@ function bindMenuPageEvents(page) {
         GS.nationContribution -= cost;
         levels[sid] = curLv + 1;
         GS.nationSkillLevels = levels;
-        addLog('system', `光 國家技能【${skill.name}】升級到 Lv.${curLv + 1}！`);
+        addLog('system', `✨ 國家技能【${skill.name}】升級到 Lv.${curLv + 1}！`);
         updateUI();
         el.pageContent.innerHTML = renderMenuPage('nation');
         bindMenuPageEvents('nation');
@@ -22153,7 +22156,7 @@ function bindMenuPageEvents(page) {
           isAI: true,
         });
       });
-      addLog('system', `城 創建了公會：${name.trim()}（${newMembers.length} 名AI慕名加入）`);
+      addLog('system', `🏰 創建了公會：${name.trim()}（${newMembers.length} 名AI慕名加入）`);
       updateUI();
       updatePlayerBadge();
       el.pageContent.innerHTML = renderMenuPage('guild');
@@ -22170,7 +22173,7 @@ function bindMenuPageEvents(page) {
         if (!confirm(`申請加入【${g.name}】，AI會長將自動審核，確定申請？`)) return;
         const ok = joinAIGuild(gid);
         if (ok) {
-          addLog('system', `✓ 已加入公會：${g.name}`);
+          addLog('system', `✅ 已加入公會：${g.name}`);
           updateUI();
           updatePlayerBadge();
           el.pageContent.innerHTML = renderMenuPage('guild');
@@ -22198,7 +22201,7 @@ function bindMenuPageEvents(page) {
           g.todayDonatedGold = (g.todayDonatedGold || 0) + amount;
           g.funds = (g.funds || 0) + amount;
           g.myContribution = (g.myContribution || 0) + contribGain;
-          addLog('system', `金 捐獻 ${amount.toLocaleString()} 金幣，獲得 ${contribGain} 貢獻值`);
+          addLog('system', `💰 捐獻 ${amount.toLocaleString()} 金幣，獲得 ${contribGain} 貢獻值`);
         } else {
           if ((g.todayDonatedGem || 0) + amount > dailyGemLimit) { alert('今日鑽石捐獻已達上限'); return; }
           if (GS.resources.gem < amount) { alert('鑽石不足'); return; }
@@ -22207,7 +22210,7 @@ function bindMenuPageEvents(page) {
           g.todayDonatedGem = (g.todayDonatedGem || 0) + amount;
           g.funds = (g.funds || 0) + amount * 100;
           g.myContribution = (g.myContribution || 0) + contribGain;
-          addLog('system', `鑽 捐獻 ${amount} 鑽石，獲得 ${contribGain} 貢獻值`);
+          addLog('system', `💎 捐獻 ${amount} 鑽石，獲得 ${contribGain} 貢獻值`);
         }
         updateUI();
         el.pageContent.innerHTML = renderMenuPage('guild');
@@ -22247,7 +22250,7 @@ function bindMenuPageEvents(page) {
           const ag = AI_GUILDS.find(x => x.id === GS.guild.id);
           if (ag) ag.skillLevels = { ...levels };
         }
-        addLog('system', `光 公會技能【${def.name}】升級到 Lv.${curLv + 1}！`);
+        addLog('system', `✨ 公會技能【${def.name}】升級到 Lv.${curLv + 1}！`);
         updateUI();
         el.pageContent.innerHTML = renderMenuPage('guild');
         bindMenuPageEvents('guild');
@@ -22302,7 +22305,7 @@ function bindMenuPageEvents(page) {
         const ag = AI_GUILDS.find(x => x.id === GS.guild.id);
         if (ag) ag.leader = m.name;
       }
-      addLog('system', `王 會長之位已轉讓給 ${m.name}`);
+      addLog('system', `👑 會長之位已轉讓給 ${m.name}`);
       updatePlayerBadge();
       el.pageContent.innerHTML = renderMenuPage('guild');
       bindMenuPageEvents('guild');
@@ -22319,7 +22322,7 @@ function bindMenuPageEvents(page) {
         const ag = AI_GUILDS.find(x => x.id === GS.guild.id);
         if (ag) ag.notice = newNotice.trim();
       }
-      addLog('system', '卷 已更新公會公告');
+      addLog('system', '📜 已更新公會公告');
       el.pageContent.innerHTML = renderMenuPage('guild');
       bindMenuPageEvents('guild');
     });
@@ -22336,7 +22339,7 @@ function bindMenuPageEvents(page) {
           GS.guild.membersData = GS.guild.membersData.filter(m => m.name !== targetName);
         }
         // AI成員：從AI公会移除（只影響展示數據，不從GLOBAL_AI_POOL刪除）
-        addLog('system', `踢 已踢除成員：${targetName}`);
+        addLog('system', `👢 已踢除成員：${targetName}`);
         el.pageContent.innerHTML = renderMenuPage('guild');
         bindMenuPageEvents('guild');
       });
@@ -22353,7 +22356,7 @@ function bindMenuPageEvents(page) {
             m.name === targetName ? { ...m, role: '副會長' } : m
           );
         }
-        addLog('system', `劍️ 已任命 ${targetName} 為副會長`);
+        addLog('system', `⚔️ 已任命 ${targetName} 為副會長`);
         el.pageContent.innerHTML = renderMenuPage('guild');
         bindMenuPageEvents('guild');
       });
@@ -22379,12 +22382,12 @@ function bindMenuPageEvents(page) {
         }
         GS.guild = null;
         GS.guildId = null;
-        addLog('system', '毀 公會已解散');
+        addLog('system', '🏚️ 公會已解散');
       } else {
         if (!confirm('確定退出公會？貢獻值將被清除。')) return;
         GS.guild = null;
         GS.guildId = null;
-        addLog('system', '門 退出了公會');
+        addLog('system', '🚪 退出了公會');
       }
       updateUI();
       updatePlayerBadge();
@@ -22417,7 +22420,7 @@ function bindMenuPageEvents(page) {
             if (confirm(`领取税收：${tax} 金幣？`)) {
               GS.resources.gold += tax;
               GS.castleTreasuries[cid] = 0;
-              addLog('system', `金 领取了 ${tax} 金幣城堡税收！`);
+              addLog('system', `💰 领取了 ${tax} 金幣城堡税收！`);
               updateUI();
               el.pageContent.innerHTML = renderMenuPage('castle');
               bindMenuPageEvents('castle');
@@ -22466,7 +22469,7 @@ function bindMenuPageEvents(page) {
         if (!confirm(confirmMsg)) return;
 
         GS.warDeclared = { castleId: cid, declaredAt: now };
-        addLog('system', `劍️ 公會【${GS.guild.name}】對【${castle.name}】發起宣戰！`);
+        addLog('system', `⚔️ 公會【${GS.guild.name}】對【${castle.name}】發起宣戰！`);
         closeSidePage();
         // 直接传送到对应攻城区域地圖并进入攻城战
         loadMap('siege_' + cid);
@@ -22807,7 +22810,7 @@ function handleScepterClick() {
   const isKing = GS.nation && getNationKingInfo(GS.nation)?.name === GS.player.name;
 
   if (!isLeader && !isKing) {
-    addLog('system', '✗ 僅軍團長或國王可拾取權杖！');
+    addLog('system', '❌ 僅軍團長或國王可拾取權杖！');
     return;
   }
 
@@ -22836,7 +22839,7 @@ function handlePickupScepter() {
   const isKing = GS.nation && getNationKingInfo(GS.nation)?.name === GS.player.name;
 
   if (!isLeader && !isKing) {
-    addLog('siege', '✗ 僅軍團長或國王可拾取權杖！');
+    addLog('siege', '❌ 僅軍團長或國王可拾取權杖！');
     console.log('[Scepter] 拾取失敗：玩家不是軍團長或國王。role=' + (GS.guild?.role || '無'));
     return;
   }
@@ -22858,8 +22861,8 @@ function handlePickupScepter() {
   updateSiegeMapByPhase('權杖被拾取，暫顯無權杖地圖');
 
   // 全服公告
-  addLog('siege', `杯 ${legionName}的${playerName}奪取了權杖！成為新城主！`);
-  addLog('system', `城 【${castle?.name || '城堡'}】易主！新城主：${legionName}，全體傳送中...`);
+  addLog('siege', `🏆 ${legionName}的${playerName}奪取了權杖！成為新城主！`);
+  addLog('system', `🏰 【${castle?.name || '城堡'}】易主！新城主：${legionName}，全體傳送中...`);
   showSiegeBroadcast(`${legionName} 佔領了城堡！全體傳送中...`);
 
   // 顯示 3 秒倒數傳送畫面
@@ -23023,11 +23026,11 @@ function executeSiegeSwapAndTeleport(castle, newDefenderId, oldDefenderId, legio
       const unit = worldLayer?.querySelector?.('.world-unit.hero');
       if (unit) positionUnit(unit, GS.player.x, GS.player.y);
     }
-    addLog('siege', `盾 你們成為守城方！已傳送至城門內側進行防守。`);
+    addLog('siege', `🛡 你們成為守城方！已傳送至城門內側進行防守。`);
     setTimeout(() => { handlePickupScepter._picking = false; }, 500);
   } else {
     // 攻城方：先回村莊，停留 2 秒後自動重新進入攻城戰
-    addLog('siege', `劍 你們為攻城方！正在傳送至村莊...`);
+    addLog('siege', `⚔ 你們為攻城方！正在傳送至村莊...`);
     const castleId = castle?.id || 'gludio';
     // 切換到村莊地圖（會自動 cleanupCastleSiege）
     loadMap('village');
@@ -23036,7 +23039,7 @@ function executeSiegeSwapAndTeleport(castle, newDefenderId, oldDefenderId, legio
       if (window.enterSiegeBattle) {
         window.enterSiegeBattle(castleId);
       }
-      addLog('siege', `劍 已重新進入攻城戰場，在城外集結！`);
+      addLog('siege', `⚔ 已重新進入攻城戰場，在城外集結！`);
       setTimeout(() => { handlePickupScepter._picking = false; }, 500);
     }, 2000);
   }
@@ -23280,7 +23283,7 @@ function handleSiegeUnitDeath(m) {
   // 城门被击破 → 生成守護塔 + 守军
   if (m.type === 'gate') {
     castleSiegePhase = 'tower';
-    addLog('siege', '城 城門已被擊破！守護塔和守衛出現了！');
+    addLog('siege', '🏰 城門已被擊破！守護塔和守衛出現了！');
     // 播放城門破壞音效
     if (window.AudioSystem && AudioSystem.playSfx) AudioSystem.playSfx('gatebreak');
     // 大爆炸/破碎特效
@@ -23313,7 +23316,7 @@ function handleSiegeUnitDeath(m) {
   // 守護塔被摧毁 → 掉落黃金權杖
   if (m.type === 'tower') {
     console.log('[Siege] Tower destroyed! Scepter dropped at x=' + SIEGE_SCEPTER_POS.x + ' y=' + SIEGE_SCEPTER_POS.y);
-    addLog('siege', '塔 守護塔已被摧毀！黃金權杖掉落！');
+    addLog('siege', '🗼 守護塔已被摧毀！黃金權杖掉落！');
     castleSiegePhase = 'scepter';
     updateSiegeMapByPhase('守護塔被破壞，權杖掉落');
     const scepter = createSiegeStructure({
@@ -23460,7 +23463,7 @@ function renderSiegeDefenderSprite(guard) {
       <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${attackSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
       <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${attack2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
       <img class="unit-sprite-img sprite-frame-hit" src="${hitSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-      <div class="unit-sprite-tomb" style="display:none">墓</div>
+      <div class="unit-sprite-tomb" style="display:none">🪦</div>
       <div class="slash-effect"></div>
       <div class="dust-particles"></div>
     </div>
@@ -24171,11 +24174,11 @@ function bindEvents() {
       if (GS.autoSkillEnabled) {
         autoSkillBtn.classList.add('active');
         autoSkillLabel.textContent = '自動技 開';
-        addLog('system', '雷 自動技能已開啟');
+        addLog('system', '⚡ 自動技能已開啟');
       } else {
         autoSkillBtn.classList.remove('active');
         autoSkillLabel.textContent = '自動技 關';
-        addLog('system', '雷 自動技能已關閉，僅普攻');
+        addLog('system', '⚡ 自動技能已關閉，僅普攻');
       }
     });
   }
@@ -24661,11 +24664,11 @@ function bindEvents() {
         
         if (dlStatus) {
           const ok = done - failed;
-          dlStatus.textContent = '✓ 下載完成！' + ok + '/' + total + ' 張圖資' + (failed ? '（' + failed + ' 失敗）' : '');
+          dlStatus.textContent = '✅ 下載完成！' + ok + '/' + total + ' 張圖資' + (failed ? '（' + failed + ' 失敗）' : '');
         }
       } catch (err) {
         console.error('Offline package error:', err);
-        if (dlStatus) dlStatus.textContent = '✗ 打包失敗：' + (err.message || err);
+        if (dlStatus) dlStatus.textContent = '❌ 打包失敗：' + (err.message || err);
       } finally {
         dlOfflineBtn.disabled = false;
         dlOfflineBtn.style.opacity = '1';
@@ -24870,8 +24873,8 @@ function doDeclareSiege(castleId, override) {
   };
   GS.siegeWarDeclareCount = (GS.siegeWarDeclareCount || 0) + 1;
   console.log('[Siege] 宣战成功！siegeWar=', GS.siegeWar);
-  addLog('system', `劍 宣戰成功！前往【${castle.name}】攻城戰場，20分鐘內佔領取勝！`);
-  addLog('siege', `劍️ 宣戰成功！目標：${castle.name}`);
+  addLog('system', `⚔ 宣戰成功！前往【${castle.name}】攻城戰場，20分鐘內佔領取勝！`);
+  addLog('siege', `⚔️ 宣戰成功！目標：${castle.name}`);
   showFloatingText('宣戰成功！', '#ff8040');
   // 重新渲染
   if (el.pageContent) {
@@ -25004,7 +25007,7 @@ window.addEventListener('load', function() {
   }
 });
 
-// v2.3.4：登出 / 換帳號時清空所有遊戲狀態
+// v2.3.0：登出 / 換帳號時清空所有遊戲狀態
 // 確保換帳號登入後只顯示該帳號從 server 取到的角色，A 帳角色不會殘留到 B 帳
 window.__clearGameState = function() {
   try {
