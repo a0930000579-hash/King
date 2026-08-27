@@ -45,7 +45,7 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// ========== 資料存儲層（v2.3.0：Postgres / JSON 自動切換） ==========
+// ========== 資料存儲層（v2.3.3：Postgres / JSON 自動切換） ==========
 const db = require('./db-layer.cjs');
 // 密碼雜湊
 function hashPassword(pwd) {
@@ -228,7 +228,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.3.0',
+      version: '2.3.3',
       time: Date.now(),
       socketIo: socketIoInstalled,
       dbBackend: db.getBackend(),
@@ -786,7 +786,7 @@ async function initGM() {
   await initGM();
   server.listen(PORT, () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.3.0 · 正式營運伺服器');
+    console.log('  君主之刃 v2.3.3 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://localhost:' + PORT);
     console.log('  資料後端: ' + db.getBackend());
