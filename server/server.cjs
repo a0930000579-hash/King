@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.0.7 · 正式營運後端伺服器
+  君主之刃 v2.0.8 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -207,7 +207,7 @@ function serveStatic(req, res, pathname) {
     };
     // 隱藏原始碼下載：以不易猜到的檔名提供，並強制下載
     if (pathname === '/mb-src-q7x2k9.zip') {
-      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.0.7-source.zip"';
+      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.0.8-source.zip"';
       headers['Content-Type'] = 'application/zip';
       headers['X-Accel-Buffering'] = 'yes';
     }
@@ -365,8 +365,10 @@ async function handleApi(req, res, pathname, query) {
   }
 
   // GET /api/characters/check-name?name=xxx&server=xxx
-  // 檢查角色名是否重複（同一伺服器全局唯一）
+  // 檢查角色名是否重複（同一伺服器全局唯一，需登入）
   if (req.method === 'GET' && pathname === '/api/characters/check-name') {
+    const accName = getAuthAccount(req);
+    if (!accName) return sendJson(res, 401, { error: '未登入' });
     const name = query.name || '';
     const serverId = query.server || 'zeus';
     if (!name) return sendJson(res, 400, { error: '名稱不可為空' });
@@ -381,6 +383,48 @@ async function handleApi(req, res, pathname, query) {
       if (conflict) break;
     }
     return sendJson(res, 200, { available: !conflict, name: name });
+  }
+
+  // POST /api/characters/create（v2.0.8 修復：正式創建角色）
+  if (req.method === 'POST' && pathname === '/api/characters/create') {
+    const accName = getAuthAccount(req);
+    if (!accName) return sendJson(res, 401, { error: '未登入' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const name = String(body.name || '').trim();
+    const classId = String(body.classId || 'warrior');
+    const serverId = String(body.server || 'zeus');
+    if (name.length < 2 || name.length > 10)
+      return sendJson(res, 400, { error: '名稱長度需 2-10 字元' });
+    const validClasses = ['warrior','paladin','rogue','archer','mage','warlock'];
+    if (!validClasses.includes(classId))
+      return sendJson(res, 400, { error: '無效的職業' });
+    // 名稱重複檢查
+    const accounts = loadJSON('accounts.json', {});
+    for (const a in accounts) {
+      const chars = (accounts[a].characters && accounts[a].characters[serverId]) || [];
+      for (const ch of chars) {
+        if (ch && ch.name === name) return sendJson(res, 409, { error: '此名稱已被使用' });
+      }
+    }
+    const acc = accounts[accName];
+    if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
+    if (!acc.characters) acc.characters = {};
+    if (!acc.characters[serverId]) acc.characters[serverId] = [];
+    if (acc.characters[serverId].length >= 3)
+      return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
+    const newChar = {
+      name: name,
+      classId: classId,
+      level: 1,
+      exp: 0,
+      created: true,
+      createdAt: Date.now(),
+    };
+    const idx = acc.characters[serverId].length;
+    acc.characters[serverId].push(newChar);
+    saveJSON('accounts.json', accounts);
+    return sendJson(res, 201, { ok: true, idx: idx, character: newChar });
   }
 
   // POST /api/characters/save（存檔）
