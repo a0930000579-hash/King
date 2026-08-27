@@ -806,5 +806,19 @@
   "transform/purple/shadow_assassin/up": "assets/transform/purple/shadow_assassin/up.jpg",
   "transform/purple/shadow_assassin/walk_down": "assets/transform/purple/shadow_assassin/walk_down.jpg",
   "transform/purple/shadow_assassin/walk_side": "assets/transform/purple/shadow_assassin/walk_side.jpg",
-  "transform/purple/shadow_assassin/walk_up": "assets/transform/purple/shadow_assassin/walk_up.jpg"
+  "transform/purple/shadow_assassin/walk_up": "assets/transform/purple/shadow_assassin/walk_up.jpg",
+  "12_map/aadkq57bnqcoi": "assets/12_map/aadkq57bnqcoi.jpg",
+  "12_map/aadkq6dgpaoci": "assets/12_map/aadkq6dgpaoci.jpg",
+  "12_map/aadkq6e5eqgcq": "assets/12_map/aadkq6e5eqgcq.jpg",
+  "12_map/aadkq6irizcgg": "assets/12_map/aadkq6irizcgg.jpg",
+  "12_map/aadkq6ivjsmio": "assets/12_map/aadkq6ivjsmio.jpg",
+  "12_map/aadkq6mpmrkki": "assets/12_map/aadkq6mpmrkki.jpg",
+  "12_map/siege": "assets/12_map/siege.jpg",
+  "aadkq57bnqcoi_ve_miaoda": "assets/12_map/aadkq57bnqcoi.jpg",
+  "aadkq6dgpaoci_ve_miaoda": "assets/12_map/aadkq6dgpaoci.jpg",
+  "aadkq6ivjsmio_ve_miaoda": "assets/12_map/aadkq6ivjsmio.jpg",
+  "aadkq6irizcgg_ve_miaoda": "assets/12_map/aadkq6irizcgg.jpg",
+  "aadkq6e5eqgcq_ve_miaoda": "assets/12_map/aadkq6e5eqgcq.jpg",
+  "aadkq6mpmrkki_ve_miaoda": "assets/12_map/aadkq6mpmrkki.jpg",
+  "eeeRmMzAbt": "assets/12_map/siege.jpg"
 }
