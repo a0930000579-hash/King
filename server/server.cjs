@@ -798,7 +798,7 @@ async function initGM() {
 (async function bootstrap() {
   await db.init();
   await initGM();
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
     console.log('  君主之刃 v2.3.5 · 正式營運伺服器');
     console.log('========================================');
