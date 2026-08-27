@@ -1,5 +1,5 @@
 /**
- * 君主之刃 v2.0 · 正式營運後端伺服器
+  君主之刃 v2.0.7 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -199,12 +199,19 @@ function serveStatic(req, res, pathname) {
   try {
     const stat = fs.statSync(filePath);
     const mime = getMime(filePath);
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': mime,
       'Content-Length': stat.size,
       'Cache-Control': pathname.endsWith('.zip') ? 'no-cache' : 'public, max-age=300',
       'X-Content-Type-Options': 'nosniff',
-    });
+    };
+    // 隱藏原始碼下載：以不易猜到的檔名提供，並強制下載
+    if (pathname === '/mb-src-q7x2k9.zip') {
+      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.0.7-source.zip"';
+      headers['Content-Type'] = 'application/zip';
+      headers['X-Accel-Buffering'] = 'yes';
+    }
+    res.writeHead(200, headers);
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
     stream.on('error', () => { res.writeHead(500); res.end('Internal Server Error'); });
