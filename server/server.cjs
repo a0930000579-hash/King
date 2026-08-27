@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.0.9 · 正式營運後端伺服器
+  君主之刃 v2.1.0 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -239,6 +239,18 @@ async function handleApi(req, res, pathname, query) {
     res.writeHead(204);
     res.end();
     return;
+  }
+
+  // === 健康檢查（永遠回 JSON 200）===
+  // 用於前端連線判定：確認此伺服器真的是 monarch-blade 營運伺服器
+  if (req.method === 'GET' && pathname === '/api/health') {
+    return sendJson(res, 200, {
+      status: 'online',
+      server: 'monarch-blade',
+      version: '2.1.0',
+      time: Date.now(),
+      socketIo: socketIoInstalled,
+    });
   }
 
   // === 帳號相關 ===
@@ -830,7 +842,7 @@ initGM();
 // ========== 啟動 ==========
 server.listen(PORT, () => {
   console.log('========================================');
-  console.log('  君主之刃 v2.0 · 正式營運伺服器');
+  console.log('  君主之刃 v2.1.0 · 正式營運伺服器');
   console.log('========================================');
   console.log('  服務位址: http://localhost:' + PORT);
   console.log('  資料目錄: ' + DATA_DIR);
