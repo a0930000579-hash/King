@@ -285,8 +285,20 @@ function assetUrl(id) {
   if (typeof id !== 'string') return id;
   // 已經是完整 URL / data URI → 原樣回傳
   if (id.startsWith('http') || id.startsWith('data:')) return id;
-  // 以 / 開頭的絕對路徑（平台靜資 /spark/...） → 原樣回傳（由 onerror fallback 處理）
-  if (id.startsWith('/')) return id;
+  // 以 / 開頭的絕對路徑（平台靜資 /spark/...） → 嘗試提取 id 走本地 manifest/分類
+  if (id.startsWith('/')) {
+    const sparkId = _extractCdnId(id);
+    if (sparkId && (ASSETS_MANIFEST?.[sparkId] || getSpriteCategory(sparkId))) {
+      // 本地有對應 → 走本地路徑
+      if (ASSETS_MANIFEST?.[sparkId]) {
+        const p = ASSETS_MANIFEST[sparkId];
+        return p.startsWith('assets/') ? p : 'assets/' + p;
+      }
+      const cat = getSpriteCategory(sparkId);
+      if (cat) return 'assets/' + cat + '/' + sparkId + '.png';
+    }
+    return id; // 沒對應就原樣回傳（由 onerror fallback 處理）
+  }
   // 已經是 assets/ 開頭的本地路徑 → 原樣回傳（由 onerror fallback 處理）
   if (id.startsWith('assets/')) return id;
   // 從完整 CDN URL 中萃取出純 ID（防止重複包前綴）
@@ -352,6 +364,29 @@ function _extractCdnId(src) {
 function handleImgError(img) {
   if (!img || img.dataset.errFallback === 'fail') return;
   const src = img.src || '';
+
+  // ===== v2.1.3：精靈 frame 圖片失敗 → 直接替換成 idle frame，絕不閃爍/透明 =====
+  if (img.classList && img.classList.contains('unit-sprite-img')) {
+    // 已經處理過就跳過
+    if (img.dataset.errFallback === 'sprite_fixed') return;
+    const unitEl = img.closest && img.closest('.world-unit');
+    const idleImg = unitEl ? unitEl.querySelector('.sprite-frame-idle') : null;
+    if (idleImg && idleImg !== img && idleImg.src) {
+      img.dataset.errFallback = 'sprite_fixed';
+      img.classList.add('frame-error');
+      // 替換為 idle 的 src，確保畫面顯示的是有效圖而非破圖/透明
+      img.src = idleImg.src;
+      img.style.opacity = '1';
+      img.style.visibility = 'visible';
+      return;
+    }
+    // 連 idle 都找不到 → 最少要確保不透明不閃爍
+    img.dataset.errFallback = 'sprite_fixed';
+    img.classList.add('frame-error');
+    img.style.opacity = '1';
+    img.style.visibility = 'visible';
+    return;
+  }
 
   // 已經走過 CDN 還是失敗 → 最終 fallback
   if (img.dataset.errFallback === 'cdn') {
@@ -9782,7 +9817,7 @@ function renderWarDeclareTab(nation) {
       ${allTargets.length === 0 ? '<div style="text-align:center;padding:20px;color:var(--parchment-dark);font-size:11px">暫無可宣戰的城堡</div>' : ''}
       ${allTargets.map(c => {
         const cnation = NATIONS.find(n => n.id === c.nation);
-        const isMine = !!( (GS.legionId || GS.guildId) && c.ownerGuildId === (GS.legionId || GS.guildId) );
+        const isMine = !!( (GS.legionId || GS.guildId) && c.ownerGuildId && c.ownerGuildId === (GS.legionId || GS.guildId) );
         const hasOwner = !!(c.owner || c.ownerGuildId);
         const onCool = GS.warCooldowns?.[c.id] && GS.warCooldowns[c.id] > now;
         const remain = onCool ? Math.ceil((GS.warCooldowns[c.id] - now) / 1000) : 0;
@@ -9847,7 +9882,7 @@ function renderCastleTab(nation) {
 
   const renderCard = (c) => {
     const myLegionId = GS.legionId || GS.guildId || null;
-    const isMine = !!(myLegionId && c.ownerGuildId === myLegionId);
+    const isMine = !!(myLegionId && c.ownerGuildId && c.ownerGuildId === myLegionId);
     const hasOwner = !!(c.owner || c.ownerGuildId);
     const isActiveSiege = activeSiege && activeSiege.castleId === c.id;
     // 按鈕狀態
@@ -11071,7 +11106,7 @@ function applyUnitAnimFrame(unitEl, uid, state) {
   // 狀態與索引都沒變 → 跳過 DOM 操作
   if (frames.lastState === showFrame && frames.lastIdx === showIdx) return;
 
-  // 全部隱藏再顯示目標
+  // 全部隱藏再顯示目標（v2.1.3：只用 display 切換，絕不設 opacity/visibility 0 導致閃爍）
   frames.idle.style.display = 'none';
   for (let i = 0; i < frames.walk.length; i++) frames.walk[i].style.display = 'none';
   for (let i = 0; i < frames.attack.length; i++) frames.attack[i].style.display = 'none';
@@ -11079,17 +11114,25 @@ function applyUnitAnimFrame(unitEl, uid, state) {
   if (frames.tomb) frames.tomb.style.display = 'none';
 
   const isFrameBroken = (el) => el && el.classList && el.classList.contains('frame-error');
+  // v2.1.3：從當前索引往前找，找到第一個沒壞的 frame；找不到才退回 idle
+  function findGoodFrame(arr, idx) {
+    if (!arr || arr.length === 0) return null;
+    const start = ((idx % arr.length) + arr.length) % arr.length;
+    for (let i = 0; i < arr.length; i++) {
+      const k = (start - i + arr.length) % arr.length;
+      if (arr[k] && !isFrameBroken(arr[k])) return arr[k];
+    }
+    return null;
+  }
   let target = null;
   if (showFrame === 'tomb') target = frames.tomb;
   else if (showFrame === 'hit') target = isFrameBroken(frames.hit) ? frames.idle : frames.hit;
   else if (showFrame === 'attack') {
-    const atkEl = frames.attack[showIdx] || frames.attack[0];
-    target = !isFrameBroken(atkEl) ? atkEl : frames.idle;
+    target = findGoodFrame(frames.attack, showIdx) || (isFrameBroken(frames.idle) ? frames.walk[0] : frames.idle);
   } else if (showFrame === 'walk') {
-    const wEl = frames.walk[showIdx] || frames.walk[0];
-    target = !isFrameBroken(wEl) ? wEl : frames.idle;
+    target = findGoodFrame(frames.walk, showIdx) || frames.idle;
   } else {
-    target = frames.idle;
+    target = isFrameBroken(frames.idle) ? (frames.walk[0] || frames.idle) : frames.idle;
   }
   if (target) target.style.display = showFrame === 'tomb' ? 'flex' : 'block';
 
@@ -11214,7 +11257,7 @@ function initCC2UI() {
       btn.className = 'cc2-class-icon-btn' + (cid === charCreateState.classId ? ' active' : '');
       btn.dataset.classId = cid;
       if (sp.useImg && sp.idle) {
-        btn.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" onerror="this.style.display='none';this.parentElement.querySelector('.cc2-icon-fallback')&&(this.parentElement.querySelector('.cc2-icon-fallback').style.display='flex');"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8)">${detail.name.slice(0, 1)}</span>`;
+        btn.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" onerror="this.style.display='none';this.parentElement.querySelector('.cc2-icon-fallback')&&(this.parentElement.querySelector('.cc2-icon-fallback').style.display='flex');"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none">${detail.name.slice(0, 1)}</span>`;
       } else {
         btn.innerHTML = `<span class="cc2-icon-fallback" style="display:flex;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8)">${detail.name.slice(0, 1)}</span>`;
       }
@@ -21832,7 +21875,9 @@ function bindMenuPageEvents(page) {
           alert('僅國王與軍團長可宣戰\n\n提示：加入軍團後自動成為軍團長');
           return;
         }
-        if (castle.ownerGuildId === (GS.legionId || GS.guildId)) { alert('不能攻擊己方城堡！'); return; }
+        const myLegionId2 = GS.legionId || GS.guildId;
+        // 僅當我方有軍團且城堡確屬我方軍團時才擋
+        if (myLegionId2 && castle.ownerGuildId === myLegionId2) { alert('不能攻擊己方城堡！'); return; }
 
         // 每日次數檢查
         const today = new Date().toDateString();
@@ -24704,7 +24749,8 @@ window.declareSiegeWar = function(castleId) {
     showSiegeAlert('僅國王與軍團長可宣戰\n\n提示：加入軍團後自動成為軍團長');
     return;
   }
-  if (castle.ownerGuildId === myLegionId) { showSiegeAlert('不能攻擊己方城堡！'); return; }
+  // 僅當我方有軍團且城堡確屬我方軍團時才擋；無軍團或無主城堡都可宣戰
+  if (myLegionId && castle.ownerGuildId === myLegionId) { showSiegeAlert('不能攻擊己方城堡！'); return; }
   // 每日次數
   const today = new Date().toDateString();
   if (GS.siegeWarDate !== today) { GS.siegeWarDate = today; GS.siegeWarDeclareCount = 0; }
