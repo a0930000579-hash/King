@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>E2E 全流程 v3</title>
+<style>
+  body { margin: 0; background: #0a0703; }
+  pre { position: fixed; bottom: 0; left: 0; right: 0; max-height: 45%; z-index: 99999;
+    background: rgba(0,0,0,0.92); color: #6f6; font-size: 9px; padding: 4px; margin: 0;
+    overflow: auto; border-top: 1px solid #444; font-family: monospace; white-space: pre-wrap; }
+  iframe { position: fixed; inset: 0; width: 100%; height: 55%; border: none; }
+</style></head>
+<body>
+<iframe id="game" src="/"></iframe>
+<pre id="log">booting...
+</pre>
+<script>
+var pre = document.getElementById('log');
+function log(s) { pre.textContent += s + '\n'; pre.scrollTop = pre.scrollHeight; }
+var iframe = document.getElementById('game');
+var win, doc;
+var errs = [], warns = [];
+
+iframe.addEventListener('load', function() {
+  win = iframe.contentWindow;
+  doc = win.document;
+  log('iframe loaded');
+
+  // 攔截
+  var oe = win.console.error, ow = win.console.warn;
+  win.console.error = function() {
+    var m = Array.prototype.slice.call(arguments).map(function(a){return String(a)}).join(' ');
+    errs.push(m.substring(0,250));
+    return oe.apply(win.console, arguments);
+  };
+  win.console.warn = function() {
+    var m = Array.prototype.slice.call(arguments).map(function(a){return String(a)}).join(' ');
+    warns.push(m.substring(0,200));
+    return ow.apply(win.console, arguments);
+  };
+  win.addEventListener('error', function(e) {
+    errs.push('[UNCAUGHT] ' + e.message + ' @ ' + e.filename + ':' + e.lineno);
+  });
+
+  waitFor(function() { return win.AuthSystem && win.AuthSystem.api; }, startFlow, 120);
+});
+
+function waitFor(fn, cb, maxTries) {
+  var t = 0;
+  var iv = setInterval(function() {
+    t++;
+    try { if (fn()) { clearInterval(iv); cb(); return; } } catch(e) {}
+    if (t >= maxTries) { clearInterval(iv); log('WAIT TIMEOUT'); finish(); }
+  }, 200);
+}
+
+function startFlow() {
+  log('AuthSystem ready');
+  var acc = 'diagv3_' + Date.now().toString(36).slice(-6);
+  var charName = 'V3' + Date.now().toString(36).slice(-4);
+  var classId = 'warrior';
+
+  // 註冊
+  win.AuthSystem.api('/auth/register', { account: acc, password: 'test1234' })
+    .then(function(r) {
+      log('register OK: ' + acc);
+      return win.AuthSystem.api('/auth/login', { account: acc, password: 'test1234' });
+    })
+    .then(function(loginRes) {
+      log('login OK, token=' + (loginRes.token || 'none').substring(0,20) + '...');
+      // 手動存 token（模擬 doLogin 的行為）
+      try {
+        win.localStorage.setItem('mmo_token', loginRes.token);
+        win.localStorage.setItem('mmo_account', acc);
+      } catch(e) { log('ls err: ' + e.message); }
+      return win.AuthSystem.api('/servers');
+    })
+    .then(function(srv) {
+      var servers = srv.servers || srv || [];
+      log('servers: ' + servers.length);
+      var zeus = servers.find(function(s){ return s.id === 'zeus'; });
+      if (win.__setCurrentServer) win.__setCurrentServer(zeus || { id: 'zeus', name: '宙斯' });
+      return win.AuthSystem.api('/characters/create', {
+        name: charName, classId: classId, server: 'zeus',
+      });
+    })
+    .then(function(cr) {
+      log('create char OK: name=' + (cr.character && cr.character.name) + ' idx=' + cr.idx);
+      // 設定 new_char 標記讓 onAuthReady 讀取
+      try {
+        win.localStorage.setItem('mmo_new_char', JSON.stringify({
+          name: charName, classId: classId, level: 1, exp: 0,
+          created: true, createdAt: Date.now(), serverId: 'zeus',
+        }));
+      } catch(e) {}
+      // 正確觸發：AuthSystem 進入遊戲 → onAuthReady → init
+      log('calling startGameCommon / AuthSystem.hide + onAuthReady');
+      // 直接呼叫 onAuthReady（與 AuthSystem.hide 內部邏輯相同）
+      if (typeof win.onAuthReady === 'function') {
+        win.document.getElementById('auth-overlay').classList.add('hidden');
+        try {
+          win.onAuthReady({ id: 'zeus', name: '宙斯' });
+          log('onAuthReady called');
+        } catch(e) {
+          log('onAuthReady ERR: ' + e.message + '\n' + (e.stack||'').split('\n').slice(0,5).join('\n'));
+          finish();
+          return;
+        }
+        // 等幾秒後檢查
+        setTimeout(checkWorld, 4000);
+      } else {
+        log('no onAuthReady function!');
+        finish();
+      }
+    })
+    .catch(function(e) {
+      log('API ERR: ' + e.message + ' (status=' + e.status + ')');
+      finish();
+    });
+}
+
+var checkCount = 0;
+function checkWorld() {
+  checkCount++;
+  var bg = doc.getElementById('scene-bg');
+  var bgStyle = bg ? win.getComputedStyle(bg).backgroundImage : '';
+  var player = doc.querySelector('.world-unit.hero');
+  var npcs = doc.querySelectorAll('.npc-unit').length;
+  var monsters = doc.querySelectorAll('.world-unit.monster').length;
+  var authHidden = doc.getElementById('auth-overlay') && doc.getElementById('auth-overlay').classList.contains('hidden');
+  var loc = (doc.getElementById('location-name') && doc.getElementById('location-name').textContent) || '';
+  var mini = !!doc.getElementById('minimap-canvas');
+  var ieb = doc.getElementById('init-error-box');
+  var ieShown = ieb && win.getComputedStyle(ieb).display !== 'none';
+  var wl = doc.getElementById('world-layer');
+  var wlChildren = wl ? wl.children.length : -1;
+
+  log('[' + checkCount + 's] auth=' + authHidden +
+      ' player=' + (!!player) +
+      ' npc=' + npcs +
+      ' mon=' + monsters +
+      ' bgLen=' + bgStyle.length +
+      ' loc=' + loc +
+      ' mini=' + mini +
+      ' ie=' + ieShown +
+      ' wlChildren=' + wlChildren +
+      ' errs=' + errs.length);
+
+  if (checkCount >= 10) {
+    finish();
+  } else {
+    setTimeout(checkWorld, 1000);
+  }
+}
+
+function finish() {
+  log('\n========== 錯誤 (' + errs.length + ') ==========');
+  errs.forEach(function(e, i) { log((i+1) + '. ' + e); });
+  log('\n========== 警告 (' + warns.length + ') ==========');
+  warns.forEach(function(e, i) { log((i+1) + '. ' + e); });
+
+  var bg = doc.getElementById('scene-bg');
+  var bgStyle = bg ? win.getComputedStyle(bg).backgroundImage : '';
+  log('\n========== 背景圖 URL ==========');
+  log(bgStyle.substring(0, 150) || '(empty)');
+
+  var wl = doc.getElementById('world-layer');
+  log('\n========== world-layer ==========');
+  if (wl) {
+    log('children: ' + wl.children.length);
+    for (var i = 0; i < wl.children.length && i < 15; i++) {
+      var c = wl.children[i];
+      log('  [' + i + '] ' + c.tagName + '.' + (c.className||'').substring(0,40) + ' id=' + (c.id||''));
+    }
+    log('\ninnerHTML 前 500 字:');
+    log(wl.innerHTML.substring(0, 500));
+  } else log('NOT FOUND');
+
+  var player = doc.querySelector('.world-unit.hero');
+  log('\n========== 玩家單元 ==========');
+  if (player) {
+    log('classList: ' + player.className);
+    var img = player.querySelector('img');
+    log('img count: ' + player.querySelectorAll('img').length);
+    var firstImg = player.querySelector('img');
+    log('first img src: ' + (firstImg ? firstImg.src.substring(0, 120) : 'no img'));
+    var nameEl = player.querySelector('.unit-name');
+    log('name: ' + (nameEl ? nameEl.textContent : 'none'));
+    // 背景圖
+    var sprite = player.querySelector('.unit-sprite-wrap, .unit-sprite-img');
+    if (sprite) {
+      log('sprite tag: ' + sprite.tagName + ' src=' + (sprite.src||'').substring(0,100));
+    }
+  } else log('NO PLAYER');
+
+  log('\n========== NPC count ==========');
+  log(doc.querySelectorAll('.npc-unit').length + ' NPC');
+
+  document.title = 'E2EV3_DONE';
+}
+</script>
+</body></html>
