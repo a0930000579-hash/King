@@ -2,15 +2,8 @@
   "19811013": {
     "account": "19811013",
     "passwordHash": "5c8e831b1e6f5174a16c547114237426cffce27223fb1833eac1e1febad23504",
-    "createdAt": "2026-08-26T19:54:52.447Z",
+    "createdAt": "2026-08-27T11:23:17.039Z",
     "isGM": true,
-    "characters": {}
-  },
-  "test001": {
-    "account": "test001",
-    "passwordHash": "f175157aa0a32d138c6e43656712f2c162145443b852d14ba641d8cd71fa38ef",
-    "createdAt": "2026-08-26T19:54:54.441Z",
-    "isGM": false,
     "characters": {}
   }
 }
