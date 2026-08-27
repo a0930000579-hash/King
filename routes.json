@@ -2,6 +2,16 @@
   {
     "path": "/",
     "file": "index.html",
-    "name": "君主之刃 · 自由移动 MMORPG"
+    "name": "君主之刃 v2.0.4 · 正式營運"
+  },
+  {
+    "path": "/game-bundle",
+    "file": "game-bundle.html",
+    "name": "君主之刃 · 自由移動 MMORPG"
+  },
+  {
+    "path": "/offline",
+    "file": "offline/index.html",
+    "name": "君主之刃 · 自由移動 MMORPG"
   }
 ]

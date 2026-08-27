@@ -1,5 +1,5 @@
 /* ============================================================
-    君主之刃 v2.0.8 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
+    君主之刃 v2.0.9 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
     對接後端 /api/auth/* 與 Socket.IO 多人連線
     ============================================================ */
 
@@ -14,6 +14,22 @@
   let currentView = 'home'; // home | login | register | server | char | charCreate
   let currentServer = null;
   let serverList = [];
+  // v2.0.9：連線狀態（online/offline/unknown），方便除錯與營運監控
+  let onlineState = 'unknown';
+
+  function setOnlineState(state) {
+    onlineState = state;
+    // 更新頁面上所有連線狀態標籤
+    const labels = document.querySelectorAll('.auth-online-state');
+    labels.forEach(l => {
+      l.textContent = state === 'online' ? '● 已連線' : state === 'offline' ? '● 未連線伺服器' : '● 連線中';
+      l.className = 'auth-online-state ' + state;
+    });
+    // 通知 game.js（若已載入）
+    if (window.__updateOnlineState) {
+      try { window.__updateOnlineState(state); } catch (e) {}
+    }
+  }
 
   // DOM 引用（延遲載入）
   function $(id) { return document.getElementById(id); }
@@ -32,14 +48,23 @@
       const tok = localStorage.getItem(STORAGE_TOKEN_KEY);
       if (tok) opts.headers['Authorization'] = 'Bearer ' + tok;
     } catch (e) { /* ignore */ }
-    const res = await fetch(url, opts);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = new Error(data.error || ('HTTP ' + res.status));
-      err.status = res.status;
-      throw err;
+    try {
+      const res = await fetch(url, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // v2.0.9：伺服器有回應但 4xx/5xx → 仍算連得上，只是業務錯誤
+        if (onlineState !== 'online') setOnlineState('online');
+        const err = new Error(data.error || ('HTTP ' + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      if (onlineState !== 'online') setOnlineState('online');
+      return data;
+    } catch (e) {
+      // 網路錯誤 / fetch 失敗 → 離線
+      if (onlineState !== 'offline') setOnlineState('offline');
+      throw e;
     }
-    return data;
   }
 
   // ========== 伺服器列表 ==========
@@ -124,12 +149,12 @@
       case 'charCreate': html = renderCharCreate(); break;
     }
     overlay.innerHTML = '<div class="auth-particles"></div>' + html;
-    // v2.0.8：滾動回頂（針對長頁官網）
+    // v2.0.9：滾動回頂（針對長頁官網）
     overlay.scrollTop = 0;
     bindCurrentViewEvents();
   }
 
-  // ========== 官方首頁（天堂M風長頁 / v2.0.8 動畫強化版）==========
+  // ========== 官方首頁（天堂M風長頁 / v2.0.9 動畫強化版）==========
   function renderHome() {
     const HERO_IMG = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7s6dsyii_ve_miaoda';
     const SCENE_BANNER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xjuwips_ve_miaoda';
@@ -534,7 +559,7 @@
           <div class="cc-header">
             <button class="auth-back-btn" id="btn-cc-back">‹ 返回</button>
             <div class="cc-title">角 色 創 建</div>
-            <div style="width:60px;"></div>
+            <div class="auth-online-state unknown" title="連線狀態">● 連線中</div>
           </div>
 
           <div class="cc-class-row" id="cc-class-row">
@@ -548,29 +573,25 @@
                 <div class="cc-portrait-glow"></div>
               </div>
               <div class="cc-portrait-name" id="cc-class-name-display">${defaultClass.name}</div>
+              <!-- 真系列變身展示（精簡小尺寸） -->
+              <div class="cc-transform-mini">
+                <div class="cc-tp-mini-sprite" id="cc-tp-sprite"></div>
+                <div class="cc-tp-mini-name" id="cc-tp-name">真系列</div>
+              </div>
             </div>
             <div class="cc-info-col">
               <div class="cc-class-title" id="cc-class-title">${defaultClass.name}</div>
               <div class="cc-class-desc" id="cc-class-desc">${defaultClass.desc}</div>
-              <div class="cc-stats-box">
-                <div class="cc-stat-row"><span>主要武器</span><b id="cc-weapon">${defaultClass.weapon}</b></div>
-                <div class="cc-stat-row"><span>戰鬥類型</span><b id="cc-type">${defaultClass.type}</b></div>
-                <div class="cc-stat-row"><span>職業特性</span><b id="cc-trait">${defaultClass.trait}</b></div>
+              <div class="cc-stats-mini">
+                <span><em>${defaultClass.weapon}</em> 主要武器</span>
+                <span><em>${defaultClass.type}</em> 戰鬥類型</span>
+                <span><em>${defaultClass.trait}</em> 職業特性</span>
               </div>
-              <div class="cc-init-stats">
-                <div class="cc-init-title">初 始 能 力 值</div>
-                <div class="cc-init-grid" id="cc-init-stats">
-                  <!-- 動態填充 -->
-                </div>
-              </div>
-              <div class="cc-transform-preview">
-                <div class="cc-tp-title">職 業 最 強 變 身</div>
-                <div class="cc-tp-body">
-                  <div class="cc-tp-sprite" id="cc-tp-sprite"></div>
-                  <div class="cc-tp-name" id="cc-tp-name">真・死亡騎士</div>
-                  <div class="cc-tp-rarity">神話級</div>
-                </div>
-              </div>
+              <!-- 初始能力值（預設摺疊） -->
+              <details class="cc-stats-details">
+                <summary>初始能力值</summary>
+                <div class="cc-init-grid" id="cc-init-stats"></div>
+              </details>
             </div>
           </div>
 
@@ -810,7 +831,7 @@
         document.querySelectorAll('.char-slot').forEach(slot => {
           slot.addEventListener('click', () => {
             if (slot.dataset.create === '1') {
-              // v2.0.8 修復：進入角色建立頁，不再直接跳進空世界
+              // v2.0.9 修復：進入角色建立頁，不再直接跳進空世界
               switchView('charCreate');
             } else {
               // 載入既有角色
@@ -883,15 +904,15 @@
               nameStatus.className = 'cc-name-status error';
             }
           } catch (e) {
-            // 後端不可用：離線模式直接允許
-            nameChecked = true;
-            nameStatus.textContent = '✓ 此名稱可使用（離線模式）';
-            nameStatus.className = 'cc-name-status ok';
+            // v2.0.9：後端不可用時顯示錯誤，不允許創建（避免重名漏洞）
+            nameChecked = false;
+            nameStatus.textContent = '✗ 未連線伺服器（靜態站模式）。需以 Web Service 部署（npm start）才能創建角色';
+            nameStatus.className = 'cc-name-status error';
           }
           updateBtnState();
         });
         // 創建按鈕
-        createBtn.addEventListener('click', () => {
+        createBtn.addEventListener('click', async () => {
           const selected = document.querySelector('.cc-class-item.active');
           const classId = selected ? selected.dataset.classId : 'warrior';
           const name = nameInput.value.trim();
@@ -917,12 +938,28 @@
             localStorage.setItem('mmo_characters', JSON.stringify(chars));
             localStorage.setItem('mmo_new_char', JSON.stringify(newChar));
           } catch (e) {}
-          // 呼叫後端創建 API（若有）
-          api('/characters/create', {
-            name: name,
-            classId: classId,
-            server: currentServer?.id || 'zeus',
-          }).catch(() => {});
+          // 呼叫後端創建 API（v2.0.9：失敗時阻擋，不直接進遊戲）
+          let createOk = false;
+          try {
+            const result = await api('/characters/create', {
+              name: name,
+              classId: classId,
+              server: currentServer?.id || 'zeus',
+            });
+            createOk = !!(result && result.ok);
+          } catch (e) {
+            // 後端不可用：顯示錯誤並阻止進入
+            nameStatus.textContent = '✗ 未連線伺服器：' + (e.message || '請以 Web Service 模式部署（npm start）');
+            nameStatus.className = 'cc-name-status error';
+            createBtn.disabled = false;
+            return;
+          }
+          if (!createOk) {
+            nameStatus.textContent = '✗ 創建失敗，請重試';
+            nameStatus.className = 'cc-name-status error';
+            createBtn.disabled = false;
+            return;
+          }
           // 進入遊戲世界
           startGameCommon();
         });
@@ -930,7 +967,7 @@
         // 初始渲染
         renderInitStats('warrior');
         updateTpPreview('warrior');
-        // v2.0.8：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
+        // v2.0.9：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
         setTimeout(() => {
           if (typeof window.SPRITE !== 'undefined' && typeof assetUrl === 'function') {
             document.querySelectorAll('.cc-class-item').forEach(item => {
@@ -996,7 +1033,7 @@
         if (status === 401 || e.message === '帳號或密碼錯誤') {
           errEl.textContent = e.message || '帳號或密碼錯誤';
         } else {
-          errEl.textContent = '無法連線伺服器，請稍後再試或使用其他帳號';
+          errEl.textContent = '無法連線伺服器，請確認已用 Web Service 模式部署（npm start）';
         }
     } finally {
       btn.disabled = false;
@@ -1035,7 +1072,7 @@
       if (e.message && e.message.includes('已存在')) {
         errEl.textContent = e.message;
       } else {
-        errEl.textContent = '無法連線伺服器，請稍後再試';
+        errEl.textContent = '無法連線伺服器，請確認已用 Web Service 模式部署（npm start）';
       }
     } finally {
       btn.disabled = false;
@@ -1178,7 +1215,7 @@
         <div class="gm-section-title">傳送</div>
         <div class="gm-row">
           <select id="gm-teleport-map">
-            <option value="village">古魯丁村莊</option>
+            <option value="village">米德加特村</option>
             <option value="goblin">哥布林森林</option>
             <option value="goblin_cave">哥布林洞窟</option>
             <option value="dark_forest">黑暗森林</option>
