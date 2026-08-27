@@ -45,31 +45,8 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// ========== 資料存取工具 ==========
-function loadJSON(filename, defaultValue) {
-  try {
-    const f = path.join(DATA_DIR, filename);
-    if (!fs.existsSync(f)) return defaultValue;
-    const raw = fs.readFileSync(f, 'utf8');
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('[DB] 讀取失敗', filename, ':', e.message);
-    return defaultValue;
-  }
-}
-function saveJSON(filename, data) {
-  try {
-    const f = path.join(DATA_DIR, filename);
-    const tmp = f + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tmp, f);
-    return true;
-  } catch (e) {
-    console.error('[DB] 寫入失敗', filename, ':', e.message);
-    return false;
-  }
-}
-
+// ========== 資料存儲層（v2.3.0：Postgres / JSON 自動切換） ==========
+const db = require('./db-layer.cjs');
 // 密碼雜湊
 function hashPassword(pwd) {
   return crypto.createHash('sha256').update(pwd + '::sword_lineage_v2_salt').digest('hex');
@@ -251,9 +228,10 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.1.3',
+      version: '2.3.0',
       time: Date.now(),
       socketIo: socketIoInstalled,
+      dbBackend: db.getBackend(),
     });
   }
 
@@ -265,23 +243,19 @@ async function handleApi(req, res, pathname, query) {
     const account = String(body.account || '').trim();
     const password = String(body.password || '');
 
-    if (account.length < 4 || account.length > 20) return sendJson(res, 400, { error: '帳號長度需 4-20 字元' });
+  if (account.length < 4 || account.length > 20) return sendJson(res, 400, { error: '帳號長度需 4-20 字元' });
     if (password.length < 6) return sendJson(res, 400, { error: '密碼至少 6 位' });
     if (!/^[a-zA-Z0-9_]+$/.test(account)) return sendJson(res, 400, { error: '帳號只能包含英數字與底線' });
 
-    const accounts = loadJSON('accounts.json', {});
-    if (accounts[account]) return sendJson(res, 409, { error: '帳號已存在' });
+    const existing = await db.getAccount(account);
+    if (existing) return sendJson(res, 409, { error: '帳號已存在' });
 
-    accounts[account] = {
-      account,
-      passwordHash: hashPassword(password),
-      createdAt: new Date().toISOString(),
-      isGM: account === GM_ACCOUNT,
-      characters: {}, // serverId -> [ {...saveData} ]
-    };
-    saveJSON('accounts.json', accounts);
+    const ok = await db.createAccount(account, hashPassword(password), account === GM_ACCOUNT);
+    if (!ok) return sendJson(res, 409, { error: '帳號已存在' });
 
-    console.log('[Auth] 新帳號註冊:', account);
+    const acc = await db.getAccount(account);
+    const token = genToken(account);
+    console.log('[Auth] 註冊成功:', account);
     return sendJson(res, 201, { ok: true, account });
   }
 
@@ -292,15 +266,14 @@ async function handleApi(req, res, pathname, query) {
     const account = String(body.account || '').trim();
     const password = String(body.password || '');
 
-    const accounts = loadJSON('accounts.json', {});
-    const acc = accounts[account];
+    const acc = await db.getAccount(account);
     if (!acc) return sendJson(res, 401, { error: '帳號或密碼錯誤' });
-    if (acc.passwordHash !== hashPassword(password)) {
-      // 檢查 GM 預設帳號（首次）
-      if (account === GM_ACCOUNT && password === GM_PASSWORD) {
-        // 正常，直接通過（上面 hash 比對已失敗，這裡單獨處理明碼比對）
-        acc.passwordHash = hashPassword(password); // 更新為 hash
-        saveJSON('accounts.json', accounts);
+    const expectedHash = acc.passwordHash;
+    const inputHash = hashPassword(password);
+    if (expectedHash !== inputHash) {
+      // 向後兼容：舊版可能存明碼（僅開發期數據）
+      if (password === expectedHash) {
+        await db.updatePassword(account, inputHash);
       } else {
         return sendJson(res, 401, { error: '帳號或密碼錯誤' });
       }
@@ -320,15 +293,15 @@ async function handleApi(req, res, pathname, query) {
   if (req.method === 'GET' && pathname === '/api/auth/me') {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
-    const accounts = loadJSON('accounts.json', {});
-    const acc = accounts[accName];
+    const acc = await db.getAccount(accName);
     if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
+    const charCount = await db.getCharacterCount(accName, 'zeus');
     return sendJson(res, 200, {
       ok: true,
       account: acc.account,
       isGM: !!acc.isGM,
       createdAt: acc.createdAt,
-      characterCount: Object.keys(acc.characters || {}).reduce((sum, k) => sum + (acc.characters[k] || []).length, 0),
+      characterCount: charCount,
     });
   }
 
@@ -347,21 +320,8 @@ async function handleApi(req, res, pathname, query) {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     const serverId = query.server || 'zeus';
-    const accounts = loadJSON('accounts.json', {});
-    const acc = accounts[accName];
-    if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
-    const chars = (acc.characters && acc.characters[serverId]) || [];
-    // 只回傳基本資訊，不回傳完整存檔
-    const list = chars.map((c, i) => ({
-      idx: i,
-      name: c.player?.name || c.name || '',
-      level: c.player?.level || c.level || 1,
-      classId: c.player?.classId || c.classId || 'warrior',
-      className: c.player?.className || c.className || '戰士',
-      nation: c.nation || null,
-      nationName: c.nationName || '',
-    }));
-    return sendJson(res, 200, { ok: true, characters: list });
+    const chars = await db.listCharacters(accName, serverId);
+    return sendJson(res, 200, { ok: true, characters: chars });
   }
 
   // GET /api/characters/:idx?server=xxx
@@ -372,36 +332,23 @@ async function handleApi(req, res, pathname, query) {
     const idx = parseInt(idxStr);
     if (isNaN(idx)) return sendJson(res, 400, { error: '無效索引' });
     const serverId = query.server || 'zeus';
-    const accounts = loadJSON('accounts.json', {});
-    const acc = accounts[accName];
-    if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
-    const chars = (acc.characters && acc.characters[serverId]) || [];
-    if (!chars[idx]) return sendJson(res, 404, { error: '角色不存在' });
-    return sendJson(res, 200, { ok: true, saveData: chars[idx] });
+    const saveData = await db.getCharacter(accName, serverId, idx);
+    if (!saveData) return sendJson(res, 404, { error: '角色不存在' });
+    return sendJson(res, 200, { ok: true, saveData });
   }
 
   // GET /api/characters/check-name?name=xxx&server=xxx
-  // 檢查角色名是否重複（同一伺服器全局唯一，需登入）
   if (req.method === 'GET' && pathname === '/api/characters/check-name') {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     const name = query.name || '';
     const serverId = query.server || 'zeus';
     if (!name) return sendJson(res, 400, { error: '名稱不可為空' });
-    const accounts = loadJSON('accounts.json', {});
-    let conflict = false;
-    for (const accName in accounts) {
-      const acc = accounts[accName];
-      const chars = (acc.characters && acc.characters[serverId]) || [];
-      for (const ch of chars) {
-        if (ch && ch.name === name) { conflict = true; break; }
-      }
-      if (conflict) break;
-    }
-    return sendJson(res, 200, { available: !conflict, name: name });
+    const available = await db.checkNameUnique(name, serverId);
+    return sendJson(res, 200, { available, name });
   }
 
-  // POST /api/characters/create（v2.0.9 修復：正式創建角色）
+  // POST /api/characters/create
   if (req.method === 'POST' && pathname === '/api/characters/create') {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
@@ -416,34 +363,18 @@ async function handleApi(req, res, pathname, query) {
     if (!validClasses.includes(classId))
       return sendJson(res, 400, { error: '無效的職業' });
     // 名稱重複檢查
-    const accounts = loadJSON('accounts.json', {});
-    for (const a in accounts) {
-      const chars = (accounts[a].characters && accounts[a].characters[serverId]) || [];
-      for (const ch of chars) {
-        if (ch && ch.name === name) return sendJson(res, 409, { error: '此名稱已被使用' });
-      }
-    }
-    const acc = accounts[accName];
-    if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
-    if (!acc.characters) acc.characters = {};
-    if (!acc.characters[serverId]) acc.characters[serverId] = [];
-    if (acc.characters[serverId].length >= 3)
-      return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
+    const unique = await db.checkNameUnique(name, serverId);
+    if (!unique) return sendJson(res, 409, { error: '此名稱已被使用' });
+    const charCount = await db.getCharacterCount(accName, serverId);
+    if (charCount >= 3) return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
     const newChar = {
-      name: name,
-      classId: classId,
-      level: 1,
-      exp: 0,
-      created: true,
-      createdAt: Date.now(),
+      name, classId, level: 1, exp: 0, created: true, createdAt: Date.now(),
     };
-    const idx = acc.characters[serverId].length;
-    acc.characters[serverId].push(newChar);
-    saveJSON('accounts.json', accounts);
-    return sendJson(res, 201, { ok: true, idx: idx, character: newChar });
+    await db.createCharacter(accName, serverId, charCount, name, classId, newChar);
+    return sendJson(res, 201, { ok: true, idx: charCount, character: newChar });
   }
 
-  // POST /api/characters/save（存檔）
+  // POST /api/characters/save
   if (req.method === 'POST' && pathname === '/api/characters/save') {
     const accName = getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
@@ -452,13 +383,7 @@ async function handleApi(req, res, pathname, query) {
     const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx != null ? body.charIdx : 0;
     const saveData = body.saveData || {};
-    const accounts = loadJSON('accounts.json', {});
-    const acc = accounts[accName];
-    if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
-    if (!acc.characters) acc.characters = {};
-    if (!acc.characters[serverId]) acc.characters[serverId] = [];
-    acc.characters[serverId][charIdx] = saveData;
-    saveJSON('accounts.json', accounts);
+    await db.saveCharacter(accName, serverId, charIdx, saveData);
     return sendJson(res, 200, { ok: true, savedAt: new Date().toISOString() });
   }
 
@@ -467,11 +392,9 @@ async function handleApi(req, res, pathname, query) {
   if (req.method === 'POST' && pathname === '/api/bug-report') {
     let body;
     try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
-    const list = loadJSON('bug-reports.json', []);
-    const now = new Date().toISOString();
     const report = {
       id: body.id || ('br_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)),
-      createdAt: body.createdAt || now,
+      createdAt: body.createdAt || new Date().toISOString(),
       version: body.version || '',
       description: String(body.description || '').slice(0, 2000),
       player: body.player || {},
@@ -480,9 +403,7 @@ async function handleApi(req, res, pathname, query) {
       errors: Array.isArray(body.errors) ? body.errors.slice(0, 20) : [],
       account: getAuthAccount(req) || null,
     };
-    list.unshift(report);
-    if (list.length > 5000) list.length = 5000;
-    saveJSON('bug-reports.json', list);
+    await db.addBugReport(report);
     return sendJson(res, 201, { ok: true, id: report.id });
   }
   // GET /api/bug-report/ping
@@ -491,36 +412,68 @@ async function handleApi(req, res, pathname, query) {
   }
 
   // === GM API 驗證 ===
-  function verifyGM(req) {
+  async function verifyGM(req) {
     const acc = getAuthAccount(req);
     if (!acc) return false;
-    const accounts = loadJSON('accounts.json', {});
-    return !!(accounts[acc] && accounts[acc].isGM);
+    const a = await db.getAccount(acc);
+    return !!(a && a.isGM);
   }
 
   // GET /api/bug-report/list
   if (req.method === 'GET' && (pathname === '/api/bug-report/list' || pathname === '/api/bug-report')) {
-    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
-    const list = loadJSON('bug-reports.json', []);
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    // JSON 模式直接讀檔；Postgres 模式查詢最新 500 筆
+    let list = [];
+    if (db.getBackend() === 'postgres') {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT id, account, version, description, player, device, page_url, errors, created_at FROM bug_reports ORDER BY created_at DESC LIMIT 500'
+        );
+        list = rows.map(r => ({
+          id: r.id, account: r.account, version: r.version,
+          description: r.description, player: r.player || {},
+          device: r.device || {}, pageUrl: r.page_url || '',
+          errors: r.errors || [], createdAt: r.created_at,
+        }));
+      } catch (e) { console.error('[GM] bug list error:', e.message); list = []; }
+    } else {
+      const f = path.join(DATA_DIR, 'bug-reports.json');
+      if (fs.existsSync(f)) {
+        try { list = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch(_) { list = []; }
+      }
+    }
     return sendJson(res, 200, { ok: true, list });
   }
   // DELETE /api/bug-report/:id
   if (req.method === 'DELETE' && pathname.startsWith('/api/bug-report/')) {
     const id = decodeURIComponent(pathname.slice('/api/bug-report/'.length));
-    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
-    const list = loadJSON('bug-reports.json', []);
-    const idx = list.findIndex(r => r.id === id);
-    if (idx === -1) return sendJson(res, 404, { error: 'not found' });
-    list.splice(idx, 1);
-    saveJSON('bug-reports.json', list);
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    if (db.getBackend() === 'postgres') {
+      try { await pgPool.query('DELETE FROM bug_reports WHERE id = $1', [id]); }
+      catch (e) { return sendJson(res, 500, { error: e.message }); }
+    } else {
+      const f = path.join(DATA_DIR, 'bug-reports.json');
+      let list = [];
+      if (fs.existsSync(f)) { try { list = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch(_) {} }
+      const idx = list.findIndex(r => r.id === id);
+      if (idx === -1) return sendJson(res, 404, { error: 'not found' });
+      list.splice(idx, 1);
+      fs.writeFileSync(f, JSON.stringify(list, null, 2));
+    }
     return sendJson(res, 200, { ok: true });
   }
   // POST /api/bug-report/clear
   if (req.method === 'POST' && pathname === '/api/bug-report/clear') {
     let body = {};
     try { body = await parseJsonBody(req); } catch (e) { /* ignore */ }
-    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
-    saveJSON('bug-reports.json', []);
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    if (db.getBackend() === 'postgres') {
+      try { await pgPool.query('DELETE FROM bug_reports'); }
+      catch (e) { return sendJson(res, 500, { error: e.message }); }
+    } else {
+      const f = path.join(DATA_DIR, 'bug-reports.json');
+      fs.writeFileSync(f, '[]');
+    }
     return sendJson(res, 200, { ok: true });
   }
 
@@ -553,24 +506,21 @@ async function handleApi(req, res, pathname, query) {
 
   // POST /api/gm/adjust - GM 調整資源(金幣/鑽石)等
   if (req.method === 'POST' && pathname === '/api/gm/adjust') {
-    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
     let body;
     try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
     const targetAccount = String(body.account || '');
     const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx != null ? parseInt(body.charIdx) : 0;
-    const action = body.action || ''; // addGold/setGold/addGem/setGem/setLevel/giveItem/teleport
+    const action = body.action || '';
     const value = body.value;
     const itemId = body.itemId;
     const itemCount = body.count || 1;
     const mapId = body.mapId;
 
-    const accounts = loadJSON('accounts.json', {});
-    const acc = accounts[targetAccount];
+    const acc = await db.getAccount(targetAccount);
     if (!acc) return sendJson(res, 404, { error: '帳號不存在' });
-    if (!acc.characters) acc.characters = {};
-    if (!acc.characters[serverId]) acc.characters[serverId] = [];
-    const saveData = acc.characters[serverId][charIdx] || {};
+    let saveData = (await db.getCharacter(targetAccount, serverId, charIdx)) || {};
 
     // 確保 resources 存在
     if (!saveData.resources) saveData.resources = { gold: 0, gem: 0 };
@@ -609,11 +559,8 @@ async function handleApi(req, res, pathname, query) {
         }
         if (!found) {
           inv.push({
-            id: itemId,
-            name: itemId,
-            type: 'consumable',
-            itemType: 'consumable',
-            rarity: 'green',
+            id: itemId, name: itemId, type: 'consumable',
+            itemType: 'consumable', rarity: 'green',
             count: parseInt(itemCount) || 1,
           });
         }
@@ -625,8 +572,7 @@ async function handleApi(req, res, pathname, query) {
         return sendJson(res, 400, { error: '未知 action' });
     }
 
-    acc.characters[serverId][charIdx] = saveData;
-    saveJSON('accounts.json', accounts);
+    await db.saveCharacter(targetAccount, serverId, charIdx, saveData);
 
     // 若玩家線上，透過 socket 廣播 gm_update 通知客戶端刷新
     if (io) {
@@ -827,44 +773,39 @@ if (socketIoInstalled) {
 }
 
 // ========== 初始化 GM 帳號 ==========
-function initGM() {
-  const accounts = loadJSON('accounts.json', {});
-  if (!accounts[GM_ACCOUNT]) {
-    accounts[GM_ACCOUNT] = {
-      account: GM_ACCOUNT,
-      passwordHash: hashPassword(GM_PASSWORD),
-      createdAt: new Date().toISOString(),
-      isGM: true,
-      characters: {},
-    };
-    saveJSON('accounts.json', accounts);
+async function initGM() {
+  const existing = await db.getAccount(GM_ACCOUNT);
+  if (!existing) {
+    await db.createAccount(GM_ACCOUNT, hashPassword(GM_PASSWORD), true);
     console.log('[Auth] 已建立 GM 帳號:', GM_ACCOUNT);
   }
 }
-initGM();
-
-// ========== 啟動 ==========
-server.listen(PORT, () => {
-  console.log('========================================');
-  console.log('  君主之刃 v2.1.2 · 正式營運伺服器');
-  console.log('========================================');
-  console.log('  服務位址: http://localhost:' + PORT);
-  console.log('  資料目錄: ' + DATA_DIR);
-  console.log('  多人連線: ' + (socketIoInstalled ? '已啟用 (Socket.IO)' : '未啟用 (單機模式)'));
-  console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
-  if (GM_PASSWORD === '19811013') {
-    console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');
-  }
-  console.log('  API:');
-  console.log('    POST /api/auth/register       註冊');
-  console.log('    POST /api/auth/login          登入');
-  console.log('    GET  /api/auth/me             目前身分');
-  console.log('    GET  /api/servers             伺服器列表');
-  console.log('    GET  /api/characters          角色列表');
-  console.log('    POST /api/characters/save     存檔');
-  console.log('    POST /api/bug-report          提交 Bug');
-  console.log('========================================');
-});
+// 啟動：先初始化 DB，再建立 GM 帳號，最後監聽
+(async function bootstrap() {
+  await db.init();
+  await initGM();
+  server.listen(PORT, () => {
+    console.log('========================================');
+    console.log('  君主之刃 v2.3.0 · 正式營運伺服器');
+    console.log('========================================');
+    console.log('  服務位址: http://localhost:' + PORT);
+    console.log('  資料後端: ' + db.getBackend());
+    console.log('  多人連線: ' + (socketIoInstalled ? '已啟用 (Socket.IO)' : '未啟用 (單機模式)'));
+    console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
+    if (GM_PASSWORD === '19811013') {
+      console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');
+    }
+    console.log('  API:');
+    console.log('    POST /api/auth/register       註冊');
+    console.log('    POST /api/auth/login          登入');
+    console.log('    GET  /api/auth/me             目前身分');
+    console.log('    GET  /api/servers             伺服器列表');
+    console.log('    GET  /api/characters          角色列表');
+    console.log('    POST /api/characters/save     存檔');
+    console.log('    POST /api/bug-report          提交 Bug');
+    console.log('========================================');
+  });
+})();
 
 // 優雅關閉
 process.on('SIGINT', () => {
