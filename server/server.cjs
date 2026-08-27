@@ -202,12 +202,12 @@ function serveStatic(req, res, pathname) {
     const headers = {
       'Content-Type': mime,
       'Content-Length': stat.size,
-      'Cache-Control': pathname.endsWith('.zip') ? 'no-cache' : 'public, max-age=300',
+      'Cache-Control': pathname.endsWith('.png') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.gif') || pathname.endsWith('.webp') || pathname.endsWith('.svg') || pathname.endsWith('.mp3') || pathname.endsWith('.wav') || pathname.endsWith('.ogg') ? 'public, max-age=86400' : 'no-cache',
       'X-Content-Type-Options': 'nosniff',
     };
     // 隱藏原始碼下載：以不易猜到的檔名提供，並強制下載
     if (pathname === '/mb-src-q7x2k9.zip') {
-      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.0.9-source.zip"';
+      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.1.1-source.zip"';
       headers['Content-Type'] = 'application/zip';
       headers['X-Accel-Buffering'] = 'yes';
     }
@@ -247,7 +247,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.1.0',
+      version: '2.1.1',
       time: Date.now(),
       socketIo: socketIoInstalled,
     });
@@ -842,7 +842,7 @@ initGM();
 // ========== 啟動 ==========
 server.listen(PORT, () => {
   console.log('========================================');
-  console.log('  君主之刃 v2.1.0 · 正式營運伺服器');
+  console.log('  君主之刃 v2.1.1 · 正式營運伺服器');
   console.log('========================================');
   console.log('  服務位址: http://localhost:' + PORT);
   console.log('  資料目錄: ' + DATA_DIR);
