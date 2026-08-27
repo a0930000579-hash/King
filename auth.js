@@ -1,5 +1,5 @@
 /* ============================================================
-    君主之刃 v2.0.2 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
+    君主之刃 v2.0.6 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
     對接後端 /api/auth/* 與 Socket.IO 多人連線
     ============================================================ */
 
@@ -9,7 +9,6 @@
   const STORAGE_TOKEN_KEY = 'mmo_token';
   const STORAGE_ACC_KEY = 'mmo_account';
   const STORAGE_OFFLINE_KEY = 'mmo_offline_account';
-  const DEV_PASSWORD = 'owner2026';
 
   // 當前狀態
   let currentView = 'home'; // home | login | register | server | char
@@ -50,11 +49,10 @@
       serverList = data.servers || [];
       return serverList;
     } catch (e) {
-      // 離線模式 fallback：顯示一個本機伺服器
+      // 離線模式 fallback：顯示兩個神話伺服器
       serverList = [
-        { id: 'justice', name: '正義伺服器', desc: '新手推薦 · 和平環境', status: 'smooth', players: 0, online: true },
-        { id: 'evil', name: '邪惡伺服器', desc: '高手雲集 · 自由 PVP', status: 'busy', players: 0, online: true },
-        { id: 'chaos', name: '混亂伺服器', desc: '維護中', status: 'maintain', players: 0, online: false },
+        { id: 'zeus', name: '宙斯', desc: '開放 · 順暢', status: 'smooth', players: 0, online: true },
+        { id: 'hades', name: '黑帝斯', desc: '準備中 · 即將開放', status: 'maintain', players: 0, online: false },
       ];
       return serverList;
     }
@@ -80,32 +78,234 @@
       case 'char': html = renderCharSelect(); break;
     }
     overlay.innerHTML = '<div class="auth-particles"></div>' + html;
+    // v2.0.6：滾動回頂（針對長頁官網）
+    overlay.scrollTop = 0;
     bindCurrentViewEvents();
   }
 
-  // ========== 官方首頁 ==========
+  // ========== 官方首頁（天堂M風長頁 / v2.0.6 動畫強化版）==========
   function renderHome() {
+    const HERO_IMG = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7s6dsyii_ve_miaoda';
+    const SCENE_BANNER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xjuwips_ve_miaoda';
+    const TRANSFORM_ROSTER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xebnybw_ve_miaoda';
+    const FEATURE_JOBS = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7tpmfoci_ve_miaoda';
+    const FEATURE_SIEGE = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7t4dqyao_ve_miaoda';
+    const FEATURE_TRANSFORM = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7uebiicq_ve_miaoda';
+    const FEATURE_MULTI = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7sju36dq_ve_miaoda';
+
+    const newsData = [
+      { cat: '更新', tag: 'update', title: '【08/27 更新與活動總覽】', date: '2026/08/27' },
+      { cat: '更新', tag: 'update', title: '(已知問題)處理說明 公告(2026.08.26)', date: '2026/08/26' },
+      { cat: '活動', tag: 'event', title: '【高級商店組合包】', date: '2026/08/25' },
+      { cat: '活動', tag: 'event', title: '【每日支援箱】', date: '2026/08/25' },
+      { cat: '活動', tag: 'event', title: '【累積購買獎勵】', date: '2026/08/25' },
+      { cat: '系統', tag: 'system', title: '【伺服器維護公告】08/28 凌晨例行維護', date: '2026/08/24' },
+      { cat: '重要', tag: 'important', title: '【防詐騙宣導】請勿點擊不明連結', date: '2026/08/20' },
+    ];
+
+    const newsHtml = newsData.map(n => `
+      <div class="news-item" data-cat="${n.tag}">
+        <span class="news-cat-tag ${n.tag}">${n.cat}</span>
+        <span class="news-title">${n.title}</span>
+        <span class="news-date">${n.date}</span>
+      </div>
+    `).join('');
+
     return `
-      <div class="home-screen">
-        <div class="game-logo-wrap" id="dev-logo-target" style="cursor:pointer">
-          <div class="logo-sword">
-            <div class="sword-blade"></div>
-            <div class="sword-guard"></div>
-            <div class="sword-grip"></div>
-            <div class="sword-pommel"></div>
+      <div class="official-site">
+        <!-- 頂部導航列 -->
+        <header class="site-header">
+          <div class="site-header-inner">
+            <div class="site-logo" id="site-logo">
+              <div class="site-logo-cn">君主之刃</div>
+              <div class="site-logo-en">LINEAGE OF SWORDS</div>
+            </div>
+            <nav class="site-nav">
+              <a href="#news" class="site-nav-link">最新消息</a>
+              <a href="#features" class="site-nav-link">遊戲特色</a>
+              <a href="#showcase" class="site-nav-link">展示</a>
+              <a href="#" class="site-nav-link">客服</a>
+            </nav>
+            <div class="site-header-actions">
+              <div class="site-search-btn" title="搜尋">&#128269;</div>
+            </div>
           </div>
-          <div class="game-title-cn">君主之刃</div>
-          <div class="game-title-sub">LINEAGE OF SWORDS</div>
-          <div class="game-version-tag" id="dev-version-target">v2.0.2 · 正式營運</div>
+        </header>
+
+        <!-- 主視覺 Hero -->
+        <section class="hero-section" id="hero">
+          <div class="hero-bg" style="background-image:url('${HERO_IMG}')"></div>
+          <div class="hero-overlay"></div>
+          <!-- 火焰/餘燼粒子層 -->
+          <div class="hero-embers">
+            <div class="ember e1"></div><div class="ember e2"></div><div class="ember e3"></div>
+            <div class="ember e4"></div><div class="ember e5"></div><div class="ember e6"></div>
+            <div class="ember e7"></div><div class="ember e8"></div><div class="ember e9"></div>
+            <div class="ember e10"></div><div class="ember e11"></div><div class="ember e12"></div>
+          </div>
+          <div class="hero-content">
+            <div class="hero-date reveal-anim">2026.08.27</div>
+            <div class="hero-title reveal-anim delay1">燃燼重生　王者歸來</div>
+            <div class="hero-subtitle reveal-anim delay2">君主之刃 · 烈焰傳說　全新登場</div>
+            <!-- 雙按鈕區：開始遊戲 / 註冊帳號 -->
+            <div class="hero-btn-row reveal-anim delay3">
+              <button class="hero-btn primary" id="btn-start">
+                <span class="hero-btn-icon">&#9876;</span>
+                開 始 遊 戲
+              </button>
+              <button class="hero-btn" id="btn-register">
+                <span class="hero-btn-icon">&#9733;</span>
+                註 冊 帳 號
+              </button>
+            </div>
+            <!-- PWA 下載遊戲按鈕（取代版本字樣） -->
+            <div class="hero-install-row reveal-anim delay4">
+              <button class="install-btn" id="btn-install">
+                <span class="install-icon">&#8681;</span>
+                下 載 遊 戲
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 遊戲展示區：變身角色輪播 + 場景展示 -->
+        <section class="section showcase-section" id="showcase">
+          <h2 class="section-title reveal-on-scroll">遊 戲 展 示</h2>
+          <!-- 變身角色圖鑑自動輪播 -->
+          <div class="showcase-transform reveal-on-scroll">
+            <div class="showcase-transform-title">變 身 圖 鑑</div>
+            <div class="transform-carousel" id="transform-carousel">
+              <div class="transform-track" id="transform-track">
+                <div class="transform-frame">
+                  <div class="transform-img" style="background-image:url('${TRANSFORM_ROSTER}')"></div>
+                </div>
+                <div class="transform-frame">
+                  <div class="transform-img" style="background-image:url('${TRANSFORM_ROSTER}')"></div>
+                </div>
+              </div>
+            </div>
+            <div class="transform-desc">8 種變身型態 · 金變紅變 · 無限覺醒</div>
+          </div>
+
+          <!-- 場景全景展示 -->
+          <div class="showcase-scene reveal-on-scroll">
+            <div class="scene-banner" style="background-image:url('${SCENE_BANNER}')">
+              <div class="scene-overlay"></div>
+              <div class="scene-text">
+                <div class="scene-title">亞 丁 大 陸</div>
+                <div class="scene-sub">雄偉城堡 · 廣闊世界 · 等你君臨</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 本週更新內容 -->
+        <section class="section weekly-update" id="weekly">
+          <h2 class="section-title reveal-on-scroll">本 週 更 新 內 容</h2>
+          <div class="weekly-cards">
+            <div class="weekly-card reveal-on-scroll"><div class="weekly-card-img" style="background-image:url('${FEATURE_TRANSFORM}')"></div><div class="weekly-card-label">神話變身</div></div>
+            <div class="weekly-card reveal-on-scroll delay-card1"><div class="weekly-card-img" style="background-image:url('${FEATURE_SIEGE}')"></div><div class="weekly-card-label">攻城戰</div></div>
+            <div class="weekly-card highlight reveal-on-scroll delay-card2"><div class="weekly-card-img" style="background-image:url('${FEATURE_JOBS}')"></div><div class="weekly-card-label">新職業</div></div>
+          </div>
+          <div class="section-more-btn">想看更多</div>
+        </section>
+
+        <!-- 最新資訊 -->
+        <section class="section news-section" id="news">
+          <h2 class="section-title reveal-on-scroll">最 新 資 訊</h2>
+          <div class="news-tabs reveal-on-scroll">
+            <span class="news-tab active" data-tab="all">綜合</span>
+            <span class="news-tab" data-tab="system">系統</span>
+            <span class="news-tab" data-tab="event">活動</span>
+            <span class="news-tab" data-tab="update">更新</span>
+            <span class="news-tab" data-tab="important">重要</span>
+            <span class="news-tab" data-tab="service">服務</span>
+          </div>
+          <div class="news-list">
+            ${newsHtml}
+          </div>
+          <div class="section-more-btn">想看更多</div>
+        </section>
+
+        <!-- 最新重點特色 -->
+        <section class="section features-section" id="features">
+          <h2 class="section-title reveal-on-scroll">最 新 重 點</h2>
+          <div class="feature-cards">
+            <div class="feature-card big reveal-on-scroll">
+              <div class="feature-card-img" style="background-image:url('${FEATURE_JOBS}')"></div>
+              <div class="feature-card-info">
+                <div class="feature-card-title">六 大 職 業</div>
+                <div class="feature-card-desc">戰士 · 法師 · 弓箭手 · 俠客 · 聖騎士 · 盜賊</div>
+              </div>
+            </div>
+            <div class="feature-card-row">
+              <div class="feature-card reveal-on-scroll">
+                <div class="feature-card-img" style="background-image:url('${FEATURE_TRANSFORM}')"></div>
+                <div class="feature-card-info">
+                  <div class="feature-card-title">變 身 系 統</div>
+                  <div class="feature-card-desc">神話金變 · 無限覺醒</div>
+                </div>
+              </div>
+              <div class="feature-card reveal-on-scroll delay-card1">
+                <div class="feature-card-img" style="background-image:url('${FEATURE_SIEGE}')"></div>
+                <div class="feature-card-info">
+                  <div class="feature-card-title">攻 城 戰</div>
+                  <div class="feature-card-desc">千人對戰 · 君臨天下</div>
+                </div>
+              </div>
+            </div>
+            <div class="feature-card big reveal-on-scroll">
+              <div class="feature-card-img" style="background-image:url('${FEATURE_MULTI}')"></div>
+              <div class="feature-card-info">
+                <div class="feature-card-title">多 人 連 線</div>
+                <div class="feature-card-desc">即時組隊 · 並肩作戰</div>
+              </div>
+            </div>
+          </div>
+          <div class="section-more-btn">想看更多</div>
+        </section>
+
+        <!-- 社群列 -->
+        <section class="section community-section reveal-on-scroll">
+          <div class="community-row">
+            <a class="community-btn" href="#" title="Facebook">
+              <div class="community-icon-circle"><span class="community-icon-txt">f</span></div>
+              <span class="community-name">FACEBOOK</span>
+            </a>
+            <a class="community-btn" href="#" title="Youtube">
+              <div class="community-icon-circle"><span class="community-icon-txt">▶</span></div>
+              <span class="community-name">YOUTUBE</span>
+            </a>
+            <a class="community-btn" href="#" title="巴哈姆特">
+              <div class="community-icon-circle"><span class="community-icon-txt">巴</span></div>
+              <span class="community-name">GAMER</span>
+            </a>
+            <a class="community-btn" href="#" title="常見問題">
+              <div class="community-icon-circle"><span class="community-icon-txt">?</span></div>
+              <span class="community-name">常見問題</span>
+            </a>
+          </div>
+        </section>
+
+        <!-- 底部版權 -->
+        <footer class="site-footer">
+          <div class="footer-corp">© 2026 君主之刃團隊 版權所有</div>
+          <div class="footer-license">本遊戲為免費營運 · 內有付費商城 · 請注意遊戲時間</div>
+          <div class="footer-rating">輔 15 級</div>
+        </footer>
+
+        <!-- PWA 安裝引導彈層 -->
+        <div class="install-modal-overlay" id="install-modal">
+          <div class="install-modal">
+            <div class="install-modal-title">加 入 主 畫 面</div>
+            <div class="install-modal-body" id="install-modal-body">
+              <!-- 動態內容：安卓直接安裝 / iOS 步驟 -->
+            </div>
+            <div class="install-modal-footer">
+              <button class="install-modal-close" id="install-modal-close">關閉</button>
+            </div>
+          </div>
         </div>
-        <div class="home-btn-row">
-          <button class="auth-btn primary" id="btn-start">開 始 遊 戲</button>
-          <button class="auth-btn" id="btn-register">註 冊 帳 號</button>
-        </div>
-        <div style="font-size:10px;color:#5a4a2a;letter-spacing:2px;margin-top:20px">
-          點擊開始進入亞丁大陸
-        </div>
-        <div class="dev-hint-text" id="dev-hint"></div>
       </div>
     `;
   }
@@ -113,20 +313,27 @@
   // ========== 登入 ==========
   function renderLogin() {
     return `
-      <div class="auth-panel" style="position:relative">
-        <div class="auth-panel-title">帳 號 登 入</div>
-        <div class="auth-field">
-          <label>帳 號</label>
-          <input class="auth-input" type="text" id="login-account" placeholder="請輸入帳號" autocomplete="username" />
-        </div>
-        <div class="auth-field">
-          <label>密 碼</label>
-          <input class="auth-input" type="password" id="login-password" placeholder="請輸入密碼" autocomplete="current-password" />
-        </div>
-        <div class="auth-error" id="login-error"></div>
-        <button class="auth-btn primary" id="btn-login-submit">登 入</button>
-        <div class="auth-footer-text">
-          還沒有帳號？<span id="link-register">立即註冊</span>
+      <div class="auth-fullpage">
+        <div class="auth-fullpage-inner">
+          <div class="auth-back-row">
+            <button class="auth-back-btn" id="btn-login-back">‹ 返回官網</button>
+          </div>
+          <div class="auth-panel" style="position:relative">
+            <div class="auth-panel-title">帳 號 登 入</div>
+            <div class="auth-field">
+              <label>帳 號</label>
+              <input class="auth-input" type="text" id="login-account" placeholder="請輸入帳號" autocomplete="username" />
+            </div>
+            <div class="auth-field">
+              <label>密 碼</label>
+              <input class="auth-input" type="password" id="login-password" placeholder="請輸入密碼" autocomplete="current-password" />
+            </div>
+            <div class="auth-error" id="login-error"></div>
+            <button class="auth-btn primary" id="btn-login-submit">登 入</button>
+            <div class="auth-footer-text">
+              還沒有帳號？<span id="link-register">立即註冊</span>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -135,24 +342,31 @@
   // ========== 註冊 ==========
   function renderRegister() {
     return `
-      <div class="auth-panel" style="position:relative">
-        <div class="auth-panel-title">帳 號 註 冊</div>
-        <div class="auth-field">
-          <label>帳 號</label>
-          <input class="auth-input" type="text" id="reg-account" placeholder="4-20 個字元" autocomplete="username" />
-        </div>
-        <div class="auth-field">
-          <label>密 碼</label>
-          <input class="auth-input" type="password" id="reg-password" placeholder="至少 6 位" autocomplete="new-password" />
-        </div>
-        <div class="auth-field">
-          <label>確認密碼</label>
-          <input class="auth-input" type="password" id="reg-password2" placeholder="再次輸入密碼" autocomplete="new-password" />
-        </div>
-        <div class="auth-error" id="reg-error"></div>
-        <button class="auth-btn primary" id="btn-register-submit">註 冊</button>
-        <div class="auth-footer-text">
-          已有帳號？<span id="link-login">返回登入</span>
+      <div class="auth-fullpage">
+        <div class="auth-fullpage-inner">
+          <div class="auth-back-row">
+            <button class="auth-back-btn" id="btn-register-back">‹ 返回官網</button>
+          </div>
+          <div class="auth-panel" style="position:relative">
+            <div class="auth-panel-title">帳 號 註 冊</div>
+            <div class="auth-field">
+              <label>帳 號</label>
+              <input class="auth-input" type="text" id="reg-account" placeholder="4-20 個字元" autocomplete="username" />
+            </div>
+            <div class="auth-field">
+              <label>密 碼</label>
+              <input class="auth-input" type="password" id="reg-password" placeholder="至少 6 位" autocomplete="new-password" />
+            </div>
+            <div class="auth-field">
+              <label>確認密碼</label>
+              <input class="auth-input" type="password" id="reg-password2" placeholder="再次輸入密碼" autocomplete="new-password" />
+            </div>
+            <div class="auth-error" id="reg-error"></div>
+            <button class="auth-btn primary" id="btn-register-submit">註 冊</button>
+            <div class="auth-footer-text">
+              已有帳號？<span id="link-login">返回登入</span>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -177,14 +391,17 @@
     }).join('');
 
     return `
-      <div class="server-select-panel">
-        <div class="server-select-title">選 擇 伺 服 器</div>
-        <div class="server-select-sub">請選擇欲進入的世界</div>
-        <div class="server-list">
-          ${items}
-        </div>
-        <div class="server-back-row">
-          <button class="server-back-btn" id="btn-server-back">‹ 返回</button>
+      <div class="auth-fullpage">
+        <div class="auth-fullpage-inner">
+          <div class="auth-back-row">
+            <button class="auth-back-btn" id="btn-server-back">‹ 返回首頁</button>
+          </div>
+            <div class="server-select-title">選 擇 伺 服 器</div>
+            <div class="server-select-sub">請選擇欲進入的世界</div>
+            <div class="server-list">
+              ${items}
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -224,14 +441,18 @@
     }
 
     return `
-      <div class="char-select-panel">
-        <div class="server-select-title">角 色 選 擇</div>
-        <div class="server-select-sub">伺服器：${escapeHtml(currentServer?.name || '未知')}</div>
-        <div style="margin-top:14px">
-          ${slots.join('')}
-        </div>
-        <div class="server-back-row" style="margin-top:14px">
-          <button class="server-back-btn" id="btn-char-back">‹ 更換伺服器</button>
+      <div class="auth-fullpage">
+        <div class="auth-fullpage-inner">
+          <div class="auth-back-row">
+            <button class="auth-back-btn" id="btn-char-back">‹ 更換伺服器</button>
+          </div>
+          <div class="char-select-panel">
+            <div class="server-select-title">角 色 選 擇</div>
+            <div class="server-select-sub">伺服器：${escapeHtml(currentServer?.name || '未知')}</div>
+            <div style="margin-top:14px">
+              ${slots.join('')}
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -251,8 +472,8 @@
       isOffline: true,
       createdAt: Date.now(),
       servers: {
-        justice: { characters: [] },
-        evil: { characters: [] },
+        zeus: { characters: [] },
+        hades: { characters: [] },
       }
     };
     try {
@@ -294,6 +515,52 @@
     }, 1500);
   }
 
+  // ===== 通用輕提示 =====
+  function showToast(msg) {
+    let box = document.getElementById('auth-toast');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'auth-toast';
+      document.body.appendChild(box);
+    }
+    box.textContent = msg;
+    box.classList.add('show');
+    clearTimeout(box._t);
+    box._t = setTimeout(() => { box.classList.remove('show'); }, 2000);
+  }
+
+  // ===== 開發者原始碼下載彈窗 =====
+  function showDevDownloadModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'dev-modal-overlay';
+    overlay.innerHTML = `
+      <div class="dev-modal">
+        <div class="dev-modal-title">開發者通道 · v2.0.6</div>
+        <div class="dev-modal-body">
+          <p style="margin:0 0 12px 0;font-size:13px;color:#b0a070;">僅限授權開發者使用，請勿外傳原始碼。</p>
+          <a href="source.zip" download="monarch-blade-v2.0.6-source.zip" class="dev-download-btn" id="dev-download-main">
+            <span style="font-size:22px;margin-right:10px;">&#8681;</span>
+            下載 v2.0.6 原始碼 ZIP
+          </a>
+          <a href="source.zip" target="_blank" rel="noopener" class="dev-download-alt" id="dev-download-alt">
+            若自動下載失敗，點此另開新視窗下載
+          </a>
+          <div style="margin-top:14px;font-size:11px;color:#7a6a40;text-align:center;">
+            檔案大小：約 450 KB · 解壓縮即可部署
+          </div>
+        </div>
+        <div class="dev-modal-footer">
+          <button class="auth-btn dev-close-btn" id="dev-modal-close">關閉</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('show'));
+    const close = () => { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 300); };
+    overlay.querySelector('#dev-modal-close').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  }
+
   // ========== 事件綁定 ==========
   function bindCurrentViewEvents() {
     switch (currentView) {
@@ -302,16 +569,177 @@
         const btnReg = $('btn-register');
         if (btnStart) btnStart.addEventListener('click', () => switchView('login'));
         if (btnReg) btnReg.addEventListener('click', () => switchView('register'));
-        // 首頁密技：連點版號 7 次 → 輸入密碼 → 下載原始碼彈窗
-        bindDevCheat();
-        // 背景探測後端狀態（僅探測，不跳轉；v2.0.2 一律顯示首頁）
+        // 背景探測後端狀態（僅探測，不跳轉）
         probeBackendStatus();
+
+        // ===== 新聞分頁切換 =====
+        document.querySelectorAll('.news-tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            document.querySelectorAll('.news-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const cat = tab.dataset.tab;
+            document.querySelectorAll('.news-item').forEach(item => {
+              item.style.display = (cat === 'all' || item.dataset.cat === cat) ? '' : 'none';
+            });
+          });
+        });
+
+        // ===== v2.0.6 開發者通道：長按 Logo 2 秒 → 輸入密碼 → 下載原始碼 =====
+        // 強化可靠性：多重事件 + 阻止預設行為 + 震動回饋
+        (function() {
+          const logo = $('site-logo');
+          if (!logo) return;
+          let pressTimer = null;
+          let triggered = false;
+          const DEV_PWD = 'owner2026';
+
+          const vibrate = () => {
+            try { if (navigator.vibrate) navigator.vibrate(50); } catch (e) {}
+          };
+
+          const startPress = (e) => {
+            // 避免選單彈出
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            if (pressTimer) return; // 重複觸發防護
+            triggered = false;
+            pressTimer = setTimeout(() => {
+              triggered = true;
+              vibrate();
+              pressTimer = null;
+              const input = prompt('請輸入開發者密碼：');
+              if (input === null) return;
+              if (input === DEV_PWD) {
+                showDevDownloadModal();
+              } else {
+                showToast('密碼錯誤');
+              }
+            }, 2000);
+          };
+
+          const cancelPress = () => {
+            if (pressTimer) {
+              clearTimeout(pressTimer);
+              pressTimer = null;
+            }
+          };
+
+          // 桌面端
+          logo.addEventListener('mousedown', startPress);
+          logo.addEventListener('mouseup', cancelPress);
+          logo.addEventListener('mouseleave', cancelPress);
+          // 防止右鍵選單
+          logo.addEventListener('contextmenu', e => e.preventDefault());
+          // 防止圖片拖曳
+          logo.addEventListener('dragstart', e => e.preventDefault());
+
+          // 觸控端（passive:false 才能 preventDefault）
+          logo.addEventListener('touchstart', startPress, { passive: false });
+          logo.addEventListener('touchend', cancelPress);
+          logo.addEventListener('touchmove', cancelPress);
+          logo.addEventListener('touchcancel', cancelPress);
+
+          // iOS Safari：長按會彈出選單，再加一層保護
+          logo.style.webkitTouchCallout = 'none';
+          logo.style.webkitUserSelect = 'none';
+          logo.style.userSelect = 'none';
+          logo.style.webkitTapHighlightColor = 'transparent';
+        })();
+
+        // ===== PWA 安裝按鈕 =====
+        (function() {
+          const btn = $('btn-install');
+          const modal = $('install-modal');
+          const body = $('install-modal-body');
+          const closeBtn = $('install-modal-close');
+          if (!btn || !modal || !body) return;
+
+          let deferredPrompt = null;
+
+          // 攔截 Chrome/Android 安裝提示
+          window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+          });
+
+          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+            navigator.standalone === true;
+
+          btn.addEventListener('click', () => {
+            if (isStandalone) {
+              showToast('已在獨立模式執行');
+              return;
+            }
+            // Android/Chrome：直接觸發安裝
+            if (deferredPrompt) {
+              deferredPrompt.prompt();
+              deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+              return;
+            }
+            // iOS：顯示加入主畫面步驟
+            if (isIOS) {
+              body.innerHTML = `
+                <div style="text-align:center;padding:8px 0">
+                  <div style="font-size:40px;margin-bottom:12px">&#8613;</div>
+                  <div style="font-size:14px;color:#e8d090;letter-spacing:2px;margin-bottom:14px">加入主畫面</div>
+                  <div style="font-size:12px;color:#a89060;line-height:1.8;letter-spacing:1px">
+                    點擊下方 <strong style="color:#f0c860">分享</strong> 按鈕<br/>
+                    選擇 <strong style="color:#f0c860">加入主畫面</strong><br/>
+                    即可像 App 一樣全螢幕遊玩
+                  </div>
+                </div>
+              `;
+            } else {
+              // 其他瀏覽器：引導說明
+              body.innerHTML = `
+                <div style="text-align:center;padding:8px 0">
+                  <div style="font-size:40px;margin-bottom:12px">&#9881;</div>
+                  <div style="font-size:14px;color:#e8d090;letter-spacing:2px;margin-bottom:14px">下載遊戲</div>
+                  <div style="font-size:12px;color:#a89060;line-height:1.8;letter-spacing:1px">
+                    將遊戲加到主畫面<br/>
+                    免開網頁直接全螢幕玩<br/>
+                    支援 Chrome / Edge / Safari
+                  </div>
+                  <div style="margin-top:16px;font-size:11px;color:#6a5020">
+                    進入遊戲後點選網址列安裝圖示
+                  </div>
+                </div>
+              `;
+            }
+            modal.classList.add('show');
+          });
+
+          closeBtn.addEventListener('click', () => modal.classList.remove('show'));
+          modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
+        })();
+
+        // ===== Scroll Reveal：捲動時元素漸入 =====
+        (function() {
+          const items = document.querySelectorAll('.reveal-on-scroll');
+          if (!items.length) return;
+          const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('in-view');
+                observer.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+          items.forEach(el => observer.observe(el));
+        })();
+
         break;
       case 'login':
         $('btn-login-submit').addEventListener('click', doLogin);
         $('link-register').addEventListener('click', () => switchView('register'));
         $('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
         $('login-account').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+        const btnLoginBack = $('btn-login-back');
+        if (btnLoginBack) btnLoginBack.addEventListener('click', () => switchView('home'));
         // 記住帳號
         try {
           const saved = localStorage.getItem(STORAGE_ACC_KEY);
@@ -322,14 +750,21 @@
         $('btn-register-submit').addEventListener('click', doRegister);
         $('link-login').addEventListener('click', () => switchView('login'));
         $('reg-password2').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
+        const btnRegBack = $('btn-register-back');
+        if (btnRegBack) btnRegBack.addEventListener('click', () => switchView('home'));
         break;
-      case 'server':
+       case 'server':
         document.querySelectorAll('.server-card').forEach(card => {
           card.addEventListener('click', () => {
-            if (card.classList.contains('disabled')) return;
             const sid = card.dataset.serverId;
             const srv = serverList.find(s => s.id === sid);
-            if (srv) enterServer(srv);
+            if (!srv) return;
+            if (srv.online === false) {
+              // 鎖定伺服器：顯示提示，不進入
+              showToast('黑帝斯伺服器準備中，敬請期待');
+              return;
+            }
+            enterServer(srv);
           });
         });
         $('btn-server-back').addEventListener('click', () => switchView('home'));
@@ -389,7 +824,7 @@
       await loadServerList();
       switchView('server');
     } catch (e) {
-        // 後端不可用時 → 提示玩家網路狀態，但留在登入頁，不強制跳離線
+    // 後端不可用時 → 提示玩家網路狀態，但留在登入頁，不強制跳離線
         const status = e.status;
         if (status === 401 || e.message === '帳號或密碼錯誤') {
           errEl.textContent = e.message || '帳號或密碼錯誤';
@@ -461,127 +896,7 @@
       });
   }
 
-  // ========== 開發者密技（首頁） ==========
-  // 首頁連點版號或 Logo 7 次 → 輸入密碼 → 顯示下載彈窗（含 <a href download> 大按鈕）
-  // v2.0.2 修正：直接走伺服器實體 source.zip，用 <a download> 觸發原生下載，相容內嵌瀏覽器
-  function bindDevCheat() {
-    const targets = ['dev-version-target', 'dev-logo-target'];
-    let taps = 0;
-    let tapTimer = null;
-
-    targets.forEach(id => {
-      const el = $(id);
-      if (!el) return;
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        taps++;
-        clearTimeout(tapTimer);
-        const hint = $('dev-hint');
-        if (hint) {
-          hint.textContent = `開發者密技：還需 ${Math.max(0, 7 - taps)} 次`;
-          hint.classList.add('show');
-        }
-        if (taps >= 7) {
-          taps = 0;
-          if (hint) hint.classList.remove('show');
-          showDevPasswordModal();
-          return;
-        }
-        tapTimer = setTimeout(() => {
-          taps = 0;
-          if (hint) hint.classList.remove('show');
-        }, 1500);
-      });
-    });
-  }
-
-  function showDevPasswordModal() {
-    // 如果已經有 modal 就不重開
-    if ($('dev-pw-modal')) return;
-    const modal = document.createElement('div');
-    modal.id = 'dev-pw-modal';
-    modal.className = 'dev-pw-modal';
-    modal.innerHTML = `
-      <div class="dev-pw-box">
-        <div class="dev-pw-title">開發者後台</div>
-        <div class="dev-pw-desc">請輸入開發者密碼以下載完整原始碼</div>
-        <input type="password" class="dev-pw-input" id="dev-pw-input" placeholder="請輸入密碼" autocomplete="off" />
-        <div class="dev-pw-error" id="dev-pw-error"></div>
-        <div class="dev-pw-btn-row">
-          <button class="auth-btn" id="dev-pw-cancel">取消</button>
-          <button class="auth-btn primary" id="dev-pw-confirm">確認</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    
-    const input = $('dev-pw-input');
-    if (input) setTimeout(() => input.focus(), 50);
-    
-    $('dev-pw-cancel').addEventListener('click', () => modal.remove());
-    $('dev-pw-confirm').addEventListener('click', () => {
-      const val = $('dev-pw-input').value;
-      if (val === DEV_PASSWORD) {
-        modal.remove();
-        showSourceDownloadModal();
-      } else {
-        const err = $('dev-pw-error');
-        if (err) err.textContent = '密碼錯誤';
-      }
-    });
-    $('dev-pw-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') $('dev-pw-confirm').click();
-    });
-    // 點擊背景關閉
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
-    });
-  }
-
-  // ========== 原始碼下載彈窗（直接 a[download] 走伺服器實體檔） ==========
-  function showSourceDownloadModal() {
-    if ($('src-dl-modal')) return;
-    const zipUrl = 'source.zip?v=v2.0.2';
-    const fullUrl = new URL(zipUrl, location.href).href;
-    const filename = 'sword-lineage-v2.0.2_fullstack.zip';
-
-    const modal = document.createElement('div');
-    modal.id = 'src-dl-modal';
-    modal.className = 'src-dl-modal';
-    modal.innerHTML = `
-      <div class="src-dl-box">
-        <div class="src-dl-icon">
-          <div class="src-dl-zip-badge">ZIP</div>
-        </div>
-        <div class="src-dl-title">君主之刃 v2.0.2 全棧原始碼</div>
-        <div class="src-dl-sub">包含前端完整檔案 + Node.js 後端 + README</div>
-        <div class="src-dl-file-info">
-          <span>檔案格式：.zip</span>
-          <span>全棧版 · 可直接部署</span>
-        </div>
-        <a class="src-dl-main-btn" href="${fullUrl}" download="${filename}" id="src-dl-main-a">
-          <span class="src-dl-btn-arrow">↓</span>
-          <span class="src-dl-btn-text">下 載 v2.0.2 原 始 碼 ZIP</span>
-        </a>
-        <div class="src-dl-tip">
-          點擊上方按鈕直接下載。如彈出新頁面，請長按連結選擇「下載連結」
-        </div>
-        <div class="src-dl-url-row">
-          <span class="src-dl-url-label">檔案位置：</span>
-          <span class="src-dl-url-text">/source.zip</span>
-        </div>
-        <button class="src-dl-close-btn" id="src-dl-close">關 閉</button>
-      </div>
-    `;
-    document.body.appendChild(modal);
-
-    $('src-dl-close').addEventListener('click', () => modal.remove());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
-    });
-  }
-
-  // ========== 開始遊戲 ==========
+  // ========== 進入伺服器 ==========
   function startGameWithNewChar() {
     startGameCommon();
   }
@@ -626,20 +941,24 @@
   }
 
   // ========== GM 狀態偵測 ==========
+  // v2.0.3：GM 身分完全以伺服器端 isGM 欄位為準
+  // 後端不可用時，客戶端絕不自行判斷 GM，杜絕離線後門
   function checkGMStatus() {
     api('/auth/me').then(data => {
       if (data && data.isGM) {
         initGMPanel();
       }
     }).catch(() => {
-      // 後端不可用 → 檢查帳號是否為 19811013
-      try {
-        const acc = localStorage.getItem(STORAGE_ACC_KEY);
-        if (acc === '19811013') {
-          initGMPanel();
-        }
-      } catch (e) {}
+      // 後端不可用：不做任何 GM 相關處理，完全關閉 GM 面板
     });
+  }
+
+  // 取得目前登入的帳號與伺服器（GM 操作的目標，預設操作自己帳號的當前角色）
+  function getGMContext() {
+    const acc = localStorage.getItem(STORAGE_ACC_KEY) || '';
+    const server = currentServer?.id || 'zeus';
+    const charIdx = window.GS?.currentCharIdx != null ? window.GS.currentCharIdx : 0;
+    return { account: acc, serverId: server, charIdx: charIdx };
   }
 
   // ========== GM 面板 ==========
@@ -846,48 +1165,61 @@
   }
 
   function gmAdjustGold(amt, mode) {
-    if (!window.GS) return;
-    if (mode === 'set') {
-      GS.resources.gold = amt;
-    } else {
-      GS.resources.gold += amt;
-    }
-    if (window.updateUI) updateUI();
-    refreshGMServerStatus();
+    const action = mode === 'set' ? 'setGold' : 'addGold';
+    const ctx = getGMContext();
+    api('/gm/adjust', { action, value: amt, account: ctx.account, serverId: ctx.serverId, charIdx: ctx.charIdx })
+      .then(res => {
+        if (res && res.resources && window.GS) {
+          GS.resources.gold = res.resources.gold || 0;
+          if (window.updateUI) updateUI();
+        }
+        refreshGMServerStatus();
+      })
+      .catch(err => alert('操作失敗：' + (err.message || err)));
   }
   function gmAdjustGem(amt, mode) {
-    if (!window.GS) return;
-    if (mode === 'set') {
-      GS.resources.gem = amt;
-    } else {
-      GS.resources.gem += amt;
-    }
-    if (window.updateUI) updateUI();
-    refreshGMServerStatus();
+    const action = mode === 'set' ? 'setGem' : 'addGem';
+    const ctx = getGMContext();
+    api('/gm/adjust', { action, value: amt, account: ctx.account, serverId: ctx.serverId, charIdx: ctx.charIdx })
+      .then(res => {
+        if (res && res.resources && window.GS) {
+          GS.resources.gem = res.resources.gem || 0;
+          if (window.updateUI) updateUI();
+        }
+        refreshGMServerStatus();
+      })
+      .catch(err => alert('操作失敗：' + (err.message || err)));
   }
   function gmSetLevel(lv) {
-    if (!window.GS || !window.GS.player) return;
-    lv = Math.max(1, Math.min(99, lv));
-    GS.player.level = lv;
-    // 重新計算屬性
-    GS.player.expMax = Math.floor(100 * Math.pow(1.3, lv - 1));
-    GS.player.exp = 0;
-    if (window.recalcStats) recalcStats();
-    if (window.updateUI) updateUI();
-    if (window.MultiplayerClient) {
-      window.MultiplayerClient.updateProfile({
-        name: GS.player.name,
-        classId: GS.player.classId,
-        level: lv,
-        nation: GS.nation,
-      });
-    }
-    refreshGMServerStatus();
+    const ctx = getGMContext();
+    api('/gm/adjust', { action: 'setLevel', value: lv, account: ctx.account, serverId: ctx.serverId, charIdx: ctx.charIdx })
+      .then(res => {
+        if (res && window.GS && GS.player) {
+          GS.player.level = res.level || lv;
+          GS.player.expMax = Math.floor(100 * Math.pow(1.3, (res.level || lv) - 1));
+          GS.player.exp = 0;
+          if (window.recalcStats) recalcStats();
+          if (window.updateUI) updateUI();
+          if (window.MultiplayerClient) {
+            window.MultiplayerClient.updateProfile({
+              name: GS.player.name,
+              classId: GS.player.classId,
+              level: res.level || lv,
+              nation: GS.nation,
+            });
+          }
+        }
+        refreshGMServerStatus();
+      })
+      .catch(err => alert('操作失敗：' + (err.message || err)));
   }
   function gmTeleport(mapId) {
-    if (typeof window.loadMap === 'function') {
-      window.loadMap(mapId);
-    }
+    const ctx = getGMContext();
+    api('/gm/adjust', { action: 'teleport', mapId: mapId, account: ctx.account, serverId: ctx.serverId, charIdx: ctx.charIdx })
+      .then(() => {
+        if (typeof window.loadMap === 'function') window.loadMap(mapId);
+      })
+      .catch(err => alert('操作失敗：' + (err.message || err)));
   }
   function gmGiveItem(itemKey) {
     const map = {
@@ -899,28 +1231,37 @@
       mystery_chest: { id: 'mystery_chest', count: 10 },
     };
     const info = map[itemKey];
-    if (!info || !window.addToInventory) return;
-    const itemDef = (window.GS?.inventory?.[0] || {}); // 從目錄找
-    // 直接用 addToInventory
-    const iconMap = window.ITEM_ICONS || {};
-    addToInventory({
-      id: info.id,
-      name: info.id,
-      type: 'consumable',
-      itemType: 'consumable',
-      rarity: 'green',
-      icon: iconMap[info.id] || iconMap.hp1 || '',
+    if (!info) return;
+    const ctx = getGMContext();
+    api('/gm/adjust', {
+      action: 'giveItem',
+      itemId: info.id,
       count: info.count,
-      effect: {},
-    }, info.count);
-    refreshGMServerStatus();
+      account: ctx.account,
+      serverId: ctx.serverId,
+      charIdx: ctx.charIdx,
+    }).then(() => {
+      // 發放成功後，從後端重新載入角色存檔以同步背包
+      return api('/characters/' + ctx.charIdx + '?server=' + encodeURIComponent(ctx.serverId));
+    }).then(res => {
+      if (res && res.saveData && window.GS) {
+        GS.inventory = res.saveData.inventory || [];
+        if (window.renderInventory) renderInventory();
+        if (window.updateUI) updateUI();
+      }
+      refreshGMServerStatus();
+    }).catch(err => alert('操作失敗：' + (err.message || err)));
   }
   function gmKickPlayer() {
     const sel = $('gm-player-select');
     if (!sel || !sel.value) return;
-    if (window.MultiplayerClient?.kickPlayer) {
-      window.MultiplayerClient.kickPlayer(sel.value);
-    }
+    if (!confirm('確定踢出此玩家？')) return;
+    api('/gm/kick', { socketId: sel.value })
+      .then(() => {
+        alert('已踢出');
+        refreshGMPanelData();
+      })
+      .catch(err => alert('操作失敗：' + (err.message || err)));
   }
   function gmLogout() {
     try {

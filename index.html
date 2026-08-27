@@ -4,7 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v2.0.2 · 正式營運</title>
+  <title>君主之刃 v2.0.6 · 正式營運</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#1a0f05" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="君主之刃" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="apple-touch-icon" href="https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7vse34gs_ve_miaoda" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="auth.css" />
   <link href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet" />
@@ -106,7 +113,7 @@
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v2.0.2 · 正式營運</div>
+    <div class="splash-version">v2.0.6 · 正式營運</div>
   </div>
 
   <div id="game-root">
@@ -213,7 +220,7 @@
 
       <!-- 任務追踪 -->
       <div class="quest-tracker" id="quest-tracker">
-        <div class="quest-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhellu6fs_ve_miaoda" class="quest-icon-img" alt="任務"/></div>
+        <div class="quest-icon quest-icon-text" data-label="任"></div>
         <div class="quest-info">
           <div class="quest-name" id="quest-name">討伐哥布林</div>
           <div class="quest-progress">
@@ -224,7 +231,7 @@
 
       <!-- 击杀数 -->
       <div class="kill-counter" id="kill-counter">
-        <span class="kill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhhp4kwps_ve_miaoda" class="kill-icon-img" alt="擊殺"/></span>
+        <span class="kill-icon kill-icon-text" data-label="殺"></span>
         <span class="kill-count" id="kill-count">0</span>
       </div>
 
@@ -251,49 +258,73 @@
       <!-- 快捷栏（底部） -->
       <div class="skill-bar" id="skill-bar">
         <button class="skill-btn" data-skill="0" title="普通攻擊">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg7agpycu_ve_miaoda" class="skill-icon-img" alt="普攻"/></div>
+          <div class="skill-icon skill-icon-tiered" data-label="攻">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg7agpycu_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">1</div>
           <div class="skill-cd" id="skill-cd-0"></div>
           <div class="skill-count" id="skill-count-0"></div>
         </button>
-        <button class="skill-btn" data-skill="1">
-          <div class="skill-icon" id="skill-icon-1"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5vdv4kw_ve_miaoda" class="skill-icon-img" alt="技能1"/></div>
+        <button class="skill-btn" data-skill="1" title="技能一">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-1" data-label="技1">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5vdv4kw_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">2</div>
           <div class="skill-cd" id="skill-cd-1"></div>
           <div class="skill-count" id="skill-count-1"></div>
         </button>
-        <button class="skill-btn" data-skill="2">
-          <div class="skill-icon" id="skill-icon-2"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhadazias_ve_miaoda" class="skill-icon-img" alt="技能2"/></div>
+        <button class="skill-btn" data-skill="2" title="技能二">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-2" data-label="技2">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhadazias_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">3</div>
           <div class="skill-cd" id="skill-cd-2"></div>
           <div class="skill-count" id="skill-count-2"></div>
         </button>
-        <button class="skill-btn" data-skill="3">
-          <div class="skill-icon" id="skill-icon-3"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsms_ve_miaoda" class="skill-icon-img" alt="技能3"/></div>
+        <button class="skill-btn" data-skill="3" title="技能三">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-3" data-label="技3">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsms_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">4</div>
           <div class="skill-cd" id="skill-cd-3"></div>
           <div class="skill-count" id="skill-count-3"></div>
         </button>
-        <button class="skill-btn" data-skill="4">
-          <div class="skill-icon" id="skill-icon-4"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsns_ve_miaoda" class="skill-icon-img" alt="技能4"/></div>
+        <button class="skill-btn" data-skill="4" title="技能四">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-4" data-label="技4">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsns_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">5</div>
           <div class="skill-cd" id="skill-cd-4"></div>
           <div class="skill-count" id="skill-count-4"></div>
         </button>
-        <button class="skill-btn" data-skill="5">
-          <div class="skill-icon" id="skill-icon-5"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能5"/></div>
+        <button class="skill-btn" data-skill="5" title="技能五">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-5" data-label="技5">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">6</div>
           <div class="skill-cd" id="skill-cd-5"></div>
           <div class="skill-count" id="skill-count-5"></div>
         </button>
-        <button class="skill-btn" data-skill="6">
-          <div class="skill-icon" id="skill-icon-6"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能6"/></div>
+        <button class="skill-btn" data-skill="6" title="技能六">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-6" data-label="技6">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">7</div>
           <div class="skill-cd" id="skill-cd-6"></div>
           <div class="skill-count" id="skill-count-6"></div>
         </button>
-        <button class="skill-btn" data-skill="7">
-          <div class="skill-icon" id="skill-icon-7"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能7"/></div>
+        <button class="skill-btn" data-skill="7" title="技能七">
+          <div class="skill-icon skill-icon-tiered" id="skill-icon-7" data-label="技7">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">8</div>
           <div class="skill-cd" id="skill-cd-7"></div>
           <div class="skill-count" id="skill-count-7"></div>
@@ -342,28 +373,27 @@
     <nav class="bottom-nav">
       <div class="nav-buttons">
         <button class="nav-btn active" data-page="hero">
-          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbuwxsas_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="人物"/></div>
+          <div class="nav-icon nav-icon-text" data-label="人物"></div>
           <span>人物</span>
         </button>
         <button class="nav-btn" data-page="bag">
-          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrettaiwci_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="背包"/></div>
+          <div class="nav-icon nav-icon-text" data-label="背包"></div>
           <span>背包</span>
         </button>
         <button class="nav-btn gacha-btn" data-page="gacha">
-          <div class="nav-icon-gacha"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkreo4cpwaq_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="召喚"/></div>
+          <div class="nav-icon nav-icon-text gacha" data-label="召喚"></div>
           <span>召喚</span>
         </button>
         <button class="nav-btn" data-page="shop">
-          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhcc4tsks_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="商店"/></div>
+          <div class="nav-icon nav-icon-text" data-label="商店"></div>
           <span>商店</span>
         </button>
         <button class="nav-btn" data-page="dungeon">
-          <div class="nav-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhekzl2pu_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="副本"/></div>
+          <div class="nav-icon nav-icon-text" data-label="副本"></div>
           <span>副本</span>
         </button>
         <button class="nav-btn" id="settings-btn">
-          <div class="nav-icon" style="position:relative">
-            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/>
+          <div class="nav-icon nav-icon-text" data-label="設定" style="position:relative">
             <!-- 連線狀態點：綠=已連線多人、灰=單機模式 -->
             <span id="mp-status-dot" class="mp-status-dot mp-status-offline" title="單機模式"></span>
           </div>
@@ -389,43 +419,43 @@
       </div>
       <div class="side-menu-list">
         <button class="side-menu-item" data-menu="nation">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhhpqp6au_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="國家"/></span>
+          <span class="menu-icon menu-icon-text" data-label="國"></span>
           <span class="menu-text">國家</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" data-menu="class">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhihjjamu_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="職業"/></span>
+          <span class="menu-icon menu-icon-text" data-label="職"></span>
           <span class="menu-text">職業</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" data-menu="ranking">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbjjeudw_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="排行榜"/></span>
+          <span class="menu-icon menu-icon-text" data-label="榜"></span>
           <span class="menu-text">排行榜</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" id="menu-codex-btn">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhdxc3opw_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="圖鑑"/></span>
+          <span class="menu-icon menu-icon-text" data-label="鑑"></span>
           <span class="menu-text">圖鑑</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" id="menu-synth-btn">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhihcnigw_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="合成"/></span>
+          <span class="menu-icon menu-icon-text" data-label="合"></span>
           <span class="menu-text">合成</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" id="menu-auction-btn">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrxeb2kaes_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="交易所"/></span>
+          <span class="menu-icon menu-icon-text" data-label="易"></span>
           <span class="menu-text">交易所</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" id="menu-settings-btn">
-          <span class="menu-icon" style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--gold-dark);background:linear-gradient(135deg, rgba(30,22,14,0.9), rgba(15,10,6,0.9));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 4px rgba(0,0,0,0.5)"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhd76ayqs_ve_miaoda" style="width:100%;height:100%;object-fit:cover;display:block;" alt="設定"/></span>
+          <span class="menu-icon menu-icon-text" data-label="設"></span>
           <span class="menu-text">設定</span>
           <span class="menu-arrow">›</span>
         </button>
       </div>
       <div class="side-menu-footer">
-        <div class="export-tip">v2.0.2 君主之刃</div>
+        <div class="export-tip">v2.0.6 君主之刃</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -524,42 +554,66 @@
       <!-- 技能栏（攻城战共用） -->
       <div class="skill-bar" id="siege-skill-bar">
         <button class="skill-btn" data-skill="0" title="普通攻擊">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg7agpycu_ve_miaoda" class="skill-icon-img" alt="普攻"/></div>
+          <div class="skill-icon skill-icon-tiered" data-label="攻">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg7agpycu_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">1</div>
           <div class="skill-cd" id="siege-skill-cd-0"></div>
         </button>
-        <button class="skill-btn" data-skill="1">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5vdv4kw_ve_miaoda" class="skill-icon-img" alt="技能1"/></div>
+        <button class="skill-btn" data-skill="1" title="技能一">
+          <div class="skill-icon skill-icon-tiered" data-label="技1">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5vdv4kw_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">2</div>
           <div class="skill-cd" id="siege-skill-cd-1"></div>
         </button>
-        <button class="skill-btn" data-skill="2">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhadazias_ve_miaoda" class="skill-icon-img" alt="技能2"/></div>
+        <button class="skill-btn" data-skill="2" title="技能二">
+          <div class="skill-icon skill-icon-tiered" data-label="技2">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhadazias_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">3</div>
           <div class="skill-cd" id="siege-skill-cd-2"></div>
         </button>
-        <button class="skill-btn" data-skill="3">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsms_ve_miaoda" class="skill-icon-img" alt="技能3"/></div>
+        <button class="skill-btn" data-skill="3" title="技能三">
+          <div class="skill-icon skill-icon-tiered" data-label="技3">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5gyhsms_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">4</div>
           <div class="skill-cd" id="siege-skill-cd-3"></div>
         </button>
-        <button class="skill-btn" data-skill="4">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能4"/></div>
+        <button class="skill-btn" data-skill="4" title="技能四">
+          <div class="skill-icon skill-icon-tiered" data-label="技4">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">5</div>
           <div class="skill-cd" id="siege-skill-cd-4"></div>
         </button>
-        <button class="skill-btn" data-skill="5">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能5"/></div>
+        <button class="skill-btn" data-skill="5" title="技能五">
+          <div class="skill-icon skill-icon-tiered" data-label="技5">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">6</div>
           <div class="skill-cd" id="siege-skill-cd-5"></div>
         </button>
-        <button class="skill-btn" data-skill="6">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能6"/></div>
+        <button class="skill-btn" data-skill="6" title="技能六">
+          <div class="skill-icon skill-icon-tiered" data-label="技6">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">7</div>
           <div class="skill-cd" id="siege-skill-cd-6"></div>
         </button>
-        <button class="skill-btn" data-skill="7">
-          <div class="skill-icon"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="技能7"/></div>
+        <button class="skill-btn" data-skill="7" title="技能七">
+          <div class="skill-icon skill-icon-tiered" data-label="技7">
+            <div class="skill-icon-bg"></div>
+            <img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrhbk652cs_ve_miaoda" class="skill-icon-img" alt="" onerror="handleImgError(this)"/>
+          </div>
           <div class="skill-key">8</div>
           <div class="skill-cd" id="siege-skill-cd-7"></div>
         </button>

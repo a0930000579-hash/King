@@ -30,7 +30,7 @@ function detectLocalAssets() {
     const probe = new Image();
     probe.onload = function () { _LOCAL_ASSETS_AVAILABLE = true; resolve(true); };
     probe.onerror = function () { _LOCAL_ASSETS_AVAILABLE = false; resolve(false); };
-    probe.src = 'assets/warrior/idle.png?_t=' + Date.now();
+    probe.src = 'assets/01_class/EH6NSfRHy5.png?_t=' + Date.now();
     // 超時保護（3 秒）
     setTimeout(function () {
       if (_LOCAL_ASSETS_AVAILABLE === null) {
@@ -47,6 +47,214 @@ function _preferCdn() {
   if (USE_LOCAL_ASSETS) return false;         // 玩家手動開啟離線模式 → 走本地
   if (_LOCAL_ASSETS_AVAILABLE === true) return false; // 本地 assets 存在 → 走本地
   return true; // 其餘（http(s) + 本地沒有 / 未偵測到）→ 優先 CDN
+}
+
+// v2.0.3：圖片 ID → 分類目錄對照表
+// 對應 assets/<slug>/<id>.png 路徑，與後端分類資料夾結構一致
+// v2.0.3：CDN 圖片 ID → 分類目錄對照表（1086 張唯一圖檔）
+// 對應 assets/<slug>/<id>.png 路徑，assetUrl() 優先走分類目錄
+// fallback：分類目錄不存在 → 扁平 assets/<id>.png → CDN
+const SPRITE_CATEGORY_MAP = {
+  '04hM2yqOUB': '01_class', '0RHsHujNVl': '01_class', '0rkIrVa7ze': '01_class', '1TRczedt8q': '01_class', '3nvwV8TVFg': '01_class', '6HYp22y9go': '01_class',
+  '6lmBqi1fPd': '01_class', '9wFUciLZbv': '01_class', 'ArNbUPLU6U': '01_class', 'BE6nspfFXV': '01_class', 'C3zZq0esCU': '01_class', 'CcVOGxaAdm': '01_class',
+  'EH6NSfRHy5': '01_class', 'FftY8v8Jwb': '01_class', 'FpNCpR5u6u': '01_class', 'GPRL9j6N2h': '01_class', 'J0pJgpRpWE': '01_class', 'JBvHrUS91w': '01_class',
+  'KrtUF6VTD8': '01_class', 'LTXxZxsro9': '01_class', 'Li6SXCqcqq': '01_class', 'NewNWSVXfS': '01_class', 'OziaGFobVL': '01_class', 'QtS48eeKRr': '01_class',
+  'RbZnbsfeUP': '01_class', 'RtauX9ExPG': '01_class', 'SL6QCntdHb': '01_class', 'WAGYLQHVL9': '01_class', 'YLQCi28fvv': '01_class', 'Z7osFolCcB': '01_class',
+  'cAMkL8UcNO': '01_class', 'dBTU62gvba': '01_class', 'dZWJfSco9X': '01_class', 'do7DZ6uWlZ': '01_class', 'hHyhIm5Ol9': '01_class', 'i6qnP4zskJ': '01_class',
+  'imCnzdid9j': '01_class', 'mkQsvB8hGu': '01_class', 'sRUlVGqmIF': '01_class', 'vuQCCL3kBJ': '01_class', 'yv76SqEKwK': '01_class', 'zmlt6wRxQ6': '01_class',
+  '01wfNPiTXP': '02_transform', '06IFpCmc14': '02_transform', '0UZceLNR6V': '02_transform', '0aE8Uy4zcS': '02_transform', '0aEPBNMAjs': '02_transform', '0behWSGxwq': '02_transform',
+  '0yfRk9msfe': '02_transform', '129Iba81fB': '02_transform', '14exjSZWW4': '02_transform', '1OVUePiezR': '02_transform', '1UZKpoQt4D': '02_transform', '1VLpSC7TlE': '02_transform',
+  '1cggz90lgT': '02_transform', '1daCVmkSeg': '02_transform', '1yaLUBo60m': '02_transform', '1zfYw9YO2l': '02_transform', '2Jh1KzopT9': '02_transform', '2SSEb3jbgH': '02_transform',
+  '2UJcZM4bVX': '02_transform', '2lE46ur5Jl': '02_transform', '2lfd3DgWWJ': '02_transform', '324delxMNK': '02_transform', '3CxLgjYu06': '02_transform', '3E5L92SGX8': '02_transform',
+  '3VfPIUl9MH': '02_transform', '3eq3rAYEYV': '02_transform', '3pD82uqAfo': '02_transform', '3ygE66VdLj': '02_transform', '4FHggRV3UL': '02_transform', '4dWxcP34zc': '02_transform',
+  '4im8YcndVt': '02_transform', '4rskJ0uzUP': '02_transform', '5FXyIK5xsd': '02_transform', '5IOLvbsXwW': '02_transform', '5S1tUIsls4': '02_transform', '5UMFE65Hny': '02_transform',
+  '6vUu4Qxv4R': '02_transform', '72qwU65Xsa': '02_transform', '7EMmttpXtt': '02_transform', '7VUpTrVgJ9': '02_transform', '7i19uQAWe9': '02_transform', '7rkggQtVva': '02_transform',
+  '88a59LdSSj': '02_transform', '8H1b89EXdY': '02_transform', '8IDPqcesFo': '02_transform', '8KkfFpRmlG': '02_transform', '8au7xoi5Il': '02_transform', '8dvXmhS5c7': '02_transform',
+  '8hb1wWKeFd': '02_transform', '8joAeHfhWH': '02_transform', '8uoto9Z1wj': '02_transform', '9Do8Ov0n08': '02_transform', '9HVEwc1CHV': '02_transform', '9QIYbWxUek': '02_transform',
+  '9aJxLBlYSk': '02_transform', '9j6fRyQNOL': '02_transform', 'A9YN2hiCuY': '02_transform', 'ABmg3UdUtX': '02_transform', 'ADpfZE1an1': '02_transform', 'APDWUGWZVw': '02_transform',
+  'AXY4DIQe2G': '02_transform', 'AabmhFFskx': '02_transform', 'AiYHpTKu8K': '02_transform', 'AlSTOhTlsh': '02_transform', 'Atwxnpfckc': '02_transform', 'BBIRZaDf3w': '02_transform',
+  'BG9V2u0zRc': '02_transform', 'BIGWnZpFlk': '02_transform', 'BIuGGAsYZh': '02_transform', 'BNueAO9UiJ': '02_transform', 'BnE6LCjrAh': '02_transform', 'BxhqoNBsy9': '02_transform',
+  'C3VstdT6dQ': '02_transform', 'CH3Wf8rqcv': '02_transform', 'CHAU6a1OqQ': '02_transform', 'D6U5t601Rd': '02_transform', 'D8IK9SlSiW': '02_transform', 'DA1JiUu25C': '02_transform',
+  'DEI5Znr00s': '02_transform', 'DGdNzHjEpE': '02_transform', 'DInQE4sGfT': '02_transform', 'DUGV885PVj': '02_transform', 'DagRO0Zu0O': '02_transform', 'DsxV4nNArA': '02_transform',
+  'DwH0XNy4cM': '02_transform', 'EHH32Fvnw1': '02_transform', 'ES8VrGKwNp': '02_transform', 'F6ctRUeEtA': '02_transform', 'F9QCsN3SUJ': '02_transform', 'FEaYTU3HUH': '02_transform',
+  'FOIte0Nrnl': '02_transform', 'FXdRQ4zYcV': '02_transform', 'FfzUQzcUjH': '02_transform', 'FknXIoGH7m': '02_transform', 'FskOyZckMz': '02_transform', 'G3QcnMpuCP': '02_transform',
+  'GI7RvSykGX': '02_transform', 'GMxsqLaCGt': '02_transform', 'GP2tFT10gV': '02_transform', 'GQiVtSUkGM': '02_transform', 'GUlp5Qy6iw': '02_transform', 'GmhHzyM35a': '02_transform',
+  'GyUzsLGZl9': '02_transform', 'HAdRkH7ast': '02_transform', 'HruKYKXKR4': '02_transform', 'HzkkhZbJQy': '02_transform', 'IIMkBDTmaj': '02_transform', 'IP20rvDTem': '02_transform',
+  'IVxWqYtCFv': '02_transform', 'IrILzX6WFb': '02_transform', 'J9PLJTHNOp': '02_transform', 'JIGsfqs5tQ': '02_transform', 'JIo0NQJyMB': '02_transform', 'JcezH6rVhY': '02_transform',
+  'Jf0iOCYab0': '02_transform', 'JsAMlghL1g': '02_transform', 'JwUkzb2ULU': '02_transform', 'K6tz7arcIU': '02_transform', 'KGGg348qE0': '02_transform', 'KWKxSZEuoL': '02_transform',
+  'Ke1R2tYyYi': '02_transform', 'KfG4vGHfBg': '02_transform', 'KkEUNrhHF9': '02_transform', 'KnhgNV0Vpg': '02_transform', 'KrBsZ5am4a': '02_transform', 'L2mcusQPUi': '02_transform',
+  'MV7BqtB99J': '02_transform', 'MwULW9MFX6': '02_transform', 'NDVG5UKea8': '02_transform', 'NaPbNp9c1V': '02_transform', 'Ni2RrhDZ1j': '02_transform', 'NvUjJpgNau': '02_transform',
+  'O6IPrYZZPE': '02_transform', 'OBwQLtVKAd': '02_transform', 'OSap9erVl0': '02_transform', 'OncrG5zfYk': '02_transform', 'P4GxGCsuAh': '02_transform', 'P8x4odPP2g': '02_transform',
+  'PABlGUtHZI': '02_transform', 'PL5FOn3oK3': '02_transform', 'PQCWH5S0nt': '02_transform', 'Pl4PBEqsvs': '02_transform', 'QHirhzODvt': '02_transform', 'QO6k6TReK3': '02_transform',
+  'QRytegQ1Oe': '02_transform', 'Qd4BJClvxa': '02_transform', 'QhpgNeRnxD': '02_transform', 'QmkvrrFzNG': '02_transform', 'Qt3jPiUHWB': '02_transform', 'Qz5xkyMung': '02_transform',
+  'QzBWNKPsY4': '02_transform', 'R00axCfBpj': '02_transform', 'RBcRgmVnXr': '02_transform', 'RBtLFeKz3n': '02_transform', 'RMvUnPUllP': '02_transform', 'RPBVhIBi7V': '02_transform',
+  'Rei3nUl68F': '02_transform', 'ResU9dONwj': '02_transform', 'RlqyeyACqE': '02_transform', 'RqzkY6gSAe': '02_transform', 'RuWfBBWE3q': '02_transform', 'RxwVHYpUBy': '02_transform',
+  'S7IOuBsYkV': '02_transform', 'SOUyJPF1a4': '02_transform', 'SiOQl1qSHv': '02_transform', 'SqE44zEURU': '02_transform', 'StSWxwsuyL': '02_transform', 'StVW9D5cG3': '02_transform',
+  'T1GQok0mRG': '02_transform', 'TLuUdtTRPo': '02_transform', 'UDUgYvLahT': '02_transform', 'UDWVV99LsP': '02_transform', 'UG62bf0JNu': '02_transform', 'UIynvopITS': '02_transform',
+  'UNApdDllMS': '02_transform', 'UNCvpUlZe3': '02_transform', 'URWgbxczyS': '02_transform', 'UTRwvn4Jvu': '02_transform', 'UdeJSiOwgC': '02_transform', 'UfxwzeARpf': '02_transform',
+  'Uy34UUhRLV': '02_transform', 'UzyGWNuIXG': '02_transform', 'VG3McWxGjS': '02_transform', 'VQVnYOGqI0': '02_transform', 'VXrkmeX6PR': '02_transform', 'VcqQUDirUp': '02_transform',
+  'VethpE7HTK': '02_transform', 'Vn6NQ5HTfP': '02_transform', 'VpFGcBGsio': '02_transform', 'Vz0tjoN3CV': '02_transform', 'WEmjqc7EFZ': '02_transform', 'WTf0hxHzTr': '02_transform',
+  'WkPzfdfBUr': '02_transform', 'WoJbCl806L': '02_transform', 'XELd2NyONv': '02_transform', 'XuqiFJ7Op1': '02_transform', 'Y1LvxRAKVX': '02_transform', 'YxXoXhdLmS': '02_transform',
+  'Z3K4JEOsj7': '02_transform', 'Z6u0oZoY1s': '02_transform', 'ZUG8O1EYV6': '02_transform', 'ZezX8UaHA9': '02_transform', 'ZqZ6j72UWj': '02_transform', 'a8JCQmVVNT': '02_transform',
+  'aERk9PVdap': '02_transform', 'aNWVrFpkQ7': '02_transform', 'aOi6g9V9CR': '02_transform', 'alr9iCtgLt': '02_transform', 'bSTo2dlMbK': '02_transform', 'bYD7aJdZCZ': '02_transform',
+  'bfyGxrCUUb': '02_transform', 'boUCARKlUK': '02_transform', 'bwenVF50Ra': '02_transform', 'bx9Mhx02ok': '02_transform', 'cHlfroDsYk': '02_transform', 'cN3E5Nquah': '02_transform',
+  'cRVH78jrX4': '02_transform', 'cVrwZiXkl0': '02_transform', 'cYtJbElVs8': '02_transform', 'cgp2aEtGh5': '02_transform', 'ci6rXRx8DG': '02_transform', 'cn1JRTsp1r': '02_transform',
+  'dPBulifvdn': '02_transform', 'dfYQSwdbFC': '02_transform', 'dgZiU5ybp0': '02_transform', 'dhRCyjwjXd': '02_transform', 'dkI8y3JSa8': '02_transform', 'dnXjUwFRcz': '02_transform',
+  'e6cVUaEb1W': '02_transform', 'ef7gCUKojx': '02_transform', 'ekiTVHnUBx': '02_transform', 'eqeb7UTVyC': '02_transform', 'f2eqJYANgu': '02_transform', 'f8JFmtkifj': '02_transform',
+  'fNqR5LHWx6': '02_transform', 'fTDu2t8m4b': '02_transform', 'fsRV73Zlc2': '02_transform', 'g5u2Sq5agH': '02_transform', 'g9gM4nu3k7': '02_transform', 'gLa19G08zS': '02_transform',
+  'gReueVbraV': '02_transform', 'gWHXi4D2KR': '02_transform', 'gZssWp0Yaq': '02_transform', 'gnxhj1r7Tr': '02_transform', 'hARxvrASWY': '02_transform', 'hZVlq8jqks': '02_transform',
+  'hbuS4nnQI2': '02_transform', 'hd5eWW3oGA': '02_transform', 'hnzd6J8WBV': '02_transform', 'i9ohDah6fK': '02_transform', 'iIv0XB8Fwn': '02_transform', 'iLLSI4Ugp4': '02_transform',
+  'iTVLHzirHU': '02_transform', 'il72r9FzSj': '02_transform', 'jMG2E9M5GC': '02_transform', 'jUCeNhLR2u': '02_transform', 'jkm5kDZZyi': '02_transform', 'jp4p2wZowU': '02_transform',
+  'jsmfG7UE6X': '02_transform', 'k5L5nRvfAz': '02_transform', 'k5PZYRWeFP': '02_transform', 'k9fWQyguRW': '02_transform', 'kUFVQVjTCS': '02_transform', 'kgBNXt4Xoo': '02_transform',
+  'khEwYymEiA': '02_transform', 'kpZ8td4p6c': '02_transform', 'l1IhVtVrYO': '02_transform', 'lJuFzWMxAU': '02_transform', 'lVvCMQkXCa': '02_transform', 'lyhUAf9LY1': '02_transform',
+  'mCjwFU7sH3': '02_transform', 'mDlj9NvC3K': '02_transform', 'mKkn8z5w9j': '02_transform', 'mO6nx6RVMn': '02_transform', 'mQismT3uJo': '02_transform', 'minclzzMDJ': '02_transform',
+  'mzfq8TKq4x': '02_transform', 'n7NjzUEXzg': '02_transform', 'nPAX4om6CQ': '02_transform', 'o3iGZH3Cy0': '02_transform', 'oAK5BfqbUG': '02_transform', 'oQGDNJrRGb': '02_transform',
+  'oa3EwFSiXq': '02_transform', 'ohKPiheUuX': '02_transform', 'osb6zySMtJ': '02_transform', 'owA0PPIkhb': '02_transform', 'pFJT2Xc5o8': '02_transform', 'pHrkeD5CZZ': '02_transform',
+  'pKWI45mDye': '02_transform', 'pL1VfcXxsV': '02_transform', 'q2rm4wKK3M': '02_transform', 'q3MAJiktJq': '02_transform', 'q4CcGLViUH': '02_transform', 'qRmnQyhsHF': '02_transform',
+  'qWnNUVJHjt': '02_transform', 'qZU5ELfxSd': '02_transform', 'qaasdrxeR4': '02_transform', 'qbFuvtVA9u': '02_transform', 'qdmsMhWgqS': '02_transform', 'qgw3ZgKID0': '02_transform',
+  'r0Wr3RU7yy': '02_transform', 'rCn1Xg8QwR': '02_transform', 'rFGDkDOZRB': '02_transform', 'rUD0POkJta': '02_transform', 'rUzaQp8hjo': '02_transform', 'rVWKSw3VY3': '02_transform',
+  'rY6t9P8rRQ': '02_transform', 'rchaMLCdba': '02_transform', 's1b9NsVUNP': '02_transform', 'tAPperojqB': '02_transform', 'tIFfmNcsAK': '02_transform', 'tRzhWyINkC': '02_transform',
+  'tXJSEwWVsy': '02_transform', 'tjFKwAE5pk': '02_transform', 'u5eemtHJJk': '02_transform', 'u8C4FDxAzq': '02_transform', 'uQMK2b8OQV': '02_transform', 'uTgkHlHwHz': '02_transform',
+  'uVxyoSmBMS': '02_transform', 'uWVpLtw83e': '02_transform', 'uiC3MCWbCM': '02_transform', 'uzOCokO05x': '02_transform', 'vQNYtfo6e9': '02_transform', 'vlURIemaSk': '02_transform',
+  'vnhVMY1Mbl': '02_transform', 'vt1sWuAPjU': '02_transform', 'vtUUJB7bTi': '02_transform', 'w3wSWVILVJ': '02_transform', 'w9NoGKlwkf': '02_transform', 'wLT8tzjGBp': '02_transform',
+  'wYvHwdI66x': '02_transform', 'wZ2LHv5DEE': '02_transform', 'wbVe3TL0Us': '02_transform', 'wfO5BlbYRQ': '02_transform', 'wk8blv3H1y': '02_transform', 'wpxuawrVCV': '02_transform',
+  'wzctdAamJe': '02_transform', 'x2macmCl5G': '02_transform', 'xEBMD6PdNQ': '02_transform', 'xF49Pin6zA': '02_transform', 'xipd7571LS': '02_transform', 'xisa2l3L81': '02_transform',
+  'xyUs6KN6V8': '02_transform', 'y1G12v4mDa': '02_transform', 'y2aDT1QdqC': '02_transform', 'y72KlnSj1F': '02_transform', 'yALOugPi8M': '02_transform', 'yT0VMafbdE': '02_transform',
+  'yV45js1CzO': '02_transform', 'yVyGfGb920': '02_transform', 'yavRrKoSfb': '02_transform', 'yjCv6PTl53': '02_transform', 'yp76je2sRV': '02_transform', 'ysMOfAVZc0': '02_transform',
+  'yzizeV2vZe': '02_transform', 'z29DBTuv6u': '02_transform', 'zZYmJKREfl': '02_transform', 'zj8RfqmcjX': '02_transform', 'zwacAmuGuC': '02_transform',
+  '2znmT3dKQc': '03_hero', '3p1uOOFmcV': '03_hero', '4GGzWY67AP': '03_hero', '4trwK4nbCK': '03_hero', '5F14d71Pyl': '03_hero', '7cS3BR2aXs': '03_hero',
+  '8Oi9kqjlW7': '03_hero', 'CWImnq6w74': '03_hero', 'DGju3Q4Ork': '03_hero', 'DN7Jyx82Wy': '03_hero', 'FdRbs6DDqD': '03_hero', 'G5YNj7nOuU': '03_hero',
+  'GcUyuA4fDo': '03_hero', 'GgXExreutf': '03_hero', 'I2SNzCU0xy': '03_hero', 'IiUR2GRnKz': '03_hero', 'M8iLItb8SL': '03_hero', 'MVfdatmvBN': '03_hero',
+  'MouZcszF2k': '03_hero', 'N9HEYzExfI': '03_hero', 'Ndq0gap6Nr': '03_hero', 'P5Zx8qWbOU': '03_hero', 'Pq2UOQqKkD': '03_hero', 'QfMFFvqiVJ': '03_hero',
+  'RWwbIlt65D': '03_hero', 'RfAz4VpN1S': '03_hero', 'ScTVMscBly': '03_hero', 'Ss1BU5oAYq': '03_hero', 'T9M88GBCQk': '03_hero', 'TAQamR2aH5': '03_hero',
+  'Td3MQT1tnF': '03_hero', 'U8qQhdSmbz': '03_hero', 'UhCMU18cUM': '03_hero', 'Upf0cg83SP': '03_hero', 'VtD3SeV87P': '03_hero', 'WawynjOGZK': '03_hero',
+  'XFdWB5oY1w': '03_hero', 'XrPTYEU4do': '03_hero', 'YjCgRDLbqB': '03_hero', 'Zae7N0mwUb': '03_hero', 'axD7UXXItT': '03_hero', 'be2uP8VYpR': '03_hero',
+  'crmYOmDoIP': '03_hero', 'drRUJ1PiSv': '03_hero', 'dxmuWjHkBl': '03_hero', 'eGFznrB3mT': '03_hero', 'emAq8UCONc': '03_hero', 'fCC7qVivRp': '03_hero',
+  'h456EaLNMu': '03_hero', 'hvqAPvsE23': '03_hero', 'jHVVvaUxZ2': '03_hero', 'kRG3SukyKD': '03_hero', 'khiUoUYZ0t': '03_hero', 'l9oUjCLsvD': '03_hero',
+  'nO9v776UoV': '03_hero', 'nYr4vtlMDr': '03_hero', 'oJot2AXiYN': '03_hero', 'oUwn28Nr9n': '03_hero', 'ohQfz22Mtr': '03_hero', 'pI0sXZsd8V': '03_hero',
+  'paP684cHRG': '03_hero', 'r5SXmQVUv2': '03_hero', 'vASAOufnxz': '03_hero', 'wDBEVqyFld': '03_hero', 'wF6kKJTc94': '03_hero', 'wxUDxrtuLx': '03_hero',
+  'x9J654XZVH': '03_hero', 'yPlesBoan0': '03_hero', 'zV8GhUB4Mx': '03_hero', 'zfpTV9oMHP': '03_hero', 'znpkGtJ8yR': '03_hero',
+  '0CytJl9tpO': '04_monster', '0Kft2Gw701': '04_monster', '0qJFdwQwIA': '04_monster', '1PRvT0IyUa': '04_monster', '1YUXX26uiA': '04_monster', '1djiUtrb2c': '04_monster',
+  '1n2FHCF00k': '04_monster', '1x1j3NjhPH': '04_monster', '292nQJbkml': '04_monster', '2UqZ9EqS9X': '04_monster', '2diYDBGw40': '04_monster', '2hMO5hilVu': '04_monster',
+  '2oWLq4vXlG': '04_monster', '2t7NaIE7tA': '04_monster', '32iobvZMDR': '04_monster', '38FuwV7gPw': '04_monster', '3iG0uaSQjw': '04_monster', '41VYP0XKXm': '04_monster',
+  '4EULJzSSlr': '04_monster', '4e21Sv8gty': '04_monster', '4eRQoBplQY': '04_monster', '582Ij09o3K': '04_monster', '5Db9F0ZKN5': '04_monster', '5oTzfOrfzV': '04_monster',
+  '5vqHZHGQV5': '04_monster', '64CM6j4mMt': '04_monster', '6AohjTIRnR': '04_monster', '6UTDEAFDC4': '04_monster', '6fn78tWYQr': '04_monster', '6ifL3DgjCY': '04_monster',
+  '6mcEV2Pgpy': '04_monster', '6q6TBuiWlt': '04_monster', '6ykq8WkXGM': '04_monster', '7FtGCbQrYd': '04_monster', '7jZBWui3Db': '04_monster', '86rJAUsBMa': '04_monster',
+  '88UbrwO9KU': '04_monster', '8s0noOL4Yj': '04_monster', '930N2UUgHS': '04_monster', '9Us5kQk4ie': '04_monster', '9evfx7AVO8': '04_monster', '9pQ6wjsVuN': '04_monster',
+  '9tQUBUFncb': '04_monster', 'A2ZjoB2Pki': '04_monster', 'AKCLMYp49L': '04_monster', 'AUb3VXl0Qy': '04_monster', 'AY9mkXA71v': '04_monster', 'ArU5iZorxO': '04_monster',
+  'AudVTivqvo': '04_monster', 'B7CVTe4x0z': '04_monster', 'BUQtrrYRAS': '04_monster', 'CFc9nu0uVZ': '04_monster', 'CIxe6TrTWl': '04_monster', 'CQZcKHDPUL': '04_monster',
+  'CewMfMo7tU': '04_monster', 'CvFbmbrRCF': '04_monster', 'DKPorAcX7s': '04_monster', 'DQeqQ0d043': '04_monster', 'DfBHVDQWHG': '04_monster', 'Dhbzw4B2uB': '04_monster',
+  'DlrVUtEL4U': '04_monster', 'EJZ0gbn982': '04_monster', 'EfvFkRDFHo': '04_monster', 'EgnBBCs2il': '04_monster', 'FEDzWUgVga': '04_monster', 'FRwIj4bM49': '04_monster',
+  'FVI72L2SIo': '04_monster', 'FVLNAE1Aju': '04_monster', 'GCjQ9UYJCa': '04_monster', 'GNZH2vsocJ': '04_monster', 'GzLoOexBtC': '04_monster', 'HHYnZL77dr': '04_monster',
+  'HLDhc9wPmh': '04_monster', 'HUp2dsmzpG': '04_monster', 'HjiPNansZJ': '04_monster', 'HtY7WUwH6y': '04_monster', 'IainVVfq3F': '04_monster', 'IkB3kC0MLn': '04_monster',
+  'Ix5C2VbmyJ': '04_monster', 'JspSNdIB2O': '04_monster', 'L2OBUHNdsg': '04_monster', 'L5TZ5ntmcZ': '04_monster', 'L8URoUC8Vs': '04_monster', 'MgoybTkwZ6': '04_monster',
+  'MijY5iMyg7': '04_monster', 'MqykB9GBTw': '04_monster', 'MuVRCBrUzD': '04_monster', 'Mx7YOqVObn': '04_monster', 'N3Oo4VTI1q': '04_monster', 'NHFUFVv4Vs': '04_monster',
+  'NckDHIlVdY': '04_monster', 'Nj49Ur4BtB': '04_monster', 'OQ155a7UgC': '04_monster', 'Oa7zNf9UFK': '04_monster', 'OgVGjrT6k0': '04_monster', 'OlcaeodfWk': '04_monster',
+  'P4IKJKFaPb': '04_monster', 'P7mvta9pXb': '04_monster', 'PGwtG4t9rj': '04_monster', 'Q3tRQvOOgA': '04_monster', 'QBG6VLKJN8': '04_monster', 'QVsxMC7AXE': '04_monster',
+  'R5ucsLb0nY': '04_monster', 'RCdDqMVfE5': '04_monster', 'RCqUWJ5gFx': '04_monster', 'RiirQZ3fSV': '04_monster', 'RzttyT1vnA': '04_monster', 'S4gNP4k3pT': '04_monster',
+  'STUpj5gzz2': '04_monster', 'SWrInn0grd': '04_monster', 'SoVisJ5aYQ': '04_monster', 'TCEkPooI9E': '04_monster', 'U3cuZTf5WT': '04_monster', 'U6IJ8Cv32K': '04_monster',
+  'U9ed5silDc': '04_monster', 'UG1LXPgLYT': '04_monster', 'UIhYxdZIV4': '04_monster', 'UKCZ9Ol81J': '04_monster', 'ULQRvB1CdS': '04_monster', 'UgIpBy6CPb': '04_monster',
+  'UjIVNyA3ms': '04_monster', 'UrxAO5gJZh': '04_monster', 'UwvHjx0urh': '04_monster', 'V9DEE42h0u': '04_monster', 'VAWDvwJJu2': '04_monster', 'VSwDVeboki': '04_monster',
+  'VTiQzea4Rm': '04_monster', 'Vb5KUo6sqn': '04_monster', 'VbAUPUjQRw': '04_monster', 'VfGgZRdHIL': '04_monster', 'VnCngAVE7l': '04_monster', 'VudULCUxHn': '04_monster',
+  'VvBW6MiFDv': '04_monster', 'W3swxk3OAM': '04_monster', 'WD439eGaFU': '04_monster', 'WFSp2Ctj4D': '04_monster', 'WV9nboUyMl': '04_monster', 'Wi8i3HuMPN': '04_monster',
+  'WpaQwxUXzh': '04_monster', 'WrjJT3OobX': '04_monster', 'Wzi9iVLdb2': '04_monster', 'Xc1HGJ1KGV': '04_monster', 'XuUqNLGiQv': '04_monster', 'XvP3MIcdio': '04_monster',
+  'Y7D6wor5GO': '04_monster', 'YQCgkX79ZB': '04_monster', 'YY8fAAd1go': '04_monster', 'Z2xMHdIvFW': '04_monster', 'ZMSh5JkLuI': '04_monster', 'ZUTg8LaVx4': '04_monster',
+  'ZhVGRF6Vtp': '04_monster', 'Zpc82edK6V': '04_monster', 'ZscZv5PG5H': '04_monster', 'aCANFoS5Gl': '04_monster', 'ahUJpmTMju': '04_monster', 'aqedAEKlp6': '04_monster',
+  'b3NpFiK4gt': '04_monster', 'bOvayC2iOD': '04_monster', 'boDcUh2M8E': '04_monster', 'clSORpgY8H': '04_monster', 'dRz7qCVPik': '04_monster', 'db3YKTmL82': '04_monster',
+  'e37AqKOKFL': '04_monster', 'e7D8utv94E': '04_monster', 'eAGGLx6phH': '04_monster', 'ennzdff10h': '04_monster', 'f7yZo8ohJK': '04_monster', 'gSqkzYpyr5': '04_monster',
+  'gpjTvUFuXy': '04_monster', 'h1SdH2HSwb': '04_monster', 'h6R9VB8C2D': '04_monster', 'hPGhoqXxrK': '04_monster', 'hjTKkz0REl': '04_monster', 'hmpB2nomb5': '04_monster',
+  'hy8Xjp5GAH': '04_monster', 'i5XYfgjPDQ': '04_monster', 'iA3sODRZZ1': '04_monster', 'iQg6zyogEa': '04_monster', 'iRA0DU1c1U': '04_monster', 'ic8EWNDNYs': '04_monster',
+  'iovh4nWNY3': '04_monster', 'isJ78s37eH': '04_monster', 'iucIEoCrcU': '04_monster', 'jNM4KI8ia2': '04_monster', 'jOmfjaAowT': '04_monster', 'jbo4hVvFPI': '04_monster',
+  'jomDSXKJlp': '04_monster', 'jrdjr24uAs': '04_monster', 'k3ide5hCRw': '04_monster', 'kKsYi20tlC': '04_monster', 'km8jUYM0xi': '04_monster', 'mRBvVrhlWs': '04_monster',
+  'mfvvD9NaVO': '04_monster', 'mlRsq3v4CR': '04_monster', 'n93e7pZjIQ': '04_monster', 'nGscTgMw4F': '04_monster', 'nSc7HUXdKk': '04_monster', 'naY3bow36j': '04_monster',
+  'nbtEFlg5Ee': '04_monster', 'ndPzwGiddo': '04_monster', 'nqRRU8MWNQ': '04_monster', 'nt1sPXaTHe': '04_monster', 'oLc2Dzb4Gp': '04_monster', 'oUaxg5EX4u': '04_monster',
+  'oVatgTEF4i': '04_monster', 'oi41e1Ciog': '04_monster', 'ok9EV5aDdb': '04_monster', 'omtqjxhzdX': '04_monster', 'pHCtLwxDf4': '04_monster', 'pVW3CEoidZ': '04_monster',
+  'paWYrtkpSB': '04_monster', 'qN3FcGwEbv': '04_monster', 'qN9sQGMUCq': '04_monster', 'qOZI7NIdhG': '04_monster', 'qUQX6lr47u': '04_monster', 'rmIJxJ5Fpg': '04_monster',
+  'rvAT3NSnQB': '04_monster', 'sWaRxnHrMT': '04_monster', 'sYDuOUW1hs': '04_monster', 'spjSIXLSiv': '04_monster', 'sxV2RI2KMa': '04_monster', 't7LvPGwoxg': '04_monster',
+  'tT2bGXfVAt': '04_monster', 'tUaY3UCxsD': '04_monster', 'tuLEUDjxSt': '04_monster', 'uUcl6ZXFlt': '04_monster', 'ulXEI5IJVn': '04_monster', 'vgIBoWl1gY': '04_monster',
+  'w9OpsvrH9Z': '04_monster', 'wS6Zm0HXjw': '04_monster', 'wUbEJL0DQj': '04_monster', 'wYFHmKE2C0': '04_monster', 'wpc6V9qVDO': '04_monster', 'wtVX2EX1W9': '04_monster',
+  'xWZWQAzLLU': '04_monster', 'xmJHo2FGR6': '04_monster', 'yAMXkNx3dg': '04_monster', 'znvzkueF2c': '04_monster',
+  '1wgGAVd8JU': '05_boss', '49gZhlUxoM': '05_boss', '5r13VWiPU7': '05_boss', '6oppkux3K5': '05_boss', '7FnWRqmp3O': '05_boss', '7YUd2dOZDc': '05_boss',
+  '9aUL4o7j9K': '05_boss', 'B1oZEnBt4W': '05_boss', 'B5UzjmgzgT': '05_boss', 'CPUrKw4Hol': '05_boss', 'CnUAPsRzlA': '05_boss', 'DsZs2wdjX8': '05_boss',
+  'Fr4eqGqBd6': '05_boss', 'FvmW2tQuUr': '05_boss', 'H0oH4yS5iQ': '05_boss', 'HcRMhunYY3': '05_boss', 'HfzbqxNOUp': '05_boss', 'ICVHEO0qCP': '05_boss',
+  'KRVgdmZdqh': '05_boss', 'MQbYJyKtqK': '05_boss', 'OYdq2KLrpQ': '05_boss', 'R1gVGe51Fb': '05_boss', 'TZ0P76Cllb': '05_boss', 'U8U8zD5mQY': '05_boss',
+  'UfgjsaYUoz': '05_boss', 'Up2bmaIU99': '05_boss', 'Yz4l2QxCxp': '05_boss', 'aPOtgxIgss': '05_boss', 'daKfmMOKiL': '05_boss', 'eqsOwvfx7E': '05_boss',
+  'fXcREvAk5H': '05_boss', 'fvPYGckiQc': '05_boss', 'g3Irrwx4oq': '05_boss', 'jJaVDoXIZ2': '05_boss', 'mXwLa8wNlS': '05_boss', 'mfoJtk6O9p': '05_boss',
+  'o1qWUrCATh': '05_boss', 'qBmed9uuoE': '05_boss', 'qjNBrcFMWq': '05_boss', 'rCZVzIR4DM': '05_boss', 'wltQkklEoZ': '05_boss', 'x0ngk7iSES': '05_boss',
+  '1HbZreUQHQ': '06_npc', '1LlR6vpGYg': '06_npc', '1pMUj0WrTL': '06_npc', '2ZqpOZV4JY': '06_npc', '4srtvDjQPd': '06_npc', '4wr1KFH7DG': '06_npc',
+  '5m99bxAUW8': '06_npc', '7x4aF7VXRK': '06_npc', '839Tu3fbmo': '06_npc', '8UCc4uRd5e': '06_npc', '8UYlKPr8L4': '06_npc', '9nqQW8OMjO': '06_npc',
+  'ADErARCdEu': '06_npc', 'B1Xj8KAEhe': '06_npc', 'BBZwu283Gy': '06_npc', 'Buiu25AfYt': '06_npc', 'Cv17QVXyT5': '06_npc', 'GhtUV9MoUM': '06_npc',
+  'GmJMM0gLrk': '06_npc', 'IrrsDh0lJh': '06_npc', 'JUMDNgMWNh': '06_npc', 'JiW0xwVu7J': '06_npc', 'KUmdX94cVK': '06_npc', 'LAPpVgy0XL': '06_npc',
+  'N3ukZgdVoy': '06_npc', 'NPqYADvHxg': '06_npc', 'PllNPKAjDG': '06_npc', 'SzFME3Pi9q': '06_npc', 'T73arNQQlA': '06_npc', 'TiXM8q4lZK': '06_npc',
+  'TjaUWFvn6f': '06_npc', 'UlhVkekfia': '06_npc', 'VgfWfm7Wp3': '06_npc', 'Vy3TpO90sn': '06_npc', 'WQcx9I9OBq': '06_npc', 'YBZ4yf3Kz5': '06_npc',
+  'YZXtVvdmuR': '06_npc', 'ZNvUhqSGHj': '06_npc', 'boDlZxOnVq': '06_npc', 'ccwUb4KD6L': '06_npc', 'dTOA2QKqa8': '06_npc', 'eNrCqbW21z': '06_npc',
+  'i3hZlyVOEh': '06_npc', 'iXPfLZ7kDc': '06_npc', 'jjmrlmCWwC': '06_npc', 'joG7wQ5Okj': '06_npc', 'kgmSkvojy6': '06_npc', 'lX6cLQIs6s': '06_npc',
+  'lcRLg7RtoR': '06_npc', 'miiDBxtyiq': '06_npc', 'nvZ2iSN7Wz': '06_npc', 'oAdyWKiLsb': '06_npc', 'oWubNqfSuy': '06_npc', 'oe0oox3tFe': '06_npc',
+  'qfwrYpaJ2K': '06_npc', 's8UUkfmEvx': '06_npc', 'tIcOqdoaRB': '06_npc', 'u8YESfQcD3': '06_npc', 'wQdrQVESaP': '06_npc',
+  'BHiRzIPTAV': '08_equip', 'FmR5P4kp9F': '08_equip', 'JDDbWSVINf': '08_equip', 'QYQPTmKP8M': '08_equip', 'WgVb3fzkIB': '08_equip', 'YwLrUA7wlU': '08_equip',
+  'cZ70J7STpP': '08_equip', 'iUJm20Glls': '08_equip', 'nactfRVTvS': '08_equip',
+  'Soc9DQWbZI': '09_item', 'TT1m224JRn': '09_item', 'URxaFSUzM7': '09_item', 'XV03XPsYo8': '09_item', 'bU4qiIVwJ0': '09_item', 'gBv7e5Mdvo': '09_item',
+  'rUwQO6PiBH': '09_item', 's6Rkjmlc5j': '09_item',
+  'aadkrfnkcb4ru_ve_miaoda': '10_card', 'aadkrfo6tm2du_ve_miaoda': '10_card', 'aadkrfoee3uaw_ve_miaoda': '10_card', 'aadkrfpvoqecu_ve_miaoda': '10_card', 'aadkrfq7ekgbw_ve_miaoda': '10_card', 'aadkrfqh7dkfw_ve_miaoda': '10_card',
+  'aadkrfqip3wes_ve_miaoda': '10_card', 'aadkrfqj3ioew_ve_miaoda': '10_card', 'aadkrfqjgryaw_ve_miaoda': '10_card', 'aadkrfrci5egw_ve_miaoda': '10_card', 'aadkrfree5wmw_ve_miaoda': '10_card', 'aadkrfrewywhu_ve_miaoda': '10_card',
+  'aadkrfrk26ybs_ve_miaoda': '10_card', 'aadkrfrob2acs_ve_miaoda': '10_card', 'aadkrfrowjojs_ve_miaoda': '10_card', 'aadkrfroybqku_ve_miaoda': '10_card', 'aadkrfroybqlu_ve_miaoda': '10_card', 'aadkrfrpna4bw_ve_miaoda': '10_card',
+  'aadkrfrzafyjw_ve_miaoda': '10_card', 'aadkrfrzafykw_ve_miaoda': '10_card', 'aadkrfs34tstw_ve_miaoda': '10_card', 'aadkrfs5eiyru_ve_miaoda': '10_card', 'aadkrfs7mfuhu_ve_miaoda': '10_card', 'aadkrfsl32kdu_ve_miaoda': '10_card',
+  'aadkrftfgucbs_ve_miaoda': '10_card', 'aadkrftm5eshw_ve_miaoda': '10_card', 'aadkrftnde4bs_ve_miaoda': '10_card', 'aadkrftp3eqpu_ve_miaoda': '10_card',
+  'aadkq6q6wywgq_ve_miaoda': '11_ui', 'aadkq6rungqhi_ve_miaoda': '11_ui', 'aadkrd2udyyco_ve_miaoda': '11_ui', 'aadkrehajimao_ve_miaoda': '11_ui', 'aadkrfdnbcygu_ve_miaoda': '11_ui', 'aadkrfdqqacds_ve_miaoda': '11_ui',
+  'aadkrfex8k9fu_ve_miaoda': '11_ui', 'aadkrffy7a4cw_ve_miaoda': '11_ui', 'aadkrfgcyuadw_ve_miaoda': '11_ui', 'aadkrfgii4ocw_ve_miaoda': '11_ui', 'aadkrfs7r3qws_ve_miaoda': '11_ui', 'aadkrgfjm22sw_ve_miaoda': '11_ui',
+  'aadkrggcscsgs_ve_miaoda': '11_ui', 'aadkrggfwmcou_ve_miaoda': '11_ui', 'aadkrgkf6f2bw_ve_miaoda': '11_ui', 'aadkrgkym66hs_ve_miaoda': '11_ui', 'aadkrglc2tmlw_ve_miaoda': '11_ui', 'aadkrgmr7pucs_ve_miaoda': '11_ui',
+  'aadkrgnkrywaw_ve_miaoda': '11_ui', 'aadkrw5dpakds_ve_miaoda': '11_ui', 'aadkrxid6zueu_ve_miaoda': '11_ui',
+  'aadkq57bnqcoi_ve_miaoda': '12_map', 'aadkq6dgpaoci_ve_miaoda': '12_map', 'aadkq6e5eqgcq_ve_miaoda': '12_map', 'aadkq6irizcgg_ve_miaoda': '12_map', 'aadkq6ivjsmio_ve_miaoda': '12_map', 'aadkq6mpmrkki_ve_miaoda': '12_map',
+  '9P95FEwyY2': '13_siege', 'eeeRmMzAbt': '13_siege',
+  '02lvTesLUi': '14_mount', '0JFrRSWgEf': '14_mount', '0NVeN9lNJA': '14_mount', '0WsrYY040Z': '14_mount', '0XlLKL8atb': '14_mount', '0inp6LignI': '14_mount',
+  '0n0OP8HGwG': '14_mount', '1kRVSk3VBo': '14_mount', '1pdxAdoLkk': '14_mount', '1wDBNqjfun': '14_mount', '34LTJLiNDO': '14_mount', '3FJxr2SP0c': '14_mount',
+  '3MNYYyJXzo': '14_mount', '3RqulnIMKy': '14_mount', '3x3U48gZcR': '14_mount', '40emHeCVH1': '14_mount', '4CM2osVl12': '14_mount', '4uLi7MXPBx': '14_mount',
+  '5DSZqUkxA6': '14_mount', '5ZTNnchgY7': '14_mount', '5cAcbkREGT': '14_mount', '5chTx1jae1': '14_mount', '5pLySnK3Lg': '14_mount', '6AvpFAIKmW': '14_mount',
+  '6QwiEOkRqz': '14_mount', '6t4fhS2Rnk': '14_mount', '7A7eCh99EZ': '14_mount', '7PqulR5l5h': '14_mount', '7eH9UKyXCD': '14_mount', '7oDIgwzidG': '14_mount',
+  '8M5wShWyWe': '14_mount', '8V4zp9cxpI': '14_mount', '8eUdSO7p1X': '14_mount', '8vBBDoZ9zt': '14_mount', '8yxvOfavEs': '14_mount', '9FvPKgn64v': '14_mount',
+  '9icr5jmvDh': '14_mount', '9sZNQmFymS': '14_mount', '9uCZT7XwV6': '14_mount', 'A21pYqojQe': '14_mount', 'B3Q2VfQ2ma': '14_mount', 'B6cC2Pn1QV': '14_mount',
+  'BdUPrEjIqo': '14_mount', 'C3nStQIv2d': '14_mount', 'C6mVDwYXfW': '14_mount', 'CHsc86xPbU': '14_mount', 'CZBFCpSKzB': '14_mount', 'Co7ankaimz': '14_mount',
+  'DD67d1B0TV': '14_mount', 'DIyJBB7Hfd': '14_mount', 'DWUNBodZSa': '14_mount', 'DcLvLZr5LQ': '14_mount', 'EnmYOQ7wAu': '14_mount', 'Eu8UDQfN8H': '14_mount',
+  'FdpkT3hOOG': '14_mount', 'FwxAfPv3Zm': '14_mount', 'GhzfjOOsXw': '14_mount', 'GnpwHW0iBq': '14_mount', 'HNdUlfLsVm': '14_mount', 'HSeduXVKKS': '14_mount',
+  'HqrXEGComg': '14_mount', 'Hs525wcDUn': '14_mount', 'I4RyckOgam': '14_mount', 'I7WXqvMDHH': '14_mount', 'IlglhTIjlX': '14_mount', 'KGHuzfmA1U': '14_mount',
+  'LDFdRSGLLU': '14_mount', 'LcI5mzyJe7': '14_mount', 'MOlHyGoYl1': '14_mount', 'MSsnp4nJ4y': '14_mount', 'MwW5SUSr6T': '14_mount', 'OPGnviaSwV': '14_mount',
+  'OS4DgGfxDX': '14_mount', 'OUOgvHV162': '14_mount', 'OlR8gHbpNf': '14_mount', 'OtKKaAFBWE': '14_mount', 'Ov4vQ1MHH1': '14_mount', 'Oz65fwVOro': '14_mount',
+  'PD8GO6Fmrz': '14_mount', 'PQQmRUIgyr': '14_mount', 'Pe5dRBZRL8': '14_mount', 'QM7hU29zbH': '14_mount', 'QgfE2yaV9i': '14_mount', 'QozCIYqTi6': '14_mount',
+  'RDeqjGT7Vb': '14_mount', 'RSeB5G5U1Q': '14_mount', 'SDheJk0GLL': '14_mount', 'SNAfsnukC6': '14_mount', 'ScDxOqHAE0': '14_mount', 'UeNX99JezO': '14_mount',
+  'UqBOwVpHVD': '14_mount', 'VH2C2VRGFt': '14_mount', 'VNXoKs3gVe': '14_mount', 'VQnJd0kS2x': '14_mount', 'VVH2o6o5ak': '14_mount', 'Vb7Fv2c5K8': '14_mount',
+  'VlbTV8sBt6': '14_mount', 'VmilYVj3R7': '14_mount', 'VyAGAhzuZW': '14_mount', 'VzUPfM2jXL': '14_mount', 'WVpILgFuCF': '14_mount', 'WXp1HQhGmb': '14_mount',
+  'WZ3hp8Q96b': '14_mount', 'X6MGt2mZ1X': '14_mount', 'X9ynYUUdla': '14_mount', 'Y0gKbBMsH0': '14_mount', 'Y2ZtcTnufI': '14_mount', 'YEc0gxHOmV': '14_mount',
+  'YW2kaD9BPQ': '14_mount', 'YZBE6jTDFn': '14_mount', 'YeoHvTLiIl': '14_mount', 'YoYDWV77Dl': '14_mount', 'YzUpO45VkX': '14_mount', 'ZA02HOMe9o': '14_mount',
+  'ZMuQtC5AnB': '14_mount', 'ZmhMturjei': '14_mount', 'a2zRgTvIfg': '14_mount', 'aC3sJuODWM': '14_mount', 'aNnoxlZvqy': '14_mount', 'aU65soJxYA': '14_mount',
+  'ad4NkJ2hkk': '14_mount', 'axPXG6qjSl': '14_mount', 'bGksllK8MX': '14_mount', 'bOd5dxwHjN': '14_mount', 'bOtwklpRMp': '14_mount', 'blQbWMunM7': '14_mount',
+  'bms44tYXFo': '14_mount', 'bysmTYdaE6': '14_mount', 'd2wfg3gMTS': '14_mount', 'eGsb5rxWyJ': '14_mount', 'eW3JJQw6az': '14_mount', 'ef7VCkv4js': '14_mount',
+  'en02PuvELB': '14_mount', 'exEu2Rz6r7': '14_mount', 'fIErMbleyT': '14_mount', 'fZ8bgNFydU': '14_mount', 'fth9fc4jJQ': '14_mount', 'g7KBkTkxXR': '14_mount',
+  'gCnLxoD4bF': '14_mount', 'h39UlWaOy2': '14_mount', 'hniEKvAlCO': '14_mount', 'i3B2LUfnCj': '14_mount', 'i9hgcsybAi': '14_mount', 'iYmy5Ot2bc': '14_mount',
+  'jHxstB93hg': '14_mount', 'jNr9X1hJn1': '14_mount', 'jXJraVmXs2': '14_mount', 'k4zO7h71lq': '14_mount', 'kCmPAfV2Wu': '14_mount', 'kHoyV0K0U0': '14_mount',
+  'kNCoNImcND': '14_mount', 'kdc5dat4qk': '14_mount', 'ki3Alsfcua': '14_mount', 'kuODhffekb': '14_mount', 'l8FG4zID55': '14_mount', 'lOLWwwavns': '14_mount',
+  'lolCkYIGT6': '14_mount', 'luJgikxm9M': '14_mount', 'mbRbnIs048': '14_mount', 'nKfUWiF77D': '14_mount', 'nhyoVvTDFa': '14_mount', 'prdxrscYBm': '14_mount',
+  'rA5mIE4o1G': '14_mount', 'riDC4w2gn5': '14_mount', 'rjhqcTwEvQ': '14_mount', 'rs4Pd5hKUV': '14_mount', 'sDUTc8rRsH': '14_mount', 'sI264sSdwF': '14_mount',
+  'sbf86tmRI6': '14_mount', 't14WAYneux': '14_mount', 'tVfIA7pfL5': '14_mount', 'toZoMFE4Y0': '14_mount', 'tu6czNGU9g': '14_mount', 'uIJL48AKFZ': '14_mount',
+  'ueUWPhtVi7': '14_mount', 'uhUzHW8L7c': '14_mount', 'urZd40vEqt': '14_mount', 'vCWDKFq6g3': '14_mount', 'vERqwfvp4V': '14_mount', 'vOdqBdV8SH': '14_mount',
+  'vPik2CFrGB': '14_mount', 'vVlDPdSprb': '14_mount', 'vm7NU2YYU2': '14_mount', 'w90N5yKYEL': '14_mount', 'xgCKwz2TGj': '14_mount', 'xkVjHUVbHy': '14_mount',
+  'xw3G6UpfC7': '14_mount', 'yg2cOCZTyG': '14_mount', 'ywIBCICmss': '14_mount', 'zAHEBQikh7': '14_mount', 'zW8cznuehh': '14_mount',
+  'aadkrg2chcolq_ve_miaoda': '15_effect', 'aadkrg42s6ggo_ve_miaoda': '15_effect', 'aadkrg5b5ssco_ve_miaoda': '15_effect', 'aadkrgnianeeg_ve_miaoda': '15_effect', 'aadkrgx6ejygg_ve_miaoda': '15_effect', 'aadkrgxgcxmcg_ve_miaoda': '15_effect',
+  'aadkrgyn27sli_ve_miaoda': '15_effect', 'aadkrgyrnfyci_ve_miaoda': '15_effect', 'aadkrgyumjgag_ve_miaoda': '15_effect', 'aadkrgzhmdgdg_ve_miaoda': '15_effect',
+  // v2.0.4 補齊：技能欄 / 底部導航 / 側邊選單 / 任務擊殺 等 /spark/ 靜資
+  'aadkrg7agpycu_ve_miaoda': '07_skill', 'aadkrg5vdv4kw_ve_miaoda': '07_skill', 'aadkrhadazias_ve_miaoda': '07_skill',
+  'aadkrg5gyhsms_ve_miaoda': '07_skill', 'aadkrg5gyhsns_ve_miaoda': '07_skill', 'aadkrhbk652cs_ve_miaoda': '07_skill',
+  'aadkrhbuwxsas_ve_miaoda': '11_ui', 'aadkrettaiwci_ve_miaoda': '11_ui', 'aadkreo4cpwaq_ve_miaoda': '11_ui',
+  'aadkrhcc4tsks_ve_miaoda': '11_ui', 'aadkrhekzl2pu_ve_miaoda': '11_ui', 'aadkrhd76ayqs_ve_miaoda': '11_ui',
+  'aadkrhellu6fs_ve_miaoda': '11_ui', 'aadkrhhp4kwps_ve_miaoda': '11_ui', 'aadkrhajdtwmu_ve_miaoda': '11_ui',
+  'aadkrhhpqp6au_ve_miaoda': '11_ui', 'aadkrhihjjamu_ve_miaoda': '11_ui', 'aadkrhbjjeudw_ve_miaoda': '11_ui',
+  'aadkrhdxc3opw_ve_miaoda': '11_ui', 'aadkrhihcnigw_ve_miaoda': '11_ui', 'aadkrxeb2kaes_ve_miaoda': '11_ui'
+};
+
+// 取得圖片 ID 對應的分類 slug；找不到回傳 null
+function getSpriteCategory(id) {
+  if (!id) return null;
+  const pure = id.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
+  return SPRITE_CATEGORY_MAP[pure] || null;
 }
 
 function assetUrl(id) {
@@ -66,9 +274,12 @@ function assetUrl(id) {
   // 去除副檔名（png/jpg/jpeg/webp/gif）
   const pureId = id.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
   // 根據環境決定優先路徑
+  // v2.0.3：本地優先 → 分類目錄 assets/<slug>/<id>.png；CDN 優先 → 直接 CDN
   if (_preferCdn()) {
     return CDN_BASE + pureId;
   }
+  const cat = getSpriteCategory(pureId);
+  if (cat) return 'assets/' + cat + '/' + pureId + '.png';
   return 'assets/' + pureId + '.png';
 }
 
@@ -104,11 +315,15 @@ function _extractCdnId(src) {
 // 圖片載入失敗備援：
 //   本地 assets/ 失敗 → 切換到 CDN
 //   CDN 失敗 → 隱藏圖片並為父層加上背景占位（避免顯示破裂圖示）
+// 圖片載入失敗備援（v2.0.3 三層 fallback）：
+//   1. assets/<分類>/<id>.png 失敗 → 嘗試 assets/<id>.png（舊扁平結構）
+//   2. 扁平結構也失敗 → 切換到 CDN
+//   3. CDN 失敗 → 隱藏圖片並為父層加上背景占位
 function handleImgError(img) {
   if (!img || img.dataset.errFallback === 'fail') return;
   const src = img.src || '';
 
-  // 如果已經走過一次 CDN 還是失敗 → 最終 fallback：隱藏 + 父層背景
+  // 已經走過 CDN 還是失敗 → 最終 fallback
   if (img.dataset.errFallback === 'cdn') {
     img.dataset.errFallback = 'fail';
     img.style.visibility = 'hidden';
@@ -120,15 +335,95 @@ function handleImgError(img) {
     return;
   }
 
-  // 第一次失敗：嘗試切換到 CDN（不論本來是本地還是 /spark/ 還是 CDN 都試一次 CDN ID）
-  const cdnId = _extractCdnId(src);
-  if (cdnId && img.dataset.errFallback !== 'cdn') {
+  // 分類目錄失敗 → 嘗試扁平結構 assets/<id>.png
+  if (img.dataset.errFallback === 'cat') {
+    const cdnId = _extractCdnId(src);
+    if (cdnId) {
+      img.dataset.errFallback = 'flat';
+      img.src = 'assets/' + cdnId + '.png';
+      return;
+    }
+    // 抽不出 ID，直接跳 CDN
     img.dataset.errFallback = 'cdn';
-    img.src = CDN_BASE + cdnId;
+    const cid = _extractCdnId(src);
+    if (cid) { img.src = CDN_BASE + cid; return; }
+    // 連 CDN ID 都抽不出 → 最終
+    img.dataset.errFallback = 'fail';
+    img.style.visibility = 'hidden';
+    img.style.opacity = '0';
+    if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
+      img.parentElement.dataset.imgErrorBg = '1';
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    }
     return;
   }
 
-  // 連 CDN ID 都抽不出來 → 直接最終 fallback
+  // 扁平結構失敗 → 嘗試 CDN
+  if (img.dataset.errFallback === 'flat') {
+    const cdnId = _extractCdnId(src);
+    if (cdnId) {
+      img.dataset.errFallback = 'cdn';
+      img.src = CDN_BASE + cdnId;
+      return;
+    }
+    img.dataset.errFallback = 'fail';
+    img.style.visibility = 'hidden';
+    img.style.opacity = '0';
+    if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
+      img.parentElement.dataset.imgErrorBg = '1';
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    }
+    return;
+  }
+
+  // 第一次失敗：判斷來源
+  const cdnId = _extractCdnId(src);
+
+  // 如果本來就是 CDN → 直接 fail
+  if (src.indexOf('aka.doubaocdn.com/') !== -1) {
+    img.dataset.errFallback = 'fail';
+    img.style.visibility = 'hidden';
+    img.style.opacity = '0';
+    if (img.parentElement && !img.parentElement.dataset.imgErrorBg) {
+      img.parentElement.dataset.imgErrorBg = '1';
+      img.parentElement.style.background = 'radial-gradient(ellipse at 50% 60%, rgba(120,90,50,0.25), transparent 70%)';
+    }
+    return;
+  }
+
+  // 如果本來是分類目錄路徑（assets/xx/yy.png，含兩層以上）→ 先嘗試扁平
+  if (src.indexOf('assets/') !== -1) {
+    const m = src.match(/assets\/[^/]+\/([^./?#]+)\./i);
+    if (m && m[1]) {
+      // 來自分類目錄 → 下一層試扁平
+      img.dataset.errFallback = 'cat';
+      img.src = 'assets/' + m[1] + '.png';
+      return;
+    }
+    // 扁平結構失敗 → 試 CDN
+    const flatM = src.match(/assets\/([^./?#]+)\./i);
+    if (flatM && flatM[1] && cdnId) {
+      img.dataset.errFallback = 'flat';
+      img.src = CDN_BASE + cdnId;
+      return;
+    }
+  }
+
+  // /spark/ 平台靜資失敗 → 先試本地分類目錄 assets/<slug>/<id>.png
+  if (src.indexOf('/spark/') !== -1 && cdnId) {
+    const cat = getSpriteCategory(cdnId);
+    if (cat) {
+      img.dataset.errFallback = 'cat';
+      img.src = 'assets/' + cat + '/' + cdnId + '.png';
+      return;
+    }
+    // 沒有分類 → 直接試扁平 assets/<id>.png
+    img.dataset.errFallback = 'flat';
+    img.src = 'assets/' + cdnId + '.png';
+    return;
+  }
+
+  // 什麼都抽不出 → 最終 fallback
   img.dataset.errFallback = 'fail';
   img.style.visibility = 'hidden';
   img.style.opacity = '0';
@@ -5912,7 +6207,7 @@ function saveGame() {
     if (window.AuthSystem && AuthSystem.getToken()) {
       try {
         const server = AuthSystem.getCurrentServer();
-        const srvId = server?.id || 'justice';
+        const srvId = server?.id || 'zeus';
         const charIdx = 0;
         fetch('/api/characters/save', {
           method: 'POST',
@@ -6128,6 +6423,28 @@ function syncMultiplayerProfile() {
 
 // ==================== 初始化 ====================
 function init() {
+  try {
+    _initCore();
+  } catch (e) {
+    console.error('[Init] 嚴重錯誤：init 中途崩潰，仍嘗試啟動遊戲主循環以避免黑屏', e);
+    // 嘗試恢復：若 loadMap / createPlayerSprite 沒跑完，補上最小可運行狀態
+    try {
+      if (sceneBg && !sceneBg.style.backgroundImage) {
+        // 沒有背景也至少給一個漸層底，避免全黑
+        sceneBg.style.background = 'radial-gradient(ellipse at 50% 60%, #1a120a 0%, #0a0705 100%)';
+      }
+      if (GS && GS.player) {
+        if (typeof recalcStats === 'function') recalcStats();
+      }
+      if (typeof updateUI === 'function') {
+        try { updateUI(); } catch(_) {}
+      }
+    } catch (_) {}
+  }
+  // 無論 init 是否成功，都啟動 gameLoop，保證畫面至少有回應
+  requestAnimationFrame(gameLoop);
+}
+function _initCore() {
   // 缓存 DOM
   el = {
     scene: $('battle-scene'),
@@ -6327,8 +6644,25 @@ function init() {
   addLog('system', '欢迎來到君主之刃的世界！');
   addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/軍團/城堡。');
 
-  // 显示角色創建界面
-  showCharCreate();
+  // 顯示角色創建介面（僅新帳號無角色時才顯示）
+  // v2.0.4：有角色直接進世界，不要無條件跳創角頁導致黑屏體驗
+  if (!GS.player || !GS.player.created) {
+    showCharCreate();
+  } else {
+    addLog('system', '歡迎回來，' + (GS.player.name || '冒險者') + '！');
+    // 有角色時確保介面正確更新
+    try {
+      updatePlayerSprite();
+      updateTransformVisual();
+      updateUI();
+      updateSkillBar();
+      updateSlotDisplay();
+    } catch(e) { console.warn('[Init] 有角色時更新UI失敗:', e); }
+    // 初始化音訊
+    if (window.AudioSystem) {
+      try { AudioSystem.init(); AudioSystem.ensureRunning(); AudioSystem.startMusic(GS.currentMap); } catch(e) {}
+    }
+  }
 
   // 啟動自動保存（每30秒 + 頁面關閉時）
   startAutoSave();
@@ -6353,8 +6687,7 @@ function init() {
     } catch (e) { console.warn('[v2.0] auto connect error:', e); }
   }
 
-  requestAnimationFrame(gameLoop);
-}
+} // end of _initCore
 
 function worldMaxW() { return Math.max(worldW, CAMERA.worldWidth); }
 function worldMaxH() { return Math.max(worldH, CAMERA.worldHeight); }
@@ -11053,6 +11386,7 @@ function confirmCC2CharCreate() {
   const pref = CLASS_STAT_PREFS[cid] || CLASS_STAT_PREFS.warrior;
   GS.player.name = name;
   GS.player.classId = cid;
+  GS.player.created = true;  // v2.0.4：標記角色已創建，下次直接進世界
   
   // 計算初始屬性（基於職業偏好 + 基礎值）
   const s = pref;
@@ -20943,355 +21277,9 @@ function exportGameFile() {
   }, 100);
 }
 
-// ========== 下載原始碼 ZIP ==========
-// 靜態 source.zip 路徑（放在專案根目錄，行動裝置優先使用這個固定連結）
-// 加上版本參數強制瀏覽器重新下載，避免吃到舊版快取
-const STATIC_SOURCE_ZIP_URL = 'source.zip?v=v2.0.2';
-
-function downloadSourceZip() {
-  closeSideMenu();
-  const btn = $('download-src-btn');
-  if (btn) { btn.classList.add('exporting'); btn.querySelector('span').textContent = '打包中...'; }
-  showExportToast('正在準備下載...', 'loading');
-
-  const isMobile = isMobileDevice();
-  const isIOS = isIOSDevice();
-  const staticUrl = STATIC_SOURCE_ZIP_URL;
-
-  // 行動裝置：優先用靜態 source.zip，避免 JSZip + Blob 在 iOS Safari 被擋
-  if (isMobile) {
-    console.log('[下載原始碼] 偵測到行動裝置，使用靜態 source.zip 路徑');
-    setTimeout(function() {
-      hideExportToast();
-      if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '下載原始碼ZIP'; }
-      showMobileDownloadModal(staticUrl, '君主之刃v2.0.2_全棧原始碼.zip');
-    }, 300);
-    return;
-  }
-
-  // 桌面版：嘗試 JSZip 動態打包（確保內容最新）
-  setTimeout(function() {
-    loadJSZip().then(function() {
-      console.log('[下載原始碼] JSZip 已就緒');
-    }).catch(function(err) {
-      console.warn('[下載原始碼] JSZip 載入失敗，改用靜態下載:', err);
-    });
-
-      loadJSZip().then(function() {
-      const filesToFetch = [
-        // 前端核心
-        { path: 'index.html', zipPath: 'index.html', isHtml: true },
-        { path: 'styles.css', zipPath: 'styles.css' },
-        { path: 'auth.css', zipPath: 'auth.css' },
-        { path: 'game.js', zipPath: 'game.js' },
-        { path: 'auth.js', zipPath: 'auth.js' },
-        { path: 'lang.js', zipPath: 'lang.js' },
-        { path: 'transform.js', zipPath: 'transform.js' },
-        { path: 'audio.js', zipPath: 'audio.js' },
-        { path: 'audio-manager.js', zipPath: 'audio-manager.js' },
-        { path: 'iso-map.js', zipPath: 'iso-map.js' },
-        { path: 'sprite_object.js', zipPath: 'sprite_object.js' },
-        { path: 'multiplayer.js', zipPath: 'multiplayer.js' },
-        { path: 'bug-report.js', zipPath: 'bug-report.js' },
-        // 後端伺服器
-        { path: 'server/server.cjs', zipPath: 'server/server.cjs' },
-        // data 目錄範例（初始空結構）
-        { path: 'data/accounts.json', zipPath: 'data/accounts.json' },
-        { path: 'data/bug-reports.json', zipPath: 'data/bug-reports.json' },
-      ];
-
-      const readmeMd = `# 君主之刃 v2.0.2 · 正式營運全棧版
-
-## 遊戲名稱
-君主之刃（LINEAGE OF SWORDS）v2.0.2
-
-## 技術架構
-- **前端**：HTML5 + CSS3 + Vanilla JavaScript（無框架），Canvas 2D 渲染
-- **後端**：Node.js 原生 http 模組 + Socket.IO v4（輕量、無外部資料庫）
-- **資料庫**：JSON 檔案持久化（data/ 目錄）
-- **部署**：DigitalOcean App Platform / 任何 Node 環境 / 純靜態 CDN
-
-## 檔案結構
-\`\`\`
-sword-lineage-v2/
-├── index.html          # HTML 本體
-├── styles.css          # 遊戲樣式
-├── auth.css            # 帳號系統樣式
-├── game.js             # 遊戲主邏輯
-├── auth.js             # 帳號 / 登入 / 註冊 / 伺服器選擇 / GM 面板
-├── lang.js             # 語系檔
-├── iso-map.js          # 等距地圖系統
-├── sprite_object.js    # 精靈 / 物件系統
-├── audio.js            # 音訊基礎模組
-├── audio-manager.js    # 音訊管理員
-├── transform.js        # 變換工具函式
-├── multiplayer.js      # 多人連線用戶端（Socket.IO）
-├── bug-report.js       # Bug 回報與開發者後台
-├── package.json        # 專案設定（含 start 與 socket.io 依賴）
-├── server/
-│   └── server.cjs      # 後端主伺服器（靜態服務 + 帳號 API + Socket.IO）
-└── data/
-    ├── accounts.json   # 帳號資料（自動建立）
-    └── bug-reports.json # Bug 回報（自動建立）
-\`\`\`
-
-## 快速啟動（本機）
-
-### 方式一：全棧模式（推薦，可多人連線）
-
-1. 安裝 Node.js 18+
-2. 進入專案目錄：
-   \`\`\`bash
-   npm install
-   npm start
-   \`\`\`
-3. 瀏覽器開啟 http://localhost:3000
-4. 註冊帳號 → 選伺服器 → 創角 → 開始遊戲
-5. 兩支手機連同一個 IP/網址、登入不同帳號 → 進入同一世界（多人連線）
-
-### 方式二：純靜態模式（單機離線）
-
-1. 用任何靜態檔案伺服器託管根目錄：
-   \`\`\`bash
-   npx serve .
-   # 或 VS Code Live Server
-   \`\`\`
-2. 瀏覽器開啟 → 點「離線模式進入」
-3. 資料存 localStorage，單機遊玩無需後端
-
-## 部署到 DigitalOcean App Platform
-
-1. 把整個專案 push 到 GitHub
-2. App Platform 新建 Web Service，選你的 repo
-3. 設定：
-   - **Build Command**: \`npm install\`
-   - **Run Command**: \`npm start\`
-   - **HTTP Port**: 讓 App Platform 自動注入（程式已支援 \`process.env.PORT\`）
-4. 環境變數（選擇性）：
-   - \`NODE_ENV=production\`
-   - \`DEV_PASSWORD=你的密碼\`（開發者後台密碼，預設 owner2026）
-5. Persistent Volume（建議，永久保存帳號資料）：
-   - Mount Path: \`/app/data\`（視 App Platform 實際 root 調整，以 server.cjs 上層的 data/ 為準）
-   - Size: 1 GB 就夠
-
-## 環境變數
-
-| 變數 | 預設值 | 說明 |
-|------|--------|------|
-| PORT | 3000 | HTTP 監聽埠號 |
-| DEV_PASSWORD | owner2026 | 開發者後台密碼 |
-| NODE_ENV | - | 設 production 可啟用最佳化 |
-
-## 多人連線機制
-- 前端自動連 \`window.location.origin\`（同源 Socket.IO）
-- 同網址、同伺服器、同地圖的玩家會在同一個房間（room）
-- 移動 / 聊天 / 戰鬥事件即時廣播
-- Socket.IO 未安裝時自動退回單機模式，不影響遊戲
-
-## 開發者後台 / 下載原始碼
-- **首頁密技**：連點版號或 Logo 7 次 → 輸入密碼 owner2026 → 下載完整原始碼 ZIP
-- **遊戲內密技**：設定頁底部連點版本號 7 次 → 同樣密碼 → 進入開發者後台
-- **GM 帳號**：帳號 \`19811013\` / 密碼 \`19811013\`（連續雙擊頂部狀態欄 3 次喚出 GM 面板）
-
-## 離線模式說明
-- 當後端不可用時，登入/註冊頁會自動 fallback 到離線模式
-- 資料存在瀏覽器 localStorage，重新整理不丟失
-- 離線模式下也能體驗完整遊戲內容，只差沒有多人連線
-
-## 二次開發
-- 前端遊戲邏輯：\`game.js\`
-- 後端伺服器：\`server/server.cjs\`
-- 帳號系統：\`auth.js\` + \`server/server.cjs\` 中的 /api/auth/* 路由
-- 多人連線：\`multiplayer.js\`（客戶端） + \`server/server.cjs\` 中的 Socket.IO 事件
-`;
-
-      const assetsReadme = `此資料夾用於放置離線圖檔。
-
-請將下載的圖片 ZIP 解壓縮到這裡，
-並於遊戲設定中開啟「離線模式」，
-遊戲就會從本機 assets/ 資料夾載入圖片。
-
-線上模式（預設）：圖片從 CDN 載入，不需此資料夾。
-`;
-
-      // 用 fetch 並行讀取所有原始檔
-      const fetchPromises = filesToFetch.map(function(f) {
-        return fetch(f.path, { cache: 'no-store' })
-          .then(function(res) {
-            if (!res.ok) throw new Error(f.path + ' 載入失敗 (' + res.status + ')');
-            return res.text().then(function(text) {
-              f.content = text;
-              f.success = true;
-              f.size = text.length;
-              console.log('[下載原始碼] ✓ 讀取成功:', f.path, '大小:', (text.length / 1024).toFixed(2), 'KB');
-              return f;
-            });
-          })
-          .catch(function(err) {
-            console.error('[下載原始碼] ✗ 載入失敗:', f.path, err);
-            f.content = '// 載入失敗：' + err.message + '\n';
-            f.success = false;
-            f.size = 0;
-            return f;
-          });
-      });
-
-      Promise.all(fetchPromises).then(function(results) {
-        // 列印總結
-        const successCount = results.filter(function(f) { return f.success; }).length;
-        const totalSize = results.reduce(function(sum, f) { return sum + f.size; }, 0);
-        console.log('[下載原始碼] 總結:', successCount + '/' + results.length + ' 檔成功，總大小:', (totalSize / 1024).toFixed(2), 'KB');
-
-        const zip = new JSZip();
-        const rootFolder = zip.folder('sword-lineage-v2.0.2');
-
-        // 生成 ZIP
-        showExportToast('正在壓縮檔案...', 'loading');
-        return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }, function(meta) {
-          const pct = Math.round(meta.percent);
-          if (pct % 10 === 0) {
-            showExportToast('正在壓縮檔案... ' + pct + '%', 'loading');
-          }
-        });
-      }).then(function(blob) {
-        hideExportToast();
-        const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
-        console.log('[下載原始碼] ZIP 生成完成，大小:', sizeMB, 'MB');
-        // 使用下載彈窗（多重保險，相容行動裝置）
-        showDownloadModal(blob, '君主之刃v2.0.2_全棧原始碼.zip', sizeMB);
-      }).catch(function(err) {
-        console.error('[下載原始碼] 打包失敗，改用靜態下載:', err);
-        // 失敗備援：直接開啟靜態 source.zip
-        hideExportToast();
-        try {
-          window.open(staticUrl, '_blank');
-        } catch(e) {
-          location.href = staticUrl;
-        }
-      }).finally(function() {
-        if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '下載原始碼ZIP'; }
-      });
-    }).catch(function(err) {
-      console.error('[下載原始碼] JSZip 載入失敗，改用靜態下載:', err);
-      hideExportToast();
-      if (btn) { btn.classList.remove('exporting'); btn.querySelector('span').textContent = '下載原始碼ZIP'; }
-      try {
-        window.open(staticUrl, '_blank');
-      } catch(e) {
-        location.href = staticUrl;
-      }
-    });
-  }, 100);
-}
-
-// 暴露給開發者後台呼叫（bug-report.js）
-if (!window.downloadSourceZip) {
-  window.downloadSourceZip = downloadSourceZip;
-}
-
-// 行動裝置專用的下載彈窗（基於靜態 URL，多重備援）
-function showMobileDownloadModal(url, filename) {
-  const old = document.getElementById('mobile-download-modal');
-  if (old) old.remove();
-
-  const isIOS = isIOSDevice();
-  const fullUrl = new URL(url, location.href).href;
-
-  const modal = document.createElement('div');
-  modal.id = 'mobile-download-modal';
-  modal.className = 'download-modal-overlay';
-  modal.innerHTML = `
-    <div class="download-modal-box">
-      <div class="download-modal-icon">⬇️</div>
-      <div class="download-modal-title">下載已準備完成</div>
-      <div class="download-modal-sub">${filename}</div>
-      <button class="download-modal-btn" id="mob-dl-btn">點此下載</button>
-      <div class="download-modal-tip">
-        ${isIOS
-          ? 'iOS 使用者請「長按下方連結 → 下載連結檔案」，或用分享 → 儲存到檔案'
-          : '手機使用者請長按下方連結選擇「下載連結」'}
-      </div>
-      <div class="download-url-box" id="mob-dl-url-box">
-        <a href="${fullUrl}" download="${filename}" target="_blank" rel="noopener">${fullUrl}</a>
-      </div>
-      <button class="download-modal-copy" id="mob-dl-copy">複製連結</button>
-      <button class="download-modal-close" id="mob-dl-close">關閉</button>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  // 主要下載按鈕：嘗試 navigator.share → a.click → window.open
-  const dlBtn = modal.querySelector('#mob-dl-btn');
-  dlBtn.addEventListener('click', function() {
-    // 方法1：navigator.share（如果瀏覽器支援）
-    if (navigator.share && navigator.canShare) {
-      fetch(fullUrl).then(function(r) { return r.blob(); }).then(function(blob) {
-        const file = new File([blob], filename, { type: blob.type || 'application/zip' });
-        if (navigator.canShare({ files: [file] })) {
-          navigator.share({
-            files: [file],
-            title: filename,
-            text: '暗黑天堂MMORPG 原始碼'
-          }).catch(function(e) {
-            console.warn('navigator.share 失敗:', e);
-            fallbackOpen();
-          });
-        } else {
-          fallbackOpen();
-        }
-      }).catch(function() { fallbackOpen(); });
-    } else {
-      fallbackOpen();
-    }
-
-    function fallbackOpen() {
-      // 方法2：a[download] click
-      try {
-        const a = document.createElement('a');
-        a.href = fullUrl;
-        a.download = filename;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(function() { document.body.removeChild(a); }, 500);
-      } catch(e) {
-        // 方法3：window.open
-        try {
-          window.open(fullUrl, '_blank');
-        } catch(e2) {
-          location.href = fullUrl;
-        }
-      }
-    }
-  });
-
-  // 複製連結
-  const copyBtn = modal.querySelector('#mob-dl-copy');
-  copyBtn.addEventListener('click', function() {
-    const ta = document.createElement('textarea');
-    ta.value = fullUrl;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      document.execCommand('copy');
-      copyBtn.textContent = '已複製 ✓';
-      setTimeout(function() { copyBtn.textContent = '複製連結'; }, 2000);
-    } catch(e) {
-      copyBtn.textContent = '複製失敗，請手動複製';
-    }
-    document.body.removeChild(ta);
-  });
-
-  // 關閉
-  const closeBtn = modal.querySelector('#mob-dl-close');
-  closeBtn.addEventListener('click', function() { modal.remove(); });
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) modal.remove();
-  });
-}
+// ========== v2.0.3 正式營運版 ==========
+// 下載原始碼功能已移除：正式對外版不提供用戶端原始碼下載入口
+// 原始碼僅由營運方保管，不對玩家開放
 
 function openMenuPage(page) {
   closeSideMenu();
@@ -24037,37 +24025,11 @@ function bindEvents() {
   // 匯出遊戲按鈕
   const exportBtn = $('export-game-btn');
   if (exportBtn) exportBtn.addEventListener('click', exportGameFile);
-  // 下載原始碼 ZIP 按鈕
+  // 下載原始碼按鈕（v2.0.3 已移除對外入口，保留 DOM 節點避免 JS 報錯）
   const downloadSrcBtn = $('download-src-btn');
-  if (downloadSrcBtn) downloadSrcBtn.addEventListener('click', downloadSourceZip);
-  // 原始碼固定連結複製鈕
-  const sourceUrlCopy = $('source-url-copy');
-  const sourceZipLink = $('source-zip-link');
-  if (sourceZipLink) {
-    const fullUrl = new URL('source.zip', location.href).href;
-    sourceZipLink.href = fullUrl;
-    sourceZipLink.textContent = fullUrl;
-  }
-  if (sourceUrlCopy) {
-    sourceUrlCopy.addEventListener('click', function() {
-      const fullUrl = new URL('source.zip', location.href).href;
-      const ta = document.createElement('textarea');
-      ta.value = fullUrl;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand('copy');
-        sourceUrlCopy.textContent = '已複製 ✓';
-        setTimeout(function() { sourceUrlCopy.textContent = '複製'; }, 2000);
-      } catch(e) {
-        sourceUrlCopy.textContent = '失敗';
-        setTimeout(function() { sourceUrlCopy.textContent = '複製'; }, 2000);
-      }
-      document.body.removeChild(ta);
-    });
-  }
+  if (downloadSrcBtn) downloadSrcBtn.style.display = 'none';
+  const sourceUrlRow = $('source-url-row');
+  if (sourceUrlRow) sourceUrlRow.style.display = 'none';
   el.settingsPanel.addEventListener('click', e => {
     if (e.target === el.settingsPanel) el.settingsPanel.classList.remove('open');
   });
