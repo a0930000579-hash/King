@@ -63,7 +63,17 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # IMPORTANT: never let an extracted zip modify workflows.
+          # The default GITHUB_TOKEN cannot push changes under .github/ ,
+          # which would otherwise reject the whole push.
+          git checkout -- .github 2>/dev/null || true
+          rm -f .github/workflows/*.zip 2>/dev/null || true
+
           git add -A
+          # Make 100% sure nothing under .github is staged
+          git reset -q -- .github 2>/dev/null || true
+
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
