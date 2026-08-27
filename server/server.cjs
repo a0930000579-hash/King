@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.1.0 · 正式營運後端伺服器
+  君主之刃 v2.1.2 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -199,15 +199,19 @@ function serveStatic(req, res, pathname) {
   try {
     const stat = fs.statSync(filePath);
     const mime = getMime(filePath);
+    // v2.1.2：HTML/JS/CSS/JSON 一律 no-cache，避免手機/CDN舊快取導致版本不一致
+    const isStaticAsset = pathname.endsWith('.png') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.gif') || pathname.endsWith('.webp') || pathname.endsWith('.svg') || pathname.endsWith('.mp3') || pathname.endsWith('.wav') || pathname.endsWith('.ogg') || pathname.endsWith('.mp4') || pathname.endsWith('.woff') || pathname.endsWith('.woff2') || pathname.endsWith('.ttf');
     const headers = {
       'Content-Type': mime,
       'Content-Length': stat.size,
-      'Cache-Control': pathname.endsWith('.png') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.gif') || pathname.endsWith('.webp') || pathname.endsWith('.svg') || pathname.endsWith('.mp3') || pathname.endsWith('.wav') || pathname.endsWith('.ogg') ? 'public, max-age=86400' : 'no-cache',
+      'Cache-Control': isStaticAsset ? 'public, max-age=86400' : 'no-cache, no-store, must-revalidate, max-age=0',
       'X-Content-Type-Options': 'nosniff',
+      'Pragma': 'no-cache',
+      'Expires': '0',
     };
     // 隱藏原始碼下載：以不易猜到的檔名提供，並強制下載
     if (pathname === '/mb-src-q7x2k9.zip') {
-      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.1.1-source.zip"';
+      headers['Content-Disposition'] = 'attachment; filename="monarch-blade-v2.1.2-source.zip"';
       headers['Content-Type'] = 'application/zip';
       headers['X-Accel-Buffering'] = 'yes';
     }
@@ -247,7 +251,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.1.1',
+      version: '2.1.2',
       time: Date.now(),
       socketIo: socketIoInstalled,
     });
@@ -842,7 +846,7 @@ initGM();
 // ========== 啟動 ==========
 server.listen(PORT, () => {
   console.log('========================================');
-  console.log('  君主之刃 v2.1.1 · 正式營運伺服器');
+  console.log('  君主之刃 v2.1.2 · 正式營運伺服器');
   console.log('========================================');
   console.log('  服務位址: http://localhost:' + PORT);
   console.log('  資料目錄: ' + DATA_DIR);
