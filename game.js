@@ -11,7 +11,7 @@ try { USE_LOCAL_ASSETS = localStorage.getItem('useLocal') === '1'; } catch(e) {}
 //   1. file:// 離線開啟 → 一定走本地（因為 CDN 可能被 CORS 擋 / 離線無網路）
 //   2. http(s) 網域 → 預設優先 CDN（避免本地 404 閃爍）；若玩家手動開啟離線模式則走本地
 //   3. 本地 assets/ 是否存在會在啟動時用一張探針圖偵測，結果緩存在 _LOCAL_ASSETS_AVAILABLE
-const CDN_BASE = 'https://aka.doubaocdn.com/s/';
+const CDN_BASE = ''; // v2.2.2：停用 CDN，完全本地資產
 
 function _isFileProtocol() {
   return location.protocol === 'file:';
@@ -248,7 +248,8 @@ const SPRITE_CATEGORY_MAP = {
   'aadkrhcc4tsks_ve_miaoda': '11_ui', 'aadkrhekzl2pu_ve_miaoda': '11_ui', 'aadkrhd76ayqs_ve_miaoda': '11_ui',
   'aadkrhellu6fs_ve_miaoda': '11_ui', 'aadkrhhp4kwps_ve_miaoda': '11_ui', 'aadkrhajdtwmu_ve_miaoda': '11_ui',
   'aadkrhhpqp6au_ve_miaoda': '11_ui', 'aadkrhihjjamu_ve_miaoda': '11_ui', 'aadkrhbjjeudw_ve_miaoda': '11_ui',
-  'aadkrhdxc3opw_ve_miaoda': '11_ui', 'aadkrhihcnigw_ve_miaoda': '11_ui', 'aadkrxeb2kaes_ve_miaoda': '11_ui'
+  'aadkrhdxc3opw_ve_miaoda': '11_ui', 'aadkrhihcnigw_ve_miaoda': '11_ui', 'aadkrxeb2kaes_ve_miaoda': '11_ui',
+  'KAfhPeuFaN': '06_npc', // v2.2.2 守衛 NPC
 };
 
 // 取得圖片 ID 對應的分類 slug；找不到回傳 null
@@ -313,12 +314,22 @@ function assetUrl(id) {
   if (_preferCdn()) {
     return CDN_BASE + pureId;
   }
-  // v2.0.9：manifest 優先級最高（若已載入且有此 id）
+  // v2.2.0：manifest 優先級最高（若已載入且有此 id）
   if (ASSETS_MANIFEST_LOADED && ASSETS_MANIFEST && ASSETS_MANIFEST[pureId]) {
-    const path = ASSETS_MANIFEST[pureId];
+    const mpath = ASSETS_MANIFEST[pureId];
+    // CDN URL 直接回傳（/spark/ 平台靜資或 http 開頭）
+    if (mpath.startsWith('/spark/') || mpath.startsWith('http')) return mpath;
     // 路徑若已含 assets/ 前綴則直接用，否則加上
-    if (path.startsWith('assets/')) return path;
-    return 'assets/' + path;
+    if (mpath.startsWith('assets/')) return mpath;
+    return 'assets/' + mpath;
+  }
+  // v2.3.0：若 manifest 已載入但此 id 不存在 → 視為棄用 hash / 未使用單位
+  // 直接返回空字串，避免產生 404。只有新路徑格式（含 / 的語意路徑）才會 fallback 到直接拼接
+  if (ASSETS_MANIFEST_LOADED && ASSETS_MANIFEST) {
+    if (pureId.indexOf('/') === -1) {
+      // 純 hash（無路徑分隔）且不在 manifest → 棄用，返回空
+      return '';
+    }
   }
   const cat = getSpriteCategory(pureId);
   if (cat) return 'assets/' + cat + '/' + pureId + '.png';
@@ -605,131 +616,131 @@ detectLocalAssets();
 const SPRITE = {
   // ========== 玩家職業 ==========
   warrior: { 
-    idle: assetUrl('EH6NSfRHy5'),
-    walk: assetUrl('EH6NSfRHy5'),
-    walk2: assetUrl('do7DZ6uWlZ'),
-    walk3: assetUrl('WAGYLQHVL9'),
-    walk4: assetUrl('1TRczedt8q'),
-    attack: assetUrl('04hM2yqOUB'),
-    attack2: assetUrl('RbZnbsfeUP'),
-    hit: assetUrl('9wFUciLZbv'),
+    idle: assetUrl('class/warrior/down'),
+    walk: assetUrl('class/warrior/down'),
+    walk2: assetUrl('class/warrior/side'),
+    walk3: assetUrl('class/warrior/up'),
+    walk4: assetUrl('class/warrior/side'),
+    attack: assetUrl('class/warrior/attack'),
+    attack2: assetUrl('class/warrior/attack'),
+    hit: assetUrl('class/warrior/attack'),
     color: '#cc2222', glow: '#ff4444', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffd880',
   },
   mage: {
-    idle: assetUrl('6lmBqi1fPd'),
-    walk: assetUrl('6lmBqi1fPd'),
-    walk2: assetUrl('i6qnP4zskJ'),
-    walk3: assetUrl('BE6nspfFXV'),
-    walk4: assetUrl('JBvHrUS91w'),
-    attack: assetUrl('NewNWSVXfS'),
-    attack2: assetUrl('yv76SqEKwK'),
-    hit: assetUrl('CcVOGxaAdm'),
+    idle: assetUrl('class/mage/down'),
+    walk: assetUrl('class/mage/down'),
+    walk2: assetUrl('class/mage/side'),
+    walk3: assetUrl('class/mage/up'),
+    walk4: assetUrl('class/mage/side'),
+    attack: assetUrl('class/mage/attack'),
+    attack2: assetUrl('class/mage/attack'),
+    hit: assetUrl('class/mage/attack'),
     color: '#8844cc', glow: '#bb66ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#80c0ff',
   },
   archer: {
-    idle: assetUrl('ArNbUPLU6U'),
-    walk: assetUrl('ArNbUPLU6U'),
-    walk2: assetUrl('RtauX9ExPG'),
-    walk3: assetUrl('OziaGFobVL'),
-    walk4: assetUrl('zmlt6wRxQ6'),
-    attack: assetUrl('0rkIrVa7ze'),
-    attack2: assetUrl('FftY8v8Jwb'),
-    hit: assetUrl('SL6QCntdHb'),
+    idle: assetUrl('class/archer/down'),
+    walk: assetUrl('class/archer/down'),
+    walk2: assetUrl('class/archer/side'),
+    walk3: assetUrl('class/archer/up'),
+    walk4: assetUrl('class/archer/side'),
+    attack: assetUrl('class/archer/attack'),
+    attack2: assetUrl('class/archer/attack'),
+    hit: assetUrl('class/archer/attack'),
     color: '#338844', glow: '#55bb66', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ff80',
   },
   rogue: {
-    idle: assetUrl('GPRL9j6N2h'),
-    walk: assetUrl('GPRL9j6N2h'),
-    walk2: assetUrl('FpNCpR5u6u'),
-    walk3: assetUrl('dBTU62gvba'),
-    walk4: assetUrl('LTXxZxsro9'),
-    attack: assetUrl('mkQsvB8hGu'),
-    attack2: assetUrl('cAMkL8UcNO'),
-    hit: assetUrl('sRUlVGqmIF'),
+    idle: assetUrl('class/rogue/down'),
+    walk: assetUrl('class/rogue/down'),
+    walk2: assetUrl('class/rogue/side'),
+    walk3: assetUrl('class/rogue/up'),
+    walk4: assetUrl('class/rogue/side'),
+    attack: assetUrl('class/rogue/attack'),
+    attack2: assetUrl('class/rogue/attack'),
+    hit: assetUrl('class/rogue/attack'),
     color: '#444444', glow: '#888888', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff6060',
   },
   paladin: {
-    idle: assetUrl('imCnzdid9j'),
-    walk: assetUrl('imCnzdid9j'),
-    walk2: assetUrl('6HYp22y9go'),
-    walk3: assetUrl('hHyhIm5Ol9'),
-    walk4: assetUrl('Z7osFolCcB'),
-    attack: assetUrl('YLQCi28fvv'),
-    attack2: assetUrl('QtS48eeKRr'),
-    hit: assetUrl('0RHsHujNVl'),
+    idle: assetUrl('class/paladin/down'),
+    walk: assetUrl('class/paladin/down'),
+    walk2: assetUrl('class/paladin/side'),
+    walk3: assetUrl('class/paladin/up'),
+    walk4: assetUrl('class/paladin/side'),
+    attack: assetUrl('class/paladin/attack'),
+    attack2: assetUrl('class/paladin/attack'),
+    hit: assetUrl('class/paladin/attack'),
     color: '#ccaa44', glow: '#ffdd66', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   warlock: {
-    idle: assetUrl('dZWJfSco9X'),
-    walk: assetUrl('dZWJfSco9X'),
-    walk2: assetUrl('C3zZq0esCU'),
-    walk3: assetUrl('Li6SXCqcqq'),
-    walk4: assetUrl('KrtUF6VTD8'),
-    attack: assetUrl('vuQCCL3kBJ'),
-    attack2: assetUrl('3nvwV8TVFg'),
-    hit: assetUrl('J0pJgpRpWE'),
+    idle: assetUrl('class/warlock/portrait.jpg'),
+    walk: assetUrl('class/warlock/portrait.jpg'),
+    walk2: assetUrl('class/warlock/portrait.jpg'),
+    walk3: assetUrl('class/warlock/portrait.jpg'),
+    walk4: assetUrl('class/warlock/portrait.jpg'),
+    attack: assetUrl('class/warlock/portrait.jpg'),
+    attack2: assetUrl('class/warlock/portrait.jpg'),
+    hit: assetUrl('class/warlock/portrait.jpg'),
     color: '#8844cc', glow: '#bb66ff', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== 變身形態（8幀完整動畫） ==========
   // ---------- 金色神話 ----------
   death_knight: {
-    idle: assetUrl('5IOLvbsXwW'),
-    walk: assetUrl('5IOLvbsXwW'),
-    walk2: assetUrl('8H1b89EXdY'),
-    walk3: assetUrl('0aEPBNMAjs'),
-    walk4: assetUrl('KWKxSZEuoL'),
-    attack: assetUrl('Rei3nUl68F'),
-    attack2: assetUrl('JsAMlghL1g'),
-    hit: assetUrl('f2eqJYANgu'),
+    idle: assetUrl('transform/gold/death_knight/down'),
+    walk: assetUrl('transform/gold/death_knight/down'),
+    walk2: assetUrl('transform/gold/death_knight/side'),
+    walk3: assetUrl('transform/gold/death_knight/up'),
+    walk4: assetUrl('transform/gold/death_knight/side'),
+    attack: assetUrl('transform/gold/death_knight/attack'),
+    attack2: assetUrl('transform/gold/death_knight/attack'),
+    hit: assetUrl('transform/gold/death_knight/attack'),
     color: '#44aaff', glow: '#66ccff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#60ff80',
   },
   ishti: {
-    idle: assetUrl('mCjwFU7sH3'),
-    walk: assetUrl('mCjwFU7sH3'),
-    walk2: assetUrl('XuqiFJ7Op1'),
-    walk3: assetUrl('Z6u0oZoY1s'),
-    walk4: assetUrl('S7IOuBsYkV'),
-    attack: assetUrl('HAdRkH7ast'),
-    attack2: assetUrl('RxwVHYpUBy'),
-    hit: assetUrl('WTf0hxHzTr'),
+    idle: assetUrl('transform/gold/ishti/down'),
+    walk: assetUrl('transform/gold/ishti/down'),
+    walk2: assetUrl('transform/gold/ishti/side'),
+    walk3: assetUrl('transform/gold/ishti/up'),
+    walk4: assetUrl('transform/gold/ishti/side'),
+    attack: assetUrl('transform/gold/ishti/attack'),
+    attack2: assetUrl('transform/gold/ishti/attack'),
+    hit: assetUrl('transform/gold/ishti/attack'),
     color: '#88ccff', glow: '#aaeeff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ffd0',
   },
   reya: {
-    idle: assetUrl('jUCeNhLR2u'),
-    walk: assetUrl('jUCeNhLR2u'),
-    walk2: assetUrl('WkPzfdfBUr'),
-    walk3: assetUrl('xyUs6KN6V8'),
-    walk4: assetUrl('UNApdDllMS'),
-    attack: assetUrl('5FXyIK5xsd'),
-    attack2: assetUrl('bfyGxrCUUb'),
-    hit: assetUrl('g9gM4nu3k7'),
+    idle: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk2: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk3: assetUrl('transform/gold/reya/portrait.jpg'),
+    walk4: assetUrl('transform/gold/reya/portrait.jpg'),
+    attack: assetUrl('transform/gold/reya/portrait.jpg'),
+    attack2: assetUrl('transform/gold/reya/portrait.jpg'),
+    hit: assetUrl('transform/gold/reya/portrait.jpg'),
     color: '#aa44ff', glow: '#cc66ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff90c0',
   },
   baphomet: {
-    idle: assetUrl('oQGDNJrRGb'),
-    walk: assetUrl('oQGDNJrRGb'),
-    walk2: assetUrl('yjCv6PTl53'),
-    walk3: assetUrl('URWgbxczyS'),
-    walk4: assetUrl('DsxV4nNArA'),
-    attack: assetUrl('2lfd3DgWWJ'),
-    attack2: assetUrl('IrILzX6WFb'),
-    hit: assetUrl('1VLpSC7TlE'),
+    idle: assetUrl('transform/gold/baphomet/down'),
+    walk: assetUrl('transform/gold/baphomet/down'),
+    walk2: assetUrl('transform/gold/baphomet/side'),
+    walk3: assetUrl('transform/gold/baphomet/up'),
+    walk4: assetUrl('transform/gold/baphomet/side'),
+    attack: assetUrl('transform/gold/baphomet/attack'),
+    attack2: assetUrl('transform/gold/baphomet/attack'),
+    hit: assetUrl('transform/gold/baphomet/attack'),
     color: '#ff4400', glow: '#ff6600', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c080ff',
@@ -749,14 +760,14 @@ const SPRITE = {
     slashColor: '#ff8060',
   },
   illusionist: {
-    idle: assetUrl('D8IK9SlSiW'),
-    walk: assetUrl('D8IK9SlSiW'),
-    walk2: assetUrl('RMvUnPUllP'),
-    walk3: assetUrl('FskOyZckMz'),
-    walk4: assetUrl('HruKYKXKR4'),
-    attack: assetUrl('dnXjUwFRcz'),
-    attack2: assetUrl('T1GQok0mRG'),
-    hit: assetUrl('qgw3ZgKID0'),
+    idle: assetUrl('class/illusionist/portrait.jpg'),
+    walk: assetUrl('class/illusionist/portrait.jpg'),
+    walk2: assetUrl('class/illusionist/portrait.jpg'),
+    walk3: assetUrl('class/illusionist/portrait.jpg'),
+    walk4: assetUrl('class/illusionist/portrait.jpg'),
+    attack: assetUrl('class/illusionist/portrait.jpg'),
+    attack2: assetUrl('class/illusionist/portrait.jpg'),
+    hit: assetUrl('class/illusionist/portrait.jpg'),
     color: '#22ccaa', glow: '#44eebb', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0a0ff',
@@ -1077,14 +1088,14 @@ const SPRITE = {
     slashColor: '#c0c0d0',
   },
   werewolf: {
-    idle: assetUrl('GMxsqLaCGt'),
-    walk: assetUrl('GMxsqLaCGt'),
-    walk2: assetUrl('q3MAJiktJq'),
-    walk3: assetUrl('P8x4odPP2g'),
-    walk4: assetUrl('xipd7571LS'),
-    attack: assetUrl('qaasdrxeR4'),
-    attack2: assetUrl('Z3K4JEOsj7'),
-    hit: assetUrl('khEwYymEiA'),
+    idle: assetUrl('monster/werewolf/down'),
+    walk: assetUrl('monster/werewolf/down'),
+    walk2: assetUrl('monster/werewolf/side'),
+    walk3: assetUrl('monster/werewolf/up'),
+    walk4: assetUrl('monster/werewolf/side'),
+    attack: assetUrl('monster/werewolf/attack'),
+    attack2: assetUrl('monster/werewolf/attack'),
+    hit: assetUrl('monster/werewolf/attack'),
     color: '#503020', glow: '#c08060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0a080',
@@ -1459,14 +1470,14 @@ const SPRITE = {
 
   // ========== 怪物 ==========
   goblin: {
-    idle: assetUrl('wYFHmKE2C0'),
-    walk: assetUrl('wYFHmKE2C0'),
-    walk2: assetUrl('UG1LXPgLYT'),
-    walk3: assetUrl('FVLNAE1Aju'),
-    walk4: assetUrl('nGscTgMw4F'),
-    attack: assetUrl('qN3FcGwEbv'),
-    attack2: assetUrl('ic8EWNDNYs'),
-    hit: assetUrl('WpaQwxUXzh'),
+    idle: assetUrl('monster/goblin/down'),
+    walk: assetUrl('monster/goblin/down'),
+    walk2: assetUrl('monster/goblin/side'),
+    walk3: assetUrl('monster/goblin/up'),
+    walk4: assetUrl('monster/goblin/side'),
+    attack: assetUrl('monster/goblin/attack'),
+    attack2: assetUrl('monster/goblin/attack'),
+    hit: assetUrl('monster/goblin/attack'),
     color: '#508040', glow: '#80c060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0ff80',
@@ -4163,28 +4174,29 @@ const SKILL_SVG_MAP = {
 
 // 暗黑天堂W 風格技能圖標圖片（替代SVG/emoji）
 // 全部統一用 CDN ID 形式，assetUrl / _extractCdnId 都能正確 fallback
+// v2.2.2：技能圖標改用本地獨立 icon（07_skill/icon_*.jpg）
 const SKILL_IMG_MAP = {
-  slash:       'aadkrevfed6ai_ve_miaoda', // 劍/斬擊（紅金）
-  fire:        'aadkrevfed6ai_ve_miaoda', // 火焰
-  ice:         'aadkreufq2oai_ve_miaoda', // 冰霜（藍）
-  lightning:   'aadkreufq2oai_ve_miaoda', // 雷電
-  poison:      'aadkrevrqimio_ve_miaoda', // 毒（綠）
-  holy:        'aadkres45tybi_ve_miaoda', // 神聖（金）
-  dark:        'aadkreozwbsdq_ve_miaoda', // 暗影（紫）
-  heal:        'aadkres45tybi_ve_miaoda', // 治療
-  shield:      'aadkres45tybi_ve_miaoda', // 盾
-  arrow:       'aadkrevrqimio_ve_miaoda', // 箭
-  dagger:      'aadkrewoxxoeq_ve_miaoda', // 匕首
-  dash:        'aadkrewoxxoeq_ve_miaoda', // 衝刺
-  summon:      'aadkreozwbsdq_ve_miaoda', // 召喚
-  whirlwind:   'aadkrevfed6ai_ve_miaoda', // 旋風
-  meteor:      'aadkreufq2oai_ve_miaoda', // 隕石
-  buff:        'aadkres45tybi_ve_miaoda', // 增益
-  debuff:      'aadkreozwbsdq_ve_miaoda', // 減益
-  stun:        'aadkrevfed6ai_ve_miaoda', // 暈眩
-  magic:       'aadkreufq2oai_ve_miaoda', // 魔法
-  crit:        'aadkrevfed6ai_ve_miaoda', // 暴擊
-  default:     'aadkrevfed6ai_ve_miaoda',
+  slash:       '07_skill/icon_fireball.jpg',
+  fire:        '07_skill/icon_fireball.jpg',
+  ice:         '07_skill/icon_ice_bolt.jpg',
+  lightning:   '07_skill/icon_lightning.jpg',
+  poison:      '07_skill/icon_ice_bolt.jpg',
+  holy:        '07_skill/icon_fireball.jpg',
+  dark:        '07_skill/icon_fireball.jpg',
+  heal:        '07_skill/icon_fireball.jpg',
+  shield:      '07_skill/icon_fireball.jpg',
+  arrow:       '07_skill/icon_lightning.jpg',
+  dagger:      '07_skill/icon_ice_bolt.jpg',
+  dash:        '07_skill/icon_lightning.jpg',
+  summon:      '07_skill/icon_fireball.jpg',
+  whirlwind:   '07_skill/icon_fireball.jpg',
+  meteor:      '07_skill/icon_fireball.jpg',
+  buff:        '07_skill/icon_fireball.jpg',
+  debuff:      '07_skill/icon_ice_bolt.jpg',
+  stun:        '07_skill/icon_lightning.jpg',
+  magic:       '07_skill/icon_fireball.jpg',
+  crit:        '07_skill/icon_lightning.jpg',
+  default:     '07_skill/icon_fireball.jpg',
 };
 
 // 技能图标映射（按id > effect > element > category > type优先级）
@@ -5631,51 +5643,51 @@ const AUTO_ITEMS_CATALOG = [
 ];
 
 const ITEM_ICONS = {
-  // 藥水
-  hp1: assetUrl('rUwQO6PiBH'),
-  hp2: assetUrl('rUwQO6PiBH'),
-  hp3: assetUrl('rUwQO6PiBH'),
-  hp4: assetUrl('rUwQO6PiBH'), // 高級生命藥水
-  mp1: assetUrl('s6Rkjmlc5j'),
-  mp2: assetUrl('s6Rkjmlc5j'),
-  mp3: assetUrl('s6Rkjmlc5j'),
-  mp4: assetUrl('s6Rkjmlc5j'), // 高級魔力藥水
-  spd1: assetUrl('XV03XPsYo8'), // 加速藥水（綠）
-  spd2: assetUrl('TT1m224JRn'), // 狂暴藥水（橘）
-  move1: assetUrl('XV03XPsYo8'), // 行走加速藥水
-  atk_potion: assetUrl('TT1m224JRn'), // 狂暴藥水（橘）
-  def_potion: assetUrl('XV03XPsYo8'), // 防禦藥水（綠）
-  crit_potion: assetUrl('TT1m224JRn'), // 暴擊藥水（橘）
-  mgem: assetUrl('Soc9DQWbZI'), // 魔法寶石
-  teleport: assetUrl('bU4qiIVwJ0'), // 回城卷軸（暫用擴充卷圖）
-  enhance_ticket: assetUrl('URxaFSUzM7'), // 強化券
-  chest: assetUrl('gBv7e5Mdvo'), // 寶箱（暫用金幣圖）
-  tscroll: assetUrl('bU4qiIVwJ0'), // 變身卷軸
-  revive_scroll: assetUrl('bU4qiIVwJ0'), // 復活卷軸
-  escape_scroll: assetUrl('bU4qiIVwJ0'), // 脫身卷軸
-  enhance_stone: assetUrl('URxaFSUzM7'), // 裝備強化卷
-  bless_stone: assetUrl('URxaFSUzM7'), // 祝福石（強化機率提升卷，用紫色濾鏡區分）
-  crystal_frag: assetUrl('Soc9DQWbZI'), // 靈魂水晶碎片
-  gold_coin: assetUrl('aadkrw5dpakds_ve_miaoda'), // 金幣堆
-  gem_bag: assetUrl('aadkrxid6zueu_ve_miaoda'), // 藍鑽
-  dungeon_key: assetUrl('bU4qiIVwJ0'), // 副本鑰匙
-  treasure_key: assetUrl('URxaFSUzM7'), // 寶箱鑰匙
-  quest_scroll: assetUrl('bU4qiIVwJ0'), // 任務卷軸
-  bag_expand_scroll: assetUrl('bU4qiIVwJ0'), // 背包擴充卷
-  ancient_book: assetUrl('bU4qiIVwJ0'), // 遠古書籍
-  monster_eye: assetUrl('Soc9DQWbZI'), // 怪物之眼
-  dragon_scale: assetUrl('URxaFSUzM7'), // 龍鱗
-  // 裝備類型通用圖資
-  weapon: assetUrl('nactfRVTvS'), // 劍類高級武器
-  armor: assetUrl('QYQPTmKP8M'), // 盔甲
-  helmet: assetUrl('FmR5P4kp9F'), // 頭盔
-  boots: assetUrl('WgVb3fzkIB'), // 靴子
-  gloves: assetUrl('iUJm20Glls'), // 手套
-  shield: assetUrl('YwLrUA7wlU'), // 盾牌
-  ring: assetUrl('BHiRzIPTAV'), // 戒指
-  bow: assetUrl('cZ70J7STpP'), // 弓
-  staff: assetUrl('JDDbWSVINf'), // 法杖
-  gem: assetUrl('Soc9DQWbZI'), // 寶石（魔法寶石）
+  // 藥水（v2.3.0：新語意路徑 assets/item/icon_*.jpg）
+  hp1: assetUrl('item/icon_potion_hp.jpg'),
+  hp2: assetUrl('item/icon_potion_hp.jpg'),
+  hp3: assetUrl('item/icon_potion_hp.jpg'),
+  hp4: assetUrl('item/icon_potion_hp.jpg'),
+  mp1: assetUrl('item/icon_potion_mp.jpg'),
+  mp2: assetUrl('item/icon_potion_mp.jpg'),
+  mp3: assetUrl('item/icon_potion_mp.jpg'),
+  mp4: assetUrl('item/icon_potion_mp.jpg'),
+  spd1: assetUrl('item/icon_potion_green.jpg'),
+  spd2: assetUrl('item/icon_potion_orange.jpg'),
+  move1: assetUrl('item/icon_potion_green.jpg'),
+  atk_potion: assetUrl('item/icon_potion_orange.jpg'),
+  def_potion: assetUrl('item/icon_potion_green.jpg'),
+  crit_potion: assetUrl('item/icon_potion_orange.jpg'),
+  mgem: assetUrl('item/icon_gem_ruby.jpg'),
+  teleport: assetUrl('item/icon_scroll.jpg'),
+  enhance_ticket: assetUrl('item/icon_scroll.jpg'),
+  chest: assetUrl('item/icon_gold_coin.jpg'),
+  tscroll: assetUrl('item/icon_scroll.jpg'),
+  revive_scroll: assetUrl('item/icon_scroll.jpg'),
+  escape_scroll: assetUrl('item/icon_scroll.jpg'),
+  enhance_stone: assetUrl('item/icon_gem_ruby.jpg'),
+  bless_stone: assetUrl('item/icon_gem_ruby.jpg'),
+  crystal_frag: assetUrl('item/icon_gem_ruby.jpg'),
+  gold_coin: assetUrl('item/icon_gold_coin.jpg'),
+  gem_bag: assetUrl('item/icon_gem_ruby.jpg'),
+  dungeon_key: assetUrl('item/icon_scroll.jpg'),
+  treasure_key: assetUrl('item/icon_gem_ruby.jpg'),
+  quest_scroll: assetUrl('item/icon_scroll.jpg'),
+  bag_expand_scroll: assetUrl('item/icon_scroll.jpg'),
+  ancient_book: assetUrl('item/icon_scroll.jpg'),
+  monster_eye: assetUrl('item/icon_gem_ruby.jpg'),
+  dragon_scale: assetUrl('item/icon_gem_ruby.jpg'),
+  // 裝備類型（v2.3.0：新語意路徑 assets/equip/icon_*.jpg）
+  weapon: assetUrl('equip/icon_sword.jpg'),
+  armor: assetUrl('equip/icon_armor.jpg'),
+  helmet: assetUrl('equip/icon_helmet.jpg'),
+  boots: assetUrl('equip/icon_boots.jpg'),
+  gloves: assetUrl('equip/icon_armor.jpg'),
+  shield: assetUrl('equip/icon_shield.jpg'),
+  ring: assetUrl('equip/icon_ring.jpg'),
+  bow: assetUrl('equip/icon_bow.jpg'),
+  staff: assetUrl('equip/icon_staff.jpg'),
+  gem: assetUrl('item/icon_gem_ruby.jpg'),
 };
 
 // 獲取道具圖資 URL（道具ID優先，裝備按類型回落）
@@ -5704,35 +5716,35 @@ const EQUIP_SLOTS = [
   { id: 'boots',   name: '靴子',   pos: 'feet' },
 ];
 
-// 裝備部位對應圖標（暗黑天堂風）
+// 裝備部位對應圖標（v2.3.0：新語意路徑 assets/equip/icon_*.jpg）
 const EQUIP_ICON_MAP = {
-  helmet:   assetUrl('FmR5P4kp9F'), // 頭盔
-  armor:    assetUrl('QYQPTmKP8M'), // 鎧甲
-  weapon:   assetUrl('nactfRVTvS'), // 武器（劍類高級）
-  necklace: assetUrl('BHiRzIPTAV'), // 項鍊（暫用戒指圖）
-  ring:     assetUrl('BHiRzIPTAV'), // 戒指
-  ring1:    assetUrl('BHiRzIPTAV'), // 戒指
-  ring2:    assetUrl('BHiRzIPTAV'),
-  boots:    assetUrl('WgVb3fzkIB'), // 靴子
-  gloves:   assetUrl('iUJm20Glls'), // 手套
-  belt:     assetUrl('QYQPTmKP8M'), // 腰帶（暫用盔甲圖）
-  cape:     assetUrl('QYQPTmKP8M'), // 披風（暫用盔甲圖）
-  pants:    assetUrl('QYQPTmKP8M'), // 護腿（暫用盔甲圖）
-  shield:   assetUrl('YwLrUA7wlU'), // 盾牌
-  bow:      assetUrl('cZ70J7STpP'), // 弓
-  staff:    assetUrl('JDDbWSVINf'), // 法杖
+  helmet:   assetUrl('equip/icon_helmet.jpg'),
+  armor:    assetUrl('equip/icon_armor.jpg'),
+  weapon:   assetUrl('equip/icon_sword.jpg'),
+  necklace: assetUrl('equip/icon_ring.jpg'),
+  ring:     assetUrl('equip/icon_ring.jpg'),
+  ring1:    assetUrl('equip/icon_ring.jpg'),
+  ring2:    assetUrl('equip/icon_ring.jpg'),
+  boots:    assetUrl('equip/icon_boots.jpg'),
+  gloves:   assetUrl('equip/icon_armor.jpg'),
+  belt:     assetUrl('equip/icon_armor.jpg'),
+  cape:     assetUrl('equip/icon_armor.jpg'),
+  pants:    assetUrl('equip/icon_armor.jpg'),
+  shield:   assetUrl('equip/icon_shield.jpg'),
+  bow:      assetUrl('equip/icon_bow.jpg'),
+  staff:    assetUrl('equip/icon_staff.jpg'),
 };
 
-// 道具/消耗品圖標
+// 道具/消耗品圖標（v2.3.0：新語意路徑 assets/item/icon_*.jpg）
 const ITEM_ICON_MAP = {
-  potion_hp: assetUrl('rUwQO6PiBH'), // 紅藥
-  potion_mp: assetUrl('s6Rkjmlc5j'), // 藍藥
-  scroll:    assetUrl('bU4qiIVwJ0'), // 卷軸
-  gem:       assetUrl('Soc9DQWbZI'), // 寶石
-  enhance:   assetUrl('URxaFSUzM7'), // 強化卷
-  gold:      assetUrl('aadkrw5dpakds_ve_miaoda'), // 金幣堆
-  diamond:   assetUrl('aadkrxid6zueu_ve_miaoda'), // 藍鑽
-  default:   assetUrl('URxaFSUzM7'),
+  potion_hp: assetUrl('item/icon_potion_hp.jpg'),
+  potion_mp: assetUrl('item/icon_potion_mp.jpg'),
+  scroll:    assetUrl('item/icon_scroll.jpg'),
+  gem:       assetUrl('item/icon_gem_ruby.jpg'),
+  enhance:   assetUrl('item/icon_gem_ruby.jpg'),
+  gold:      assetUrl('item/icon_gold_coin.jpg'),
+  diamond:   assetUrl('item/icon_gem_ruby.jpg'),
+  default:   assetUrl('item/icon_gem_ruby.jpg'),
 };
 
 // 取得裝備圖標 URL（按類型）
@@ -8607,31 +8619,46 @@ function onPlayerDead() {
   const killer = p.lastKiller || '未知敵人';
   const isAIKiller = /\[AI\]/.test(killer);
   showDeathNotice(killer, lostExp, lostLevel, isAIKiller);
-  // 3秒后复活回到出生点/村莊，恢复50%血量
+  // 攻城戰死亡：留在原地復活，不提前結束；攻城戰以時間為主
   setTimeout(() => {
     const hpMax = getTotalHpMax();
     p.hp = Math.floor(hpMax * 0.5);
     p.state = 'idle';
-    // 回城复活
-    const safeMap = SAFE_MAPS['village'] ? 'village' : Object.keys(SAFE_MAPS)[0];
-    if (GS.currentMap !== safeMap) {
-      loadMap(safeMap);
+    const isSiege = curMap?.type === 'castle_siege';
+    if (isSiege) {
+      // v2.3.0：攻城戰中死亡 → 原地復活（50%血量），戰鬥繼續；以時間為主
+      // 把玩家移到攻城地圖內的安全位置（入口區）
+      p.x = 200;
+      p.y = 200;
+      p.targetX = p.x;
+      p.targetY = p.y;
       const msg = lostExp > 0
-        ? `你已復活回到米德加特村。死亡損失：${formatNumber(lostExp)} 經驗${lostLevel > 0 ? '（降級）' : ''}`
-        : '你已復活，回到了米德加特村。';
+        ? `你已在原地復活。死亡損失：${formatNumber(lostExp)} 經驗${lostLevel > 0 ? '（降級）' : ''}`
+        : '你已在原地復活，戰鬥繼續！';
       addLog('system', msg);
-      if (lostExp > 0) showDamage(p.x, p.y - 60, `-${formatNumber(lostExp)} EXP`, 'heal');
+      if (playerEl) playerEl.style.display = '';
     } else {
-      // 已经在村莊，回到村莊中心
-      const map = getAllMaps()[safeMap];
-      if (map) {
-        p.x = map.w / 2;
-        p.y = map.h * 0.7;
-        p.targetX = p.x;
-        p.targetY = p.y;
+      // 回城復活（非攻城地圖）
+      const safeMap = SAFE_MAPS['village'] ? 'village' : Object.keys(SAFE_MAPS)[0];
+      if (GS.currentMap !== safeMap) {
+        loadMap(safeMap);
+        const msg = lostExp > 0
+          ? `你已復活回到米德加特村。死亡損失：${formatNumber(lostExp)} 經驗${lostLevel > 0 ? '（降級）' : ''}`
+          : '你已復活，回到了米德加特村。';
+        addLog('system', msg);
+      } else {
+        // 已经在村莊，回到村莊中心
+        const map = getAllMaps()[safeMap];
+        if (map) {
+          p.x = map.w / 2;
+          p.y = map.h * 0.7;
+          p.targetX = p.x;
+          p.targetY = p.y;
+        }
+        addLog('system', '你已復活。');
       }
-      addLog('system', '你已復活。');
     }
+    if (lostExp > 0) showDamage(p.x, p.y - 60, `-${formatNumber(lostExp)} EXP`, 'heal');
     updateUI();
     renderPlayer();
   }, 3000);
@@ -10940,6 +10967,60 @@ function initCastles() {
   });
 }
 
+// v2.2.2：有四方向+攻擊真圖的單位清單（用 frames/ 子目錄結構）
+// key 為方向檔案夾名，cat 為分類
+const DIRECTIONAL_SPRITES_DIRKEY = {
+  warrior:            { cat: '01_class' },
+  archer:             { cat: '01_class' },
+  mage:               { cat: '01_class' },
+  rogue:              { cat: '01_class' },
+  paladin:            { cat: '01_class' },
+  illusionist:        { cat: '01_class' },
+  dark_elf_assassin:  { cat: '01_class' },
+  death_knight:       { cat: '02_transform' },
+  baphomet:           { cat: '02_transform' },
+  ishti:              { cat: '02_transform' },
+  goblin:             { cat: '04_monster' },
+  skeleton_warrior:   { cat: '04_monster' },
+  giant_spider:       { cat: '04_monster' },
+  werewolf:           { cat: '04_monster' },
+};
+// 執行期初始化：建立 idleId → dirKey 的快取（第一次使用時從 SPRITE 物件遍歷比對）
+let _dirSpriteByIdleCache = null;
+function _buildDirSpriteCache() {
+  _dirSpriteByIdleCache = {};
+  for (const [dirKey, info] of Object.entries(DIRECTIONAL_SPRITES_DIRKEY)) {
+    // 從 SPRITE 物件中找 idle 路徑對應的 sprite
+    const dirDownPath = assetUrl(info.cat + '/frames/' + dirKey + '/down.jpg');
+    // 同時嘗試各種常見的 sprite key 對應
+    if (SPRITE[dirKey]) {
+      const idleUrl = SPRITE[dirKey].idle;
+      // 萃取出 idle 的 id (最後一段，不含副檔名)
+      const m = idleUrl.match(/([^/]+)\.(jpg|png|jpeg)$/i);
+      if (m) {
+        _dirSpriteByIdleCache[m[1]] = dirKey;
+      }
+    }
+  }
+}
+function getDirKeyFromSprite(s) {
+  if (!s || !s.idle) return null;
+  if (!_dirSpriteByIdleCache) _buildDirSpriteCache();
+  const m = s.idle.match(/([^/]+)\.(jpg|png|jpeg)$/i);
+  if (!m) return null;
+  return _dirSpriteByIdleCache[m[1]] || null;
+}
+function hasDirectionalSprites(s) {
+  return !!getDirKeyFromSprite(s);
+}
+function getDirSpriteUrl(s, frame) {
+  const dirKey = getDirKeyFromSprite(s);
+  if (!dirKey) return null;
+  const info = DIRECTIONAL_SPRITES_DIRKEY[dirKey];
+  if (!info) return null;
+  return assetUrl(info.cat + '/frames/' + dirKey + '/' + frame + '.jpg');
+}
+
 // ==================== 精灵图 HTML（单张图 + CSS 动画模式） ====================
 // 每个角色使用单张完整角色图，通过 CSS 动画实现待机呼吸、行走弹跳、攻擊冲刺、受击闪白晃动、死亡倒地
 // 彻底避免多帧堆叠问题
@@ -10959,6 +11040,25 @@ function buildSpriteHTML(spriteObj, kind, lean) {
   const emojiAttack = s.attack || s.idle || '⚔️';
   // lean 模式：AI/怪物/召唤只用 1 张图（idle）+ CSS 动画，大幅减少 DOM
   // 只有玩家/英雄/变身用完整8帧结构
+  // v2.2.2：有方向圖的單位疊加方向層
+  const hasDir = hasDirectionalSprites(s);
+  const dirDownSrc = hasDir ? getDirSpriteUrl(s, 'down') : '';
+  const dirUpSrc = hasDir ? getDirSpriteUrl(s, 'up') : '';
+  const dirSideSrc = hasDir ? getDirSpriteUrl(s, 'side') : '';
+  const dirAttackSrc = hasDir ? getDirSpriteUrl(s, 'attack') : '';
+  const dirClass = hasDir ? ' sprite-dir-mode dir-down' : '';
+  
+  const dirLayerHTML = hasDir ? `
+    <div class="dir-sprite-layer">
+      <img class="dir-sprite dir-down" src="${dirDownSrc}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
+      <img class="dir-sprite dir-up" src="${dirUpSrc}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
+      <img class="dir-sprite dir-left" src="${dirSideSrc}" style="filter:${baseFilter};transform:scaleX(-1)" alt="" onerror="handleImgError(this)"/>
+      <img class="dir-sprite dir-right" src="${dirSideSrc}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
+      <img class="dir-sprite dir-attack dir-attack-right" src="${dirAttackSrc}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
+      <img class="dir-sprite dir-attack dir-attack-left" src="${dirAttackSrc}" style="filter:${baseFilter};transform:scaleX(-1)" alt="" onerror="handleImgError(this)"/>
+    </div>
+  ` : '';
+  
   if (lean && isImg) {
     return `
       <div class="unit-info">
@@ -10966,22 +11066,26 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <div class="unit-name"></div>
         <div class="unit-level-tag"></div>
       </div>
-      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
-        <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>
-        <div class="unit-sprite-tomb" style="display:none">🪦</div>
+      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}${dirClass}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
+        ${hasDir ? '' : `<img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>`}
+        ${dirLayerHTML}
+        <div class="unit-sprite-tomb" style="display:none"></div>
         <div class="slash-effect"></div>
       </div>
       <div class="unit-shadow"></div>
     `;
   }
   // 完整模式：8帧结构（玩家/英雄/变身）
-  const attackSrc = isImg ? (s.attack || s.idle) : '';
-  const attack2Src = isImg ? (s.attack2 || s.attack || s.idle) : '';
-  const walkSrc = isImg ? (s.walk || s.idle) : '';
-  const walk2Src = isImg ? (s.walk2 || s.walk || s.idle) : '';
-  const walk3Src = isImg ? (s.walk3 || s.walk || s.idle) : '';
-  const walk4Src = isImg ? (s.walk4 || s.walk || s.idle) : '';
-  const hitSrc = isImg ? (s.hit || s.idle) : '';
+  // v2.2.0：所有 frame 統一使用 idle 真圖，外觀完全一致、絕不閃爍
+  // 動畫靠 CSS 類（walking/attacking/hit）的 transform + filter 驅動
+  const idleSrcComputed = isImg ? s.idle : '';
+  const attackSrc = idleSrcComputed;
+  const attack2Src = idleSrcComputed;
+  const walkSrc = idleSrcComputed;
+  const walk2Src = idleSrcComputed;
+  const walk3Src = idleSrcComputed;
+  const walk4Src = idleSrcComputed;
+  const hitSrc = idleSrcComputed;
   // onerror 統一使用全域 handleImgError：
   //   - 本地資源失敗 → 自動切換到 CDN
   //   - CDN 也失敗 → 隱藏圖片並為父層加上背景占位，避免顯示破裂圖示
@@ -11173,12 +11277,12 @@ const CLASS_STAT_PREFS = {
 // ===== v2.0.1 創角頁：天堂經典樣式 =====
 // 職業 → 對應真•系列金變 映射
 const CLASS_TRANSFORM_MAP = {
-  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級' },
-  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級' },
-  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級' },
-  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級' },
-  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級' },
-  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級' },
+  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
+  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
+  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/class/assassin/portrait.jpg' },
+  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/class/archer/portrait.jpg' },
+  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/class/mage/portrait.jpg' },
+  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/class/warlock/portrait.jpg' },
 };
 
 // 職業詳細資訊（繁中）
@@ -11256,8 +11360,14 @@ function initCC2UI() {
       const btn = document.createElement('button');
       btn.className = 'cc2-class-icon-btn' + (cid === charCreateState.classId ? ' active' : '');
       btn.dataset.classId = cid;
+      btn.style.cursor = 'pointer';
+      btn.title = detail.name + ' — 點擊選擇此職業';
+      // v2.3.0：使用職業頭像 icon，加上邊框強化可點擊性
+      const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
       if (sp.useImg && sp.idle) {
-        btn.innerHTML = `<img src="${sp.idle}" alt="${detail.name}" onerror="this.style.display='none';this.parentElement.querySelector('.cc2-icon-fallback')&&(this.parentElement.querySelector('.cc2-icon-fallback').style.display='flex');"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none">${detail.name.slice(0, 1)}</span>`;
+        btn.innerHTML = `<img src="${portraitUrl}" alt="${detail.name}" 
+          style="width:100%;height:100%;object-fit:cover;border-radius:4px"
+          onerror="this.style.display='none';var fb=this.parentElement.querySelector('.cc2-icon-fallback');if(fb)fb.style.display='flex';"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none">${detail.name.slice(0, 1)}</span>`;
       } else {
         btn.innerHTML = `<span class="cc2-icon-fallback" style="display:flex;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8)">${detail.name.slice(0, 1)}</span>`;
       }
@@ -11325,22 +11435,20 @@ function updateCC2Portrait() {
   const portraitEl = $('cc2-portrait');
   if (!portraitEl) return;
   const cid = charCreateState.classId;
-  const sp = SPRITE[cid] || SPRITE.warrior;
   const detail = CLASS_DETAIL[cid];
+  // v2.3.0：使用職業立繪真圖（portrait.jpg），不再用精靈圖當大立繪
+  const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
   
-  // 8 幀 idle 動畫（面朝右，第一幀為主）
-  const frames = [sp.idle, sp.walk, sp.walk2, sp.walk3, sp.walk4].filter(Boolean);
-  
-  // v2.1.2：永遠先放兜底（暗色漸層 + 職業名文字），圖片成功才顯示，確保不出現破圖 ?
   portraitEl.innerHTML = `
-    <div class="cc2-portrait-fallback">
+    <div class="cc2-portrait-fallback" style="display:none">
       <div class="cc2-fallback-title">${detail ? detail.name : ''}</div>
-      <div class="cc2-fallback-sub">${detail && detail.topTransform ? detail.topTransform : '真系列金變'}</div>
+      <div class="cc2-fallback-sub">${detail && CLASS_TRANSFORM_MAP[cid] ? CLASS_TRANSFORM_MAP[cid].name : '真系列金變'}</div>
     </div>
-  ` + (sp.useImg && sp.idle ? `<img src="${sp.idle}" alt="${detail ? detail.name : ''}" class="cc2-portrait-img" data-frames='${JSON.stringify(frames)}' style="display:none" onload="this.style.display='block'" onerror="this.style.display='none'"/>` : '');
-  
-  const img = portraitEl.querySelector('img');
-  if (img) startCC2PortraitAnim(img, frames);
+    <img src="${portraitUrl}" alt="${detail ? detail.name : ''}" class="cc2-portrait-img cc2-portrait-real" 
+         style="display:none;object-fit:contain;width:100%;height:100%"
+         onload="this.style.display='block';var fb=this.parentElement.querySelector('.cc2-portrait-fallback');if(fb)fb.style.display='none'"
+         onerror="this.style.display='none';var fb=this.parentElement.querySelector('.cc2-portrait-fallback');if(fb)fb.style.display='flex'"/>
+  `;
 }
 
 // 8 幀動畫播放（用於創角頁立繪輕微呼吸/待機效果）
@@ -11390,24 +11498,16 @@ function updateCC2TransformPreview() {
   const poolTf = TRANSFORM_POOL.find(t => t.id === tf.id);
   if (descEl) descEl.textContent = poolTf?.desc || '最強變身形態，全屬性大幅提升';
   
-  // 變身 8 幀動畫展示
-  const spKey = tf.spriteKey;
-  const sp = SPRITE[spKey];
-  if (sp && sp.useImg && spriteEl) {
-    const frames = [sp.idle, sp.walk, sp.walk2, sp.walk3, sp.walk4].filter(Boolean);
-    spriteEl.innerHTML = `<img src="${sp.idle}" alt="${tf.name}" class="cc2-transform-img" onerror="this.parentElement.innerHTML='<div class=\\"cc2-transform-fallback\\"><div class=\\"cc2-tf-name\\">' + this.alt + '</div></div>'"/>`;
-    const img = spriteEl.querySelector('img');
-    if (frames.length > 1) {
-      let idx = 0;
-      if (spriteEl._animTimer) clearInterval(spriteEl._animTimer);
-      spriteEl._animTimer = setInterval(() => {
-        idx = (idx + 1) % frames.length;
-        if (img) img.src = frames[idx];
-      }, 280);
+  // v2.3.0：變身預覽使用 portrait 立繪真圖
+  if (spriteEl) {
+    const portraitUrl = tf.portrait || (sp && sp.idle);
+    if (portraitUrl) {
+      spriteEl.innerHTML = `<img src="${portraitUrl}" alt="${tf.name}" class="cc2-transform-img cc2-transform-real" 
+        style="object-fit:contain;width:100%;height:100%"
+        onerror="this.parentElement.innerHTML='<div class=\\'cc2-transform-fallback\\'><div class=\\'cc2-tf-name\\'>${tf.name}</div></div>'"/>`;
+    } else {
+      spriteEl.innerHTML = `<div class="cc2-transform-fallback"><div class="cc2-tf-name">${tf.name}</div></div>`;
     }
-  } else if (spriteEl) {
-    // v2.1.1：sprite 不存在時，用暗色漸層 + 金變名稱兜底，絕不露藍底問號
-    spriteEl.innerHTML = `<div class="cc2-transform-fallback"><div class="cc2-tf-name">${tf.name}</div></div>`;
   }
 }
 
@@ -11700,46 +11800,7 @@ function showNationSelect() {
   });
 }
 
-function showClassSelect() {
-  const grid = $('class-grid');
-  grid.innerHTML = '';
-  Object.values(CLASSES).forEach(cls => {
-    const card = document.createElement('div');
-    card.className = 'class-card';
-    card.dataset.class = cls.id;
-    card.innerHTML = `
-      <div class="class-sprite arch-sprite-frame rarity-white" style="width:56px;height:72px">${spriteEmojiHTML(cls.sprite, 60)}</div>
-      <div class="class-name">${cls.name}</div>
-      <div class="class-desc">${cls.desc}</div>
-    `;
-    card.addEventListener('click', () => selectClass(cls.id));
-    grid.appendChild(card);
-  });
-  el.classSelectModal.classList.add('open');
-}
-
-function selectClass(classId) {
-  const cls = CLASSES[classId];
-  GS.player.classId = classId;
-  GS.player.transformId = null;
-  // 应用职业基础屬性
-  for (const k in cls.baseStats) {
-    if (k === 'hpMax') { GS.player.hpMax = cls.baseStats.hpMax; GS.player.hp = cls.baseStats.hpMax; }
-    else if (k in GS.player) GS.player[k] = cls.baseStats[k];
-  }
-  el.classSelectModal.classList.remove('open');
-  updatePlayerSprite();
-  updateTransformVisual();
-  updateUI();
-  updateSkillBar();
-  // 顶部头像：用背景图裁剪左上角第一帧
-  const topAvatarEl = $('top-avatar');
-  if (topAvatarEl) {
-    topAvatarEl.innerHTML = spriteEmojiHTML(cls.sprite, 36);
-  }
-  if (el.classBadge) el.classBadge.textContent = cls.name;
-  addLog('system', `選擇了${cls.name}职业！`);
-}
+// v2.3.0：舊創角模態 class-select-modal 已移除，統一使用 char-create-screen（羊皮紙樣式）
 
 // 金/紫變身新精靈圖（帶閃電冒煙效果）
 // ==================== 玩家渲染 ====================
@@ -11984,11 +12045,10 @@ function updatePlayerSprite() {
       const attackImgs = unit.querySelectorAll('.sprite-frame-attack');
       const imgHit = unit.querySelector('.sprite-frame-hit');
       if (imgIdle) imgIdle.src = s.idle;
-      const walkSrcs = [s.walk, s.walk2, s.walk3, s.walk4];
-      walkImgs.forEach((img, i) => { img.src = walkSrcs[i] || s.walk || s.idle; });
-      const atkSrcs = [s.attack, s.attack2, s.attack3];
-      attackImgs.forEach((img, i) => { img.src = atkSrcs[i] || s.attack || s.idle; });
-      if (imgHit) imgHit.src = s.hit || s.idle;
+      // v2.2.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍
+      walkImgs.forEach((img) => { img.src = s.idle; });
+      attackImgs.forEach((img) => { img.src = s.idle; });
+      if (imgHit) imgHit.src = s.idle;
     }
     const emojiEl = unit.querySelector('.unit-sprite-emoji');
     if (emojiEl) emojiEl.remove();
@@ -12172,6 +12232,25 @@ function renderPlayer() {
   unit.classList.remove('idle','walking','attacking','casting','hit','dead');
   if (p.hitTimer > 0) unit.classList.add('hit');
   else unit.classList.add(p.state);
+  // v2.2.2：四方向 sprite 方向更新
+  const wrap = unit.querySelector('.unit-sprite-wrap');
+  if (wrap && wrap.classList.contains('sprite-dir-mode')) {
+    let dir = p._lastDir || 'down';
+    if (p.state === 'walking' || p.state === 'chasing') {
+      const dx = p.targetX - p.x;
+      const dy = p.targetY - p.y;
+      if (Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 0.1) {
+        dir = dx >= 0 ? 'right' : 'left';
+      } else if (Math.abs(dy) > 0.1) {
+        dir = dy >= 0 ? 'down' : 'up';
+      }
+      p._lastDir = dir;
+    } else if (p.state === 'attacking' && p._attackDir) {
+      dir = p._attackDir;
+    }
+    wrap.classList.remove('dir-down','dir-up','dir-left','dir-right');
+    wrap.classList.add('dir-' + dir);
+  }
   // 应用帧动画
   applyUnitAnimFrame(unit, 'player', p.state);
 }
@@ -12340,8 +12419,9 @@ function renderNPCs(map) {
     let spriteHTML = '';
     if (isImg && multiFrame) {
       // 8 幀 NPC：完整圖片結構 + 呼吸動畫
-      const walkSrcs = [sp.walk || sp.idle, sp.walk2 || sp.walk || sp.idle, sp.walk3 || sp.walk || sp.idle, sp.walk4 || sp.walk || sp.idle];
-      const atkSrcs = [sp.attack || sp.idle, sp.attack2 || sp.attack || sp.idle];
+      // v2.2.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍；動畫靠 CSS transform 驅動
+      const walkSrcs = [sp.idle, sp.idle, sp.idle, sp.idle];
+      const atkSrcs = [sp.idle, sp.idle];
       spriteHTML = `
         <div class="npc-sprite-wrap sprite-multi-frame" style="position:relative;width:56px;height:64px">
           <img class="unit-sprite-img sprite-frame-idle" src="${sp.idle}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" alt="" onerror="handleImgError(this)"/>
@@ -12351,7 +12431,7 @@ function renderNPCs(map) {
           <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${walkSrcs[3]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
           <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${atkSrcs[0]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
           <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${atkSrcs[1]}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
-          <img class="unit-sprite-img sprite-frame-hit" src="${sp.hit || sp.idle}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
+          <img class="unit-sprite-img sprite-frame-hit" src="${sp.idle}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;filter:${filter}" alt="" onerror="handleImgError(this)"/>
         </div>
       `;
       // 註冊 NPC 動畫狀態（呼吸：idle 時慢速輪播 walk 幀）
@@ -12466,16 +12546,23 @@ function renderMapModal() {
   if (siegeList) {
     Object.values(SIEGE_MAPS).forEach(map => {
       const lvUnlocked = pl >= map.levelMin;
-      const warReady = GS.siegeWar && GS.siegeWar.status === 'active' && GS.siegeWar.castleId === map.castle && GS.siegeWar.endTime > Date.now();
+      const warActive = GS.siegeWar && GS.siegeWar.status === 'active' && GS.siegeWar.castleId === map.castle && GS.siegeWar.endTime > Date.now();
       const current = GS.currentMap === map.id;
       const isSiege = true;
-      const locked = !lvUnlocked || !warReady;
+      // v2.3.0：只有「等級不夠」才鎖定；宣戰狀態只影響是否顯示「戰鬥中」標籤
+      // 玩家隨時可以進出攻城地圖（類似一般戰鬥地圖），戰鬥邏輯僅在戰爭期間生效
+      const locked = !lvUnlocked;
       const card = buildMapCard(map, current, false, locked, isSiege);
-      if (locked && lvUnlocked && !warReady) {
-        // 等级够但未宣战：显示提示
+      if (!locked && !warActive) {
+        // 非戰爭期：顯示「平靜」標籤
         const tip = document.createElement('div');
-        tip.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);color:#ffd080;font-size:10px;font-weight:600;pointer-events:none;text-shadow:0 1px 2px #000';
-        tip.innerHTML = '<div style=\'font-size:18px;margin-bottom:4px\'>🔒</div><div>需先宣戰</div><div style=\'font-size:9px;color:#c0a070;margin-top:2px\'>前往 國家→城堡</div>';
+        tip.style.cssText = 'position:absolute;top:6px;right:6px;padding:2px 6px;background:rgba(60,80,100,0.75);color:#c0d8e8;font-size:10px;font-weight:600;border-radius:3px;pointer-events:none;text-shadow:0 1px 2px #000';
+        tip.textContent = '平靜期';
+        card.appendChild(tip);
+      } else if (!locked && warActive) {
+        const tip = document.createElement('div');
+        tip.style.cssText = 'position:absolute;top:6px;right:6px;padding:2px 6px;background:rgba(180,40,40,0.85);color:#ffe0a0;font-size:10px;font-weight:700;border-radius:3px;pointer-events:none;text-shadow:0 1px 2px #000;animation:pulse 1.6s infinite';
+        tip.textContent = '● 戰鬥中';
         card.appendChild(tip);
       }
       siegeList.appendChild(card);
@@ -21313,7 +21400,7 @@ function loadJSZip() {
   return new Promise(function(resolve, reject) {
     if (typeof JSZip !== 'undefined') { resolve(JSZip); return; }
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.src = 'assets/17_lib/jszip.min.js';
     s.onload = function() {
       if (typeof JSZip !== 'undefined') resolve(JSZip);
       else reject(new Error('JSZip 載入後仍未定義'));
@@ -23349,14 +23436,15 @@ function renderSiegeDefenderSprite(guard) {
 
   // 构建8帧精灵HTML（与普通多帧怪物一致的结构）
   const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8)) hue-rotate(-10deg) saturate(1.2)';
+  // v2.2.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍
   const idleSrc = sp.idle || '';
-  const walkSrc = sp.walk || sp.idle || '';
-  const walk2Src = sp.walk2 || sp.walk || sp.idle || '';
-  const walk3Src = sp.walk3 || sp.walk || sp.idle || '';
-  const walk4Src = sp.walk4 || sp.walk || sp.idle || '';
-  const attackSrc = sp.attack || sp.idle || '';
-  const attack2Src = sp.attack2 || sp.attack || sp.idle || '';
-  const hitSrc = sp.hit || sp.idle || '';
+  const walkSrc = idleSrc;
+  const walk2Src = idleSrc;
+  const walk3Src = idleSrc;
+  const walk4Src = idleSrc;
+  const attackSrc = idleSrc;
+  const attack2Src = idleSrc;
+  const hitSrc = idleSrc;
   const onErrorHide = "if(!this.dataset.err){this.dataset.err='1';this.classList.add('frame-error')}" ;
 
   elDiv.innerHTML = `
@@ -24389,7 +24477,7 @@ function bindEvents() {
         if (dlStatus) { dlStatus.style.display = 'block'; dlStatus.textContent = '正在載入 JSZip...'; }
         await new Promise((resolve, reject) => {
           const s = document.createElement('script');
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+          s.src = 'assets/17_lib/jszip.min.js';
           s.onload = resolve;
           s.onerror = reject;
           document.head.appendChild(s);
@@ -24918,6 +25006,39 @@ window.addEventListener('load', function() {
     init();
   }
 });
+
+// v2.3.0：登出 / 換帳號時清空所有遊戲狀態
+// 確保換帳號登入後只顯示該帳號從 server 取到的角色，A 帳角色不會殘留到 B 帳
+window.__clearGameState = function() {
+  try {
+    // 清空 GS 全域狀態
+    if (typeof GS !== 'undefined') {
+      GS.player = null;
+      GS.inventory = [];
+      GS.monsters = [];
+      GS.aiPlayers = [];
+      GS.currentMap = null;
+      GS.siegeWar = null;
+      GS.siegeStats = {};
+      GS.ownedTransforms = [];
+      GS.resources = { gold: 0, gem: 0 };
+      GS.guild = null;
+      GS.nation = null;
+    }
+    // 清空 DOM 世界層元素
+    const wl = document.getElementById('world-layer');
+    if (wl) wl.innerHTML = '';
+    const nl = document.getElementById('npc-layer');
+    if (nl) nl.innerHTML = '';
+    // 關閉所有彈窗
+    document.querySelectorAll('.modal.open, .panel.open, .screen:not(.hidden)').forEach(el => {
+      el.classList.remove('open');
+      if (el.id !== 'game-root') el.classList.add('hidden');
+    });
+  } catch (e) {
+    console.warn('[ClearState] 清空失敗:', e);
+  }
+};
 window.__debugCreateChar = function(classId, name) {
   if (!name) name = '測試' + classId;
   // 先重置charCreateState為該職業屬性傾向

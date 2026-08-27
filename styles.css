@@ -12134,3 +12134,131 @@ img { display: block; pointer-events: none; }
   padding: 0 4px;
   line-height: 1.3;
 }
+
+/* ============================================================
+   v2.2.1：四方向 Sprite 動畫系統
+   單位有方向圖時，.unit-sprite-wrap 加上 .sprite-dir-mode
+   方向由 .dir-down / .dir-up / .dir-left / .dir-right 控制
+   攻擊時額外顯示 .dir-attack-* 並播放攻擊動畫
+   ============================================================ */
+
+.unit-sprite-wrap.sprite-dir-mode .dir-sprite-layer {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+.unit-sprite-wrap.sprite-dir-mode .dir-sprite {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  opacity: 0;
+  transition: opacity 0.05s linear;
+}
+
+/* 方向顯示控制 */
+.unit-sprite-wrap.sprite-dir-mode.dir-down .dir-sprite.dir-down { opacity: 1; }
+.unit-sprite-wrap.sprite-dir-mode.dir-up   .dir-sprite.dir-up   { opacity: 1; }
+.unit-sprite-wrap.sprite-dir-mode.dir-left .dir-sprite.dir-left { opacity: 1; }
+.unit-sprite-wrap.sprite-dir-mode.dir-right .dir-sprite.dir-right { opacity: 1; }
+
+/* 攻擊時顯示 attack 圖（蓋在方向圖上） */
+.unit-sprite-wrap.sprite-dir-mode.dir-right.attacking .dir-sprite.dir-attack-right { opacity: 1; }
+.unit-sprite-wrap.sprite-dir-mode.dir-left.attacking  .dir-sprite.dir-attack-left  { opacity: 1; }
+.unit-sprite-wrap.sprite-dir-mode.dir-down.attacking  .dir-sprite.dir-down { opacity: 1; } /* 朝下用 down 圖 */
+.unit-sprite-wrap.sprite-dir-mode.dir-up.attacking    .dir-sprite.dir-up   { opacity: 1; } /* 朝上用 up 圖 */
+
+/* 方向模式下，原本的 sprite-frame 隱藏（用方向層取代） */
+.unit-sprite-wrap.sprite-dir-mode > .unit-sprite-img,
+.unit-sprite-wrap.sprite-dir-mode > img.unit-sprite-img {
+  display: none !important;
+}
+
+/* ---- 方向模式：idle 呼吸（用整個 wrap 的 translateY） ---- */
+.world-unit.idle .unit-sprite-wrap.sprite-dir-mode {
+  animation: dirIdle 2.6s ease-in-out infinite;
+}
+@keyframes dirIdle {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50%      { transform: translateY(-3px) scaleY(1.02); }
+}
+
+/* ---- 方向模式：走路起伏 + 身體擺動 ---- */
+.world-unit.walking .unit-sprite-wrap.sprite-dir-mode {
+  animation: dirWalk 0.45s ease-in-out infinite;
+}
+@keyframes dirWalk {
+  0%, 100% { transform: translateY(0) scaleY(1) skewX(0deg); }
+  25%      { transform: translateY(-4px) scaleY(1.03) skewX(-1deg); }
+  50%      { transform: translateY(-1px) scaleY(0.99) skewX(0deg); }
+  75%      { transform: translateY(-5px) scaleY(1.02) skewX(1deg); }
+}
+
+/* ---- 方向模式：攻擊動作（蓄力→頂點→收招） ---- */
+.world-unit.attacking .unit-sprite-wrap.sprite-dir-mode.dir-right,
+.world-unit.attacking .unit-sprite-wrap.sprite-dir-mode.dir-left {
+  animation: dirAttackSide 0.4s ease-out;
+}
+@keyframes dirAttackSide {
+  0%   { transform: translateX(0) scale(1); }
+  20%  { transform: translateX(-3px) scale(0.95); } /* 蓄力後退 */
+  50%  { transform: translateX(12px) scale(1.15); } /* 揮砍頂點 */
+  80%  { transform: translateX(4px) scale(1.05); }  /* 收招 */
+  100% { transform: translateX(0) scale(1); }
+}
+.world-unit.attacking.face-left .unit-sprite-wrap.sprite-dir-mode.dir-right,
+.world-unit.attacking.face-left .unit-sprite-wrap.sprite-dir-mode.dir-left {
+  animation: dirAttackSideLeft 0.4s ease-out;
+}
+@keyframes dirAttackSideLeft {
+  0%   { transform: translateX(0) scale(1); }
+  20%  { transform: translateX(3px) scale(0.95); }
+  50%  { transform: translateX(-12px) scale(1.15); }
+  80%  { transform: translateX(-4px) scale(1.05); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+/* 上下方向攻擊：簡單的衝刺 + 放大 */
+.world-unit.attacking .unit-sprite-wrap.sprite-dir-mode.dir-down {
+  animation: dirAttackDown 0.4s ease-out;
+}
+@keyframes dirAttackDown {
+  0%   { transform: translateY(0) scale(1); }
+  20%  { transform: translateY(-2px) scale(0.95); }
+  50%  { transform: translateY(8px) scale(1.15); }
+  80%  { transform: translateY(2px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+.world-unit.attacking .unit-sprite-wrap.sprite-dir-mode.dir-up {
+  animation: dirAttackUp 0.4s ease-out;
+}
+@keyframes dirAttackUp {
+  0%   { transform: translateY(0) scale(1); }
+  20%  { transform: translateY(2px) scale(0.95); }
+  50%  { transform: translateY(-8px) scale(1.15); }
+  80%  { transform: translateY(-2px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* 受擊：方向模式也閃紅 */
+.world-unit.hit .unit-sprite-wrap.sprite-dir-mode {
+  animation: dirHit 0.3s ease-out;
+}
+@keyframes dirHit {
+  0%   { filter: brightness(1); }
+  20%  { filter: brightness(3) sepia(1) hue-rotate(-50deg) saturate(5); }
+  60%  { filter: brightness(1.8) sepia(0.5) hue-rotate(-20deg); }
+  100% { filter: brightness(1); }
+}
+
+/* 死亡：方向模式旋轉淡出 */
+.world-unit.dead .unit-sprite-wrap.sprite-dir-mode {
+  animation: dirDead 0.6s ease-out forwards;
+}
+@keyframes dirDead {
+  0%   { transform: rotate(0deg) scale(1); opacity: 1; }
+  30%  { transform: rotate(15deg) scale(0.92); opacity: 0.85; }
+  100% { transform: rotate(85deg) scale(0.7); opacity: 0; }
+}

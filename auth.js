@@ -1,5 +1,5 @@
 /* ============================================================
-    君主之刃 v2.1.3 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
+    君主之刃 v2.3.0 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
     對接後端 /api/auth/* 與 Socket.IO 多人連線
     ============================================================ */
 
@@ -137,37 +137,37 @@
       desc: '以強大的鎧甲和體力站在戰場的最前線，揮舞巨劍將一切阻擋者化為廢土。',
       stats: { STR: 15, DEX: 8, INT: 5, CON: 14, LUK: 3 },
       topTransform: '真・死亡騎士',
-      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksatzo5qii_ve_miaoda',
+      portrait: 'assets/class/warrior/portrait.jpg',
       accent: '#8b3a3a' },
     paladin: { name: '聖騎士', weapon: '劍盾', type: '近戰物理', trait: '坦克・治癒',
       desc: '曾經的聖光守護者，如今背負著黑暗的詛咒，以墮落的聖裁審判一切罪惡。',
       stats: { STR: 10, DEX: 6, INT: 8, CON: 18, LUK: 3 },
       topTransform: '真・墮落聖執者',
-      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksavuxkohg_ve_miaoda',
+      portrait: 'assets/class/paladin/portrait.jpg',
       accent: '#7d6a3a' },
     rogue: { name: '黑暗妖精', weapon: '雙刀', type: '近戰物理', trait: '高爆擊・高閃避',
       desc: '潛伏於暗影中的死亡信使，以迅雷不及掩耳的速度給予敵人最後一擊。',
       stats: { STR: 10, DEX: 16, INT: 4, CON: 10, LUK: 10 },
       topTransform: '真・死亡刺客',
-      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksatqzaeeo_ve_miaoda',
+      portrait: 'assets/class/assassin/portrait.jpg',
       accent: '#2d5a3d' },
     archer: { name: '精靈', weapon: '長弓', type: '遠程物理', trait: '高輸出・遠程',
       desc: '百步穿楊的亡靈射手，以白骨之弓從遠處給予敵人穩定而致命的審判。',
       stats: { STR: 7, DEX: 18, INT: 4, CON: 9, LUK: 12 },
       topTransform: '真・死亡弓箭手',
-      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksax733mni_ve_miaoda',
+      portrait: 'assets/class/archer/portrait.jpg',
       accent: '#3a4d6b' },
     mage: { name: '法師', weapon: '法杖', type: '遠程魔法', trait: '高魔攻・範圍',
       desc: '操控死亡奧義的智者，以巴風特之力召喚毀滅級的暗影魔法吞噬一切。',
       stats: { STR: 4, DEX: 8, INT: 18, CON: 8, LUK: 12 },
       topTransform: '真・死亡法師',
-      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksawepqahq_ve_miaoda',
+      portrait: 'assets/class/mage/portrait.jpg',
       accent: '#5a2d6b' },
     warlock: { name: '幻術師', weapon: '權杖', type: '遠程魔法', trait: '召喚・持續傷害',
       desc: '與黑暗締結契約的亡靈咒術師，以惡魔召喚與死亡詛咒逐漸吞噬敵人。',
       stats: { STR: 3, DEX: 6, INT: 16, CON: 10, LUK: 15 },
       topTransform: '真・死亡術士',
-      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksayc3uiaq_ve_miaoda',
+      portrait: 'assets/class/warlock/portrait.jpg',
       accent: '#2d5a5a' },
   };
   function renderInitStats(classId) {
@@ -216,13 +216,13 @@
 
   // ========== 官方首頁（天堂M風長頁 / v2.1.2 動畫強化版）==========
   function renderHome() {
-    const HERO_IMG = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7s6dsyii_ve_miaoda';
-    const SCENE_BANNER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xjuwips_ve_miaoda';
-    const TRANSFORM_ROSTER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xebnybw_ve_miaoda';
-    const FEATURE_JOBS = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7tpmfoci_ve_miaoda';
-    const FEATURE_SIEGE = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7t4dqyao_ve_miaoda';
-    const FEATURE_TRANSFORM = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7uebiicq_ve_miaoda';
-    const FEATURE_MULTI = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7sju36dq_ve_miaoda';
+    const HERO_IMG = 'assets/16_landing/hero_main.jpg';
+    const SCENE_BANNER = 'assets/16_landing/scene_banner.jpg';
+    const TRANSFORM_ROSTER = 'assets/16_landing/transform_roster.jpg';
+    const FEATURE_JOBS = 'assets/16_landing/feature_jobs.jpg';
+    const FEATURE_SIEGE = 'assets/16_landing/feature_siege.jpg';
+    const FEATURE_TRANSFORM = 'assets/16_landing/feature_transform.jpg';
+    const FEATURE_MULTI = 'assets/16_landing/feature_multiplayer.jpg';
 
     const newsData = [
       { cat: '更新', tag: 'update', title: '【08/27 更新與活動總覽】', date: '2026/08/27' },
@@ -1649,10 +1649,26 @@
       if (overlay) overlay.classList.add('hidden');
     },
     logout() {
+      // v2.3.0：登出時徹底清空所有 session 與前端狀態
+      // 避免換帳號後顯示上一隻角色的殘留資訊
       try {
         localStorage.removeItem(STORAGE_TOKEN_KEY);
         localStorage.removeItem(STORAGE_OFFLINE_KEY);
-      } catch (e) {}
+        // 清除角色相關快取
+        localStorage.removeItem('mmo_characters');
+        localStorage.removeItem('mmo_char_idx');
+        // 清除所有 mmo_save_ 開頭的角色存檔
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('mmo_save_')) keysToRemove.push(k);
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        // 通知 game.js 清空狀態
+        if (window.__clearGameState) {
+          try { window.__clearGameState(); } catch (e) {}
+        }
+      } catch (e) { /* ignore */ }
       // 重新整理會回到首頁（init 統一顯示 home）
       location.reload();
     },
