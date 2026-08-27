@@ -1,0 +1,113 @@
+name: Upload ZIP and Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find uploaded ZIP
+        id: zip
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -type f \( -iname "*.zip" \) | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP file found."
+            echo "has_zip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ZIP found: $ZIP_FILE"
+            echo "has_zip=true" >> "$GITHUB_OUTPUT"
+            echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Remove old game files
+        if: steps.zip.outputs.has_zip == 'true'
+        run: |
+          echo "Removing old game files..."
+
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name ".github" \
+            ! -name "*.zip" \
+            -exec rm -rf {} \;
+
+      - name: Extract ZIP
+        if: steps.zip.outputs.has_zip == 'true'
+        run: |
+          ZIP_FILE="${{ steps.zip.outputs.zip_file }}"
+
+          echo "Extracting $ZIP_FILE..."
+
+          unzip -o "$ZIP_FILE" -d .
+
+          rm -f "$ZIP_FILE"
+
+      - name: Fix nested folder
+        if: steps.zip.outputs.has_zip == 'true'
+        run: |
+          if [ ! -f "index.html" ]; then
+            echo "index.html not found at repository root."
+
+            INDEX_FILE=$(find . -mindepth 2 -name "index.html" -type f | head -n 1)
+
+            if [ -n "$INDEX_FILE" ]; then
+              INDEX_DIR=$(dirname "$INDEX_FILE")
+
+              echo "Moving files from $INDEX_DIR to repository root."
+
+              shopt -s dotglob
+              mv "$INDEX_DIR"/* .
+              rm -rf "$INDEX_DIR"
+            fi
+          fi
+
+      - name: Commit extracted files
+        if: steps.zip.outputs.has_zip == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Auto extract uploaded ZIP"
+            git push
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
