@@ -41,12 +41,13 @@ function detectLocalAssets() {
   });
 }
 
-// 是否「應該優先走 CDN」（網域模式 + 本地 assets 不存在 / 未開啟離線模式）
+// 是否「應該優先走 CDN」
+// v2.0.7：預設一律本地分類目錄優先，CDN 僅作最後 fallback
+// 規範順序：assets/<分類>/<id>.png → assets/<id>.png → CDN
+// 例外：USE_CDN_FIRST 全域設為 true 時才反轉
 function _preferCdn() {
-  if (_isFileProtocol()) return false;        // file:// 一定走本地
-  if (USE_LOCAL_ASSETS) return false;         // 玩家手動開啟離線模式 → 走本地
-  if (_LOCAL_ASSETS_AVAILABLE === true) return false; // 本地 assets 存在 → 走本地
-  return true; // 其餘（http(s) + 本地沒有 / 未偵測到）→ 優先 CDN
+  if (typeof USE_CDN_FIRST !== 'undefined' && USE_CDN_FIRST === true) return true;
+  return false;
 }
 
 // v2.0.3：圖片 ID → 分類目錄對照表
@@ -3945,12 +3946,12 @@ const CLASSES = {
 };
 
 // ==================== 地圖 ====================
-const MAP_BG_VILLAGE  = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq57bnqcoi_ve_miaoda';
-const MAP_BG_ELF      = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6dgpaoci_ve_miaoda';
-const MAP_BG_SWAMP    = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6ivjsmio_ve_miaoda';
-const MAP_BG_DARKFOREST = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6irizcgg_ve_miaoda';
-const MAP_BG_DEADDESERT = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6e5eqgcq_ve_miaoda';
-const MAP_BG_VOLCANO    = '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkq6mpmrkki_ve_miaoda';
+const MAP_BG_VILLAGE  = assetUrl('aadkq57bnqcoi_ve_miaoda');
+const MAP_BG_ELF      = assetUrl('aadkq6dgpaoci_ve_miaoda');
+const MAP_BG_SWAMP    = assetUrl('aadkq6ivjsmio_ve_miaoda');
+const MAP_BG_DARKFOREST = assetUrl('aadkq6irizcgg_ve_miaoda');
+const MAP_BG_DEADDESERT = assetUrl('aadkq6e5eqgcq_ve_miaoda');
+const MAP_BG_VOLCANO    = assetUrl('aadkq6mpmrkki_ve_miaoda');
 const MAP_BG_SIEGE    = assetUrl('eeeRmMzAbt');
 
 // 技能图标精灵图（两套）
@@ -18055,16 +18056,16 @@ function useTransformTicket(tfId) {
 // 檢查變身是否到期
 // ==================== Buff 系統 ====================
 const BUFF_ICONS = {
-  transform:  '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgnianeeg_ve_miaoda',
-  atkspd:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgyn27sli_ve_miaoda',
-  movespd:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgx6ejygg_ve_miaoda',
-  exp:        '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgyumjgag_ve_miaoda',
-  drop:       '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg2chcolq_ve_miaoda',
-  shield:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg5b5ssco_ve_miaoda',
-  atkpot:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgyrnfyci_ve_miaoda',
-  defpot:     '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgzhmdgdg_ve_miaoda',
-  berserk:    '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrg42s6ggo_ve_miaoda',
-  dodge:      '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgxgcxmcg_ve_miaoda',
+  transform:  assetUrl('aadkrgnianeeg_ve_miaoda'),
+  atkspd:     assetUrl('aadkrgyn27sli_ve_miaoda'),
+  movespd:    assetUrl('aadkrgx6ejygg_ve_miaoda'),
+  exp:        assetUrl('aadkrgyumjgag_ve_miaoda'),
+  drop:       assetUrl('aadkrg2chcolq_ve_miaoda'),
+  shield:     assetUrl('aadkrg5b5ssco_ve_miaoda'),
+  atkpot:     assetUrl('aadkrgyrnfyci_ve_miaoda'),
+  defpot:     assetUrl('aadkrgzhmdgdg_ve_miaoda'),
+  berserk:    assetUrl('aadkrg42s6ggo_ve_miaoda'),
+  dodge:      assetUrl('aadkrgxgcxmcg_ve_miaoda'),
 };
 
 // 初始化 activeBuffs

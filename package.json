@@ -1,7 +1,7 @@
 {
   "name": "monarch-blade-server",
-  "version": "2.0.6",
-  "description": "君主之刃 v2.0.6 · 正式營運伺服器",
+  "version": "2.0.7",
+  "description": "君主之刃 v2.0.7 · 正式營運伺服器",
   "main": "server/server.cjs",
   "scripts": {
     "start": "node server/server.cjs"

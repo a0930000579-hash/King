@@ -1,5 +1,5 @@
 /* ============================================================
-    君主之刃 v2.0.6 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
+    君主之刃 v2.0.7 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
     對接後端 /api/auth/* 與 Socket.IO 多人連線
     ============================================================ */
 
@@ -78,12 +78,12 @@
       case 'char': html = renderCharSelect(); break;
     }
     overlay.innerHTML = '<div class="auth-particles"></div>' + html;
-    // v2.0.6：滾動回頂（針對長頁官網）
+    // v2.0.7：滾動回頂（針對長頁官網）
     overlay.scrollTop = 0;
     bindCurrentViewEvents();
   }
 
-  // ========== 官方首頁（天堂M風長頁 / v2.0.6 動畫強化版）==========
+  // ========== 官方首頁（天堂M風長頁 / v2.0.7 動畫強化版）==========
   function renderHome() {
     const HERO_IMG = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7s6dsyii_ve_miaoda';
     const SCENE_BANNER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xjuwips_ve_miaoda';
@@ -116,7 +116,7 @@
         <!-- 頂部導航列 -->
         <header class="site-header">
           <div class="site-header-inner">
-            <div class="site-logo" id="site-logo">
+            <div class="site-logo">
               <div class="site-logo-cn">君主之刃</div>
               <div class="site-logo-en">LINEAGE OF SWORDS</div>
             </div>
@@ -145,7 +145,10 @@
           </div>
           <div class="hero-content">
             <div class="hero-date reveal-anim">2026.08.27</div>
-            <div class="hero-title reveal-anim delay1">燃燼重生　王者歸來</div>
+            <div class="hero-title-wrap reveal-anim delay1">
+              <div class="hero-title-line">燃燼重生</div>
+              <div class="hero-title-line">王者歸來</div>
+            </div>
             <div class="hero-subtitle reveal-anim delay2">君主之刃 · 烈焰傳說　全新登場</div>
             <!-- 雙按鈕區：開始遊戲 / 註冊帳號 -->
             <div class="hero-btn-row reveal-anim delay3">
@@ -529,38 +532,6 @@
     box._t = setTimeout(() => { box.classList.remove('show'); }, 2000);
   }
 
-  // ===== 開發者原始碼下載彈窗 =====
-  function showDevDownloadModal() {
-    const overlay = document.createElement('div');
-    overlay.className = 'dev-modal-overlay';
-    overlay.innerHTML = `
-      <div class="dev-modal">
-        <div class="dev-modal-title">開發者通道 · v2.0.6</div>
-        <div class="dev-modal-body">
-          <p style="margin:0 0 12px 0;font-size:13px;color:#b0a070;">僅限授權開發者使用，請勿外傳原始碼。</p>
-          <a href="source.zip" download="monarch-blade-v2.0.6-source.zip" class="dev-download-btn" id="dev-download-main">
-            <span style="font-size:22px;margin-right:10px;">&#8681;</span>
-            下載 v2.0.6 原始碼 ZIP
-          </a>
-          <a href="source.zip" target="_blank" rel="noopener" class="dev-download-alt" id="dev-download-alt">
-            若自動下載失敗，點此另開新視窗下載
-          </a>
-          <div style="margin-top:14px;font-size:11px;color:#7a6a40;text-align:center;">
-            檔案大小：約 450 KB · 解壓縮即可部署
-          </div>
-        </div>
-        <div class="dev-modal-footer">
-          <button class="auth-btn dev-close-btn" id="dev-modal-close">關閉</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.classList.add('show'));
-    const close = () => { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 300); };
-    overlay.querySelector('#dev-modal-close').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-  }
-
   // ========== 事件綁定 ==========
   function bindCurrentViewEvents() {
     switch (currentView) {
@@ -583,70 +554,6 @@
             });
           });
         });
-
-        // ===== v2.0.6 開發者通道：長按 Logo 2 秒 → 輸入密碼 → 下載原始碼 =====
-        // 強化可靠性：多重事件 + 阻止預設行為 + 震動回饋
-        (function() {
-          const logo = $('site-logo');
-          if (!logo) return;
-          let pressTimer = null;
-          let triggered = false;
-          const DEV_PWD = 'owner2026';
-
-          const vibrate = () => {
-            try { if (navigator.vibrate) navigator.vibrate(50); } catch (e) {}
-          };
-
-          const startPress = (e) => {
-            // 避免選單彈出
-            if (e) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
-            if (pressTimer) return; // 重複觸發防護
-            triggered = false;
-            pressTimer = setTimeout(() => {
-              triggered = true;
-              vibrate();
-              pressTimer = null;
-              const input = prompt('請輸入開發者密碼：');
-              if (input === null) return;
-              if (input === DEV_PWD) {
-                showDevDownloadModal();
-              } else {
-                showToast('密碼錯誤');
-              }
-            }, 2000);
-          };
-
-          const cancelPress = () => {
-            if (pressTimer) {
-              clearTimeout(pressTimer);
-              pressTimer = null;
-            }
-          };
-
-          // 桌面端
-          logo.addEventListener('mousedown', startPress);
-          logo.addEventListener('mouseup', cancelPress);
-          logo.addEventListener('mouseleave', cancelPress);
-          // 防止右鍵選單
-          logo.addEventListener('contextmenu', e => e.preventDefault());
-          // 防止圖片拖曳
-          logo.addEventListener('dragstart', e => e.preventDefault());
-
-          // 觸控端（passive:false 才能 preventDefault）
-          logo.addEventListener('touchstart', startPress, { passive: false });
-          logo.addEventListener('touchend', cancelPress);
-          logo.addEventListener('touchmove', cancelPress);
-          logo.addEventListener('touchcancel', cancelPress);
-
-          // iOS Safari：長按會彈出選單，再加一層保護
-          logo.style.webkitTouchCallout = 'none';
-          logo.style.webkitUserSelect = 'none';
-          logo.style.userSelect = 'none';
-          logo.style.webkitTapHighlightColor = 'transparent';
-        })();
 
         // ===== PWA 安裝按鈕 =====
         (function() {
