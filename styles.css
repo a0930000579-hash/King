@@ -110,6 +110,22 @@ img { display: block; pointer-events: none; }
   overflow: hidden;
 }
 
+/* v2.1.0：頁面載入時遊戲世界預設隱藏，避免官網前閃出遊戲 HUD/畫面
+   玩家真正登入進世界後才由 JS 移除 .game-hidden 顯示遊戲 */
+#game-root.game-hidden .top-bar,
+#game-root.game-hidden .skill-bar,
+#game-root.game-hidden .attack-btn-group,
+#game-root.game-hidden .hp-mp-bar,
+#game-root.game-hidden #game-canvas,
+#game-root.game-hidden #world-container,
+#game-root.game-hidden .game-ui,
+#game-root.game-hidden .bottom-right-menu,
+#game-root.game-hidden .quest-panel,
+#game-root.game-hidden .chat-panel,
+#game-root.game-hidden .minimap-wrap {
+  display: none !important;
+}
+
 /* ==================== 顶部状态栏（新版：Lv徽章 + HP/MP + 攻防 + 鑽石 + 地圖） ==================== */
 .top-bar {
   position: absolute; top: 0; left: 0; right: 0;
@@ -2248,6 +2264,10 @@ img { display: block; pointer-events: none; }
 /* 當圖片失敗被 handleImgError 設為 hidden 時，文字層會自動顯露出來 */
 .skill-icon-tiered .skill-icon-img[style*="hidden"] {
   display: none;
+}
+/* v2.1.0：空槽位時隱藏 label 文字（避免顯示「技3/技4/??」），單純漸層底 */
+.skill-btn.empty .skill-icon-tiered::after {
+  content: '';
 }
 .skill-icon-img { width: 100%; height: 100%; object-fit: contain; display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 

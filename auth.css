@@ -1732,3 +1732,446 @@
   .cc-transform-mini { padding: 3px 6px; }
   .cc-tp-mini-sprite { width: 24px; height: 32px; }
 }
+
+/* ============================================================
+   v2.1.0 羊皮紙暗黑奇幻風創角頁
+   ============================================================ */
+.cc-parchment-bg {
+  background:
+    radial-gradient(ellipse at center, rgba(40,28,16,0.6) 0%, rgba(12,8,4,0.95) 70%),
+    #0a0704;
+  position: relative;
+}
+.cc-parchment-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(180,120,40,0.06) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(80,30,15,0.1) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.cc-parchment-panel {
+  width: 920px;
+  max-width: 96vw;
+  margin: 0 auto;
+  padding: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: relative;
+  z-index: 1;
+}
+
+/* 頂部導航列 */
+.cc-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+}
+.cc-back-btn {
+  background: none;
+  border: none;
+  color: #c0a878;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 10px;
+  font-family: inherit;
+  transition: color 0.2s;
+}
+.cc-back-btn:hover { color: #ffd880; }
+.cc-page-title {
+  font-size: 20px;
+  color: #d4b878;
+  letter-spacing: 8px;
+  font-weight: 600;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+
+/* 職業標籤列 */
+.cc-class-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  border-bottom: 1px solid rgba(180,140,60,0.25);
+  padding-bottom: 0;
+}
+.cc-class-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8a7654;
+  font-size: 14px;
+  padding: 10px 18px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 2px;
+  transition: all 0.25s ease;
+  position: relative;
+  bottom: -1px;
+}
+.cc-class-tab:hover {
+  color: #c4a868;
+}
+.cc-class-tab.active {
+  color: #ffd880;
+  border-bottom-color: #d4a054;
+  text-shadow: 0 0 10px rgba(232,192,96,0.4);
+}
+
+/* 主要羊皮紙區 */
+.cc-main-parchment {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 36px;
+  background:
+    linear-gradient(135deg,
+      rgba(58,42,26,0.85) 0%,
+      rgba(42,30,18,0.9) 50%,
+      rgba(52,36,20,0.85) 100%);
+  border: 1px solid rgba(180,140,60,0.35);
+  border-radius: 4px;
+  padding: 30px;
+  position: relative;
+  box-shadow:
+    0 8px 40px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,220,150,0.12),
+    inset 0 -1px 0 rgba(0,0,0,0.4);
+}
+.cc-main-parchment::before,
+.cc-main-parchment::after {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(212,160,84,0.5);
+  pointer-events: none;
+}
+.cc-main-parchment::before {
+  top: 8px; left: 8px;
+  border-right: none; border-bottom: none;
+}
+.cc-main-parchment::after {
+  bottom: 8px; right: 8px;
+  border-left: none; border-top: none;
+}
+
+/* 左側：立繪區 */
+.cc-portrait-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.cc-portrait-frame-deco {
+  position: relative;
+  width: 280px;
+  height: 380px;
+}
+.cc-portrait-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #1a1208;
+  position: relative;
+  border: 1px solid rgba(180,140,60,0.4);
+  box-shadow:
+    inset 0 0 60px rgba(0,0,0,0.6),
+    0 4px 20px rgba(0,0,0,0.5);
+}
+.cc-portrait-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+  filter: brightness(0.95) contrast(1.05);
+}
+.cc-portrait-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(10,6,3,0.7) 100%);
+  pointer-events: none;
+}
+
+/* 角飾 */
+.cc-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #c49850;
+  pointer-events: none;
+}
+.cc-corner-tl { top: -5px; left: -5px; border-right: none; border-bottom: none; }
+.cc-corner-tr { top: -5px; right: -5px; border-left: none; border-bottom: none; }
+.cc-corner-bl { bottom: -5px; left: -5px; border-right: none; border-top: none; }
+.cc-corner-br { bottom: -5px; right: -5px; border-left: none; border-top: none; }
+
+/* 立繪下方職業橫幅 */
+.cc-class-banner {
+  width: 100%;
+  text-align: center;
+  padding: 10px 0;
+  border-top: 1px solid rgba(180,140,60,0.3);
+  border-bottom: 1px solid rgba(180,140,60,0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.cc-banner-cn {
+  font-size: 20px;
+  color: #e8c068;
+  letter-spacing: 10px;
+  font-weight: 700;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8), 0 0 12px var(--accent, rgba(232,192,96,0.3));
+  padding-left: 10px; /* 修正 letter-spacing 造成的偏移 */
+}
+.cc-banner-en {
+  font-size: 11px;
+  color: #9a8250;
+  letter-spacing: 2px;
+  opacity: 0.85;
+}
+
+/* 右側：資訊區 */
+.cc-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.cc-info-title {
+  font-size: 36px;
+  font-weight: 700;
+  color: #f0d080;
+  letter-spacing: 4px;
+  text-shadow:
+    0 2px 10px rgba(0,0,0,0.8),
+    0 0 20px var(--accent, rgba(232,192,96,0.25));
+  line-height: 1;
+}
+.cc-info-subtitle {
+  font-size: 13px;
+  color: #a08858;
+  letter-spacing: 4px;
+  margin-top: -4px;
+  padding-left: 2px;
+}
+
+.cc-info-desc {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #c4b080;
+  margin: 0;
+  padding: 14px 0;
+  border-top: 1px solid rgba(180,140,60,0.15);
+  border-bottom: 1px solid rgba(180,140,60,0.15);
+  text-align: justify;
+}
+
+/* 規格列表 */
+.cc-spec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.cc-spec-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cc-spec-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(60,42,24,0.9), rgba(30,20,10,0.9));
+  border: 1px solid rgba(180,140,60,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #c49850);
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255,220,150,0.1);
+}
+.cc-spec-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.cc-spec-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cc-spec-label {
+  font-size: 10px;
+  color: #7a6848;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.cc-spec-value {
+  font-size: 14px;
+  color: #d8c088;
+  font-weight: 500;
+}
+
+/* 分隔飾紋 */
+.cc-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #8a7448;
+  font-size: 10px;
+  letter-spacing: 6px;
+  padding: 6px 0 2px;
+  padding-left: 6px; /* 修正 letter-spacing */
+}
+.cc-divider::before,
+.cc-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(180,140,60,0.3), transparent);
+}
+.cc-divider::before { background: linear-gradient(90deg, transparent, rgba(180,140,60,0.3)); }
+.cc-divider::after { background: linear-gradient(90deg, rgba(180,140,60,0.3), transparent); }
+
+/* 名稱輸入區 */
+.cc-name-area {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.cc-name-input {
+  flex: 1;
+  background: rgba(20,14,8,0.7);
+  border: 1px solid rgba(180,140,60,0.4);
+  border-radius: 3px;
+  padding: 10px 14px;
+  color: #e8d4a0;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+  letter-spacing: 1px;
+}
+.cc-name-input:focus {
+  border-color: #d4a054;
+  box-shadow: 0 0 8px rgba(212,160,84,0.2);
+}
+.cc-name-input::placeholder { color: #6a5838; }
+.cc-check-btn {
+  background: linear-gradient(180deg, #6a5228, #4a3818);
+  border: 1px solid #8a6a38;
+  color: #e8c878;
+  padding: 10px 18px;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 2px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.cc-check-btn:hover {
+  background: linear-gradient(180deg, #8a6a38, #6a4a20);
+  color: #ffe090;
+}
+.cc-name-status {
+  font-size: 12px;
+  min-height: 18px;
+  color: #8a7448;
+  padding: 0 2px;
+}
+.cc-name-status.ok { color: #7ab86a; }
+.cc-name-status.error { color: #c87858; }
+
+/* 底部創建按鈕 */
+.cc-footer-area {
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  justify-content: center;
+}
+.cc-create-parchment-btn {
+  position: relative;
+  width: 220px;
+  padding: 14px 24px;
+  background: linear-gradient(180deg, #c89638 0%, #8a6020 50%, #6a4818 100%);
+  border: 1px solid #d4a054;
+  border-radius: 3px;
+  color: #fff5dc;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  box-shadow:
+    0 4px 14px rgba(200,150,40,0.3),
+    inset 0 1px 0 rgba(255,235,180,0.4),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+  transition: all 0.2s ease;
+  padding-left: 32px; /* letter-spacing 補償 */
+}
+.cc-create-parchment-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 20px rgba(220,170,60,0.4),
+    inset 0 1px 0 rgba(255,245,200,0.5),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+}
+.cc-create-parchment-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.cc-create-parchment-btn:disabled {
+  background: linear-gradient(180deg, #4a3c28, #3a2e1c, #2a2010);
+  border-color: #4a3c28;
+  color: #6a5a3a;
+  cursor: not-allowed;
+  box-shadow: none;
+  text-shadow: none;
+}
+.cc-btn-glow {
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,240,180,0.3), transparent);
+  transform: skewX(-20deg);
+  animation: cc-btn-sweep 3s ease-in-out infinite;
+}
+.cc-create-parchment-btn:disabled .cc-btn-glow {
+  display: none;
+}
+@keyframes cc-btn-sweep {
+  0% { left: -60%; }
+  50% { left: 100%; }
+  100% { left: 100%; }
+}
+
+/* 響應式 */
+@media (max-width: 780px) {
+  .cc-parchment-panel { width: 100%; }
+  .cc-main-parchment {
+    grid-template-columns: 1fr;
+    padding: 20px;
+    gap: 20px;
+  }
+  .cc-portrait-frame-deco {
+    width: 220px;
+    height: 300px;
+  }
+  .cc-info-title { font-size: 28px; }
+  .cc-page-title { font-size: 16px; letter-spacing: 6px; }
+  .cc-class-tab {
+    font-size: 12px;
+    padding: 8px 12px;
+    letter-spacing: 1px;
+  }
+}

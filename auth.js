@@ -1,5 +1,5 @@
 /* ============================================================
-    君主之刃 v2.0.9 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
+    君主之刃 v2.1.0 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
     對接後端 /api/auth/* 與 Socket.IO 多人連線
     ============================================================ */
 
@@ -14,21 +14,61 @@
   let currentView = 'home'; // home | login | register | server | char | charCreate
   let currentServer = null;
   let serverList = [];
-  // v2.0.9：連線狀態（online/offline/unknown），方便除錯與營運監控
+  // ========== 連線狀態判定（v2.1.0 改為 /api/health 精準判斷）==========
+  // 邏輯：fetch('/api/health') 回 HTTP 200 且 JSON.status === 'online' 才標已連線
+  // 任何其他情況（404/HTML/網路錯誤/非 JSON/欄位不符）一律視為未連線
   let onlineState = 'unknown';
+  let healthChecked = false;
 
   function setOnlineState(state) {
     onlineState = state;
-    // 更新頁面上所有連線狀態標籤
     const labels = document.querySelectorAll('.auth-online-state');
     labels.forEach(l => {
       l.textContent = state === 'online' ? '● 已連線' : state === 'offline' ? '● 未連線伺服器' : '● 連線中';
       l.className = 'auth-online-state ' + state;
     });
-    // 通知 game.js（若已載入）
     if (window.__updateOnlineState) {
       try { window.__updateOnlineState(state); } catch (e) {}
     }
+  }
+
+  // v2.1.0：健康檢查，精準判定是否為營運伺服器
+  async function checkServerHealth() {
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store', method: 'GET' });
+      // 必須是 HTTP 200
+      if (res.status !== 200) {
+        setOnlineState('offline');
+        healthChecked = true;
+        return false;
+      }
+      // Content-Type 必須是 JSON（不是 HTML）
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json') && !ct.includes('json')) {
+        setOnlineState('offline');
+        healthChecked = true;
+        return false;
+      }
+      const data = await res.json();
+      // status 必須是 online
+      if (data && data.status === 'online') {
+        setOnlineState('online');
+        healthChecked = true;
+        return true;
+      }
+      setOnlineState('offline');
+      healthChecked = true;
+      return false;
+    } catch (e) {
+      // fetch 失敗 → 連不到 → 離線
+      setOnlineState('offline');
+      healthChecked = true;
+      return false;
+    }
+  }
+
+  function isServerOnline() {
+    return onlineState === 'online';
   }
 
   // DOM 引用（延遲載入）
@@ -52,7 +92,7 @@
       const res = await fetch(url, opts);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        // v2.0.9：伺服器有回應但 4xx/5xx → 仍算連得上，只是業務錯誤
+        // v2.1.0：伺服器有回應但 4xx/5xx → 仍算連得上，只是業務錯誤
         if (onlineState !== 'online') setOnlineState('online');
         const err = new Error(data.error || ('HTTP ' + res.status));
         err.status = res.status;
@@ -86,29 +126,41 @@
   // ========== 創角頁職業資料與輔助 ==========
   const CC_CLASS_DATA = {
     warrior: { name: '戰士', weapon: '雙手劍', type: '近戰物理', trait: '高血量・高防禦',
-      desc: '以強大的鎧甲和體力站在戰場的最前線，利用各種技術將戰鬥帶往勝利。',
+      desc: '以強大的鎧甲和體力站在戰場的最前線，揮舞巨劍將一切阻擋者化為廢土。',
       stats: { STR: 15, DEX: 8, INT: 5, CON: 14, LUK: 3 },
-      topTransform: '真・暴君戰士' },
-    paladin: { name: '騎士', weapon: '劍盾', type: '近戰物理', trait: '坦克・治癒',
-      desc: '神聖力量的繼承者，以堅盾與聖光庇護隊友，是隊伍中最可靠的守護者。',
+      topTransform: '真・死亡騎士',
+      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksatzo5qii_ve_miaoda',
+      accent: '#8b3a3a' },
+    paladin: { name: '聖騎士', weapon: '劍盾', type: '近戰物理', trait: '坦克・治癒',
+      desc: '曾經的聖光守護者，如今背負著黑暗的詛咒，以墮落的聖裁審判一切罪惡。',
       stats: { STR: 10, DEX: 6, INT: 8, CON: 18, LUK: 3 },
-      topTransform: '真・聖光騎士' },
+      topTransform: '真・墮落聖執者',
+      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksavuxkohg_ve_miaoda',
+      accent: '#7d6a3a' },
     rogue: { name: '盜賊', weapon: '雙刀', type: '近戰物理', trait: '高爆擊・高閃避',
-      desc: '潛伏於暗影中的暗殺者，以迅雷不及掩耳的速度給予敵人致命一擊。',
+      desc: '潛伏於暗影中的死亡信使，以迅雷不及掩耳的速度給予敵人最後一擊。',
       stats: { STR: 10, DEX: 16, INT: 4, CON: 10, LUK: 10 },
-      topTransform: '真・暗影刺客' },
+      topTransform: '真・死亡刺客',
+      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksatqzaeeo_ve_miaoda',
+      accent: '#2d5a3d' },
     archer: { name: '弓手', weapon: '長弓', type: '遠程物理', trait: '高輸出・遠程',
-      desc: '百步穿楊的精準射手，從遠處給予敵人穩定而致命的傷害。',
+      desc: '百步穿楊的亡靈射手，以白骨之弓從遠處給予敵人穩定而致命的審判。',
       stats: { STR: 7, DEX: 18, INT: 4, CON: 9, LUK: 12 },
-      topTransform: '真・精靈遊俠' },
+      topTransform: '真・死亡弓箭手',
+      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksax733mni_ve_miaoda',
+      accent: '#3a4d6b' },
     mage: { name: '法師', weapon: '法杖', type: '遠程魔法', trait: '高魔攻・範圍',
-      desc: '操控元素奧義的智者，以強大的範圍魔法毀滅擋在面前的一切。',
+      desc: '操控死亡奧義的智者，以巴風特之力召喚毀滅級的暗影魔法吞噬一切。',
       stats: { STR: 4, DEX: 8, INT: 18, CON: 8, LUK: 12 },
-      topTransform: '真・大法師' },
+      topTransform: '真・死亡法師',
+      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksawepqahq_ve_miaoda',
+      accent: '#5a2d6b' },
     warlock: { name: '術士', weapon: '權杖', type: '遠程魔法', trait: '召喚・持續傷害',
-      desc: '與黑暗締結契約的咒術師，召喚惡魔並以詛咒逐漸吞噬敵人。',
+      desc: '與黑暗締結契約的亡靈咒術師，以惡魔召喚與死亡詛咒逐漸吞噬敵人。',
       stats: { STR: 3, DEX: 6, INT: 16, CON: 10, LUK: 15 },
-      topTransform: '真・惡魔召喚師' },
+      topTransform: '真・死亡術士',
+      portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksayc3uiaq_ve_miaoda',
+      accent: '#2d5a5a' },
   };
   function renderInitStats(classId) {
     const box = $('cc-init-stats');
@@ -149,12 +201,12 @@
       case 'charCreate': html = renderCharCreate(); break;
     }
     overlay.innerHTML = '<div class="auth-particles"></div>' + html;
-    // v2.0.9：滾動回頂（針對長頁官網）
+    // v2.1.0：滾動回頂（針對長頁官網）
     overlay.scrollTop = 0;
     bindCurrentViewEvents();
   }
 
-  // ========== 官方首頁（天堂M風長頁 / v2.0.9 動畫強化版）==========
+  // ========== 官方首頁（天堂M風長頁 / v2.1.0 動畫強化版）==========
   function renderHome() {
     const HERO_IMG = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7s6dsyii_ve_miaoda';
     const SCENE_BANNER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xjuwips_ve_miaoda';
@@ -532,80 +584,114 @@
     `;
   }
 
-  // ========== 角色建立（天堂風六職業選擇） ==========
+  // ========== 角色建立（羊皮紙暗黑奇幻風 / v2.1.0 精簡版）==========
   function renderCharCreate() {
-    const classList = [
-      { id: 'warrior',   name: '戰士',   weapon: '雙手劍',   type: '近戰物理', trait: '高血量・高防禦', desc: '以強大的鎧甲和體力站在戰場的最前線，利用各種技術將戰鬥帶往勝利。' },
-      { id: 'paladin',   name: '騎士',   weapon: '劍盾',     type: '近戰物理', trait: '坦克・治癒',   desc: '神聖力量的繼承者，以堅盾與聖光庇護隊友，是隊伍中最可靠的守護者。' },
-      { id: 'rogue',     name: '盜賊',   weapon: '雙刀',     type: '近戰物理', trait: '高爆擊・高閃避', desc: '潛伏於暗影中的暗殺者，以迅雷不及掩耳的速度給予敵人致命一擊。' },
-      { id: 'archer',    name: '弓手',   weapon: '長弓',     type: '遠程物理', trait: '高輸出・遠程',   desc: '百步穿楊的精準射手，從遠處給予敵人穩定而致命的傷害。' },
-      { id: 'mage',      name: '法師',   weapon: '法杖',     type: '遠程魔法', trait: '高魔攻・範圍',   desc: '操控元素奧義的智者，以強大的範圍魔法毀滅擋在面前的一切。' },
-      { id: 'warlock',   name: '術士',   weapon: '權杖',     type: '遠程魔法', trait: '召喚・持續傷害', desc: '與黑暗締結契約的咒術師，召喚惡魔並以詛咒逐漸吞噬敵人。' },
-    ];
+    const classList = ['warrior','paladin','rogue','archer','mage','warlock'];
+    const defaultClass = CC_CLASS_DATA[classList[0]];
 
-    const classBtns = classList.map((c, i) => `
-      <div class="cc-class-item ${i === 0 ? 'active' : ''}" data-class-id="${c.id}">
-        <div class="cc-class-icon-wrap">
-          <div class="cc-class-icon" data-sprite="${c.id}"></div>
-        </div>
-        <div class="cc-class-name">${c.name}</div>
-      </div>
-    `).join('');
+    // 職業選擇按鈕列（頁面頂部，簡潔文字按鈕）
+    const classTabs = classList.map((cid, i) => {
+      const c = CC_CLASS_DATA[cid];
+      return `<button class="cc-class-tab ${i === 0 ? 'active' : ''}" data-class-id="${cid}">${c.name}</button>`;
+    }).join('');
 
-    const defaultClass = classList[0];
     return `
-      <div class="auth-fullpage">
-        <div class="char-create-panel">
-          <div class="cc-header">
-            <button class="auth-back-btn" id="btn-cc-back">‹ 返回</button>
-            <div class="cc-title">角 色 創 建</div>
+      <div class="auth-fullpage cc-parchment-bg">
+        <div class="cc-parchment-panel">
+          <!-- 頂部：返回 + 標題 + 連線狀態 -->
+          <div class="cc-top-bar">
+            <button class="cc-back-btn" id="btn-cc-back">‹ 返回</button>
+            <div class="cc-page-title">創建角色</div>
             <div class="auth-online-state unknown" title="連線狀態">● 連線中</div>
           </div>
 
-          <div class="cc-class-row" id="cc-class-row">
-            ${classBtns}
+          <!-- 職業選擇標籤列 -->
+          <div class="cc-class-tabs" id="cc-class-tabs">
+            ${classTabs}
           </div>
 
-          <div class="cc-main-area">
-            <div class="cc-portrait-col">
-              <div class="cc-portrait-frame">
-                <div class="cc-portrait-sprite" id="cc-portrait"></div>
-                <div class="cc-portrait-glow"></div>
+          <!-- 主要內容區 -->
+          <div class="cc-main-parchment">
+            <!-- 左側：大立繪 -->
+            <div class="cc-portrait-section">
+              <div class="cc-portrait-frame-deco">
+                <div class="cc-portrait-inner">
+                  <img class="cc-portrait-img" id="cc-portrait-img" src="${defaultClass.portrait}" alt="${defaultClass.name}"/>
+                  <div class="cc-portrait-vignette"></div>
+                </div>
+                <!-- 角飾 -->
+                <div class="cc-corner cc-corner-tl"></div>
+                <div class="cc-corner cc-corner-tr"></div>
+                <div class="cc-corner cc-corner-bl"></div>
+                <div class="cc-corner cc-corner-br"></div>
               </div>
-              <div class="cc-portrait-name" id="cc-class-name-display">${defaultClass.name}</div>
-              <!-- 真系列變身展示（精簡小尺寸） -->
-              <div class="cc-transform-mini">
-                <div class="cc-tp-mini-sprite" id="cc-tp-sprite"></div>
-                <div class="cc-tp-mini-name" id="cc-tp-name">真系列</div>
+              <!-- 立繪下方職業名 -->
+              <div class="cc-class-banner" id="cc-class-banner" style="--accent:${defaultClass.accent}">
+                <span class="cc-banner-cn">${defaultClass.name}</span>
+                <span class="cc-banner-en">${defaultClass.topTransform}</span>
               </div>
             </div>
-            <div class="cc-info-col">
-              <div class="cc-class-title" id="cc-class-title">${defaultClass.name}</div>
-              <div class="cc-class-desc" id="cc-class-desc">${defaultClass.desc}</div>
-              <div class="cc-stats-mini">
-                <span><em>${defaultClass.weapon}</em> 主要武器</span>
-                <span><em>${defaultClass.type}</em> 戰鬥類型</span>
-                <span><em>${defaultClass.trait}</em> 職業特性</span>
-              </div>
-              <!-- 初始能力值（預設摺疊） -->
-              <details class="cc-stats-details">
-                <summary>初始能力值</summary>
-                <div class="cc-init-grid" id="cc-init-stats"></div>
-              </details>
-            </div>
-          </div>
 
-          <div class="cc-name-section">
-            <div class="cc-name-label">請 輸 入 角 色 名 稱</div>
-            <div class="cc-name-row">
-              <input type="text" id="cc-name-input" class="cc-name-input" maxlength="10" placeholder="允許中/英、數字，2-10 字元" autocomplete="off" />
-              <button class="cc-check-btn" id="cc-check-btn">重複確認</button>
-            </div>
-            <div class="cc-name-status" id="cc-name-status"></div>
-          </div>
+            <!-- 右側：資訊面板 -->
+            <div class="cc-info-section">
+              <!-- 職業名（大字） -->
+              <div class="cc-info-title" id="cc-info-title" style="--accent:${defaultClass.accent}">
+                ${defaultClass.name}
+              </div>
+              <div class="cc-info-subtitle" id="cc-info-subtitle">${defaultClass.topTransform}</div>
 
-          <div class="cc-footer">
-            <button class="cc-create-btn" id="cc-create-btn" disabled>創 建 角 色</button>
+              <!-- 描述 -->
+              <p class="cc-info-desc" id="cc-info-desc">${defaultClass.desc}</p>
+
+              <!-- 資訊列：Main Weapon / Combat Type / 職業特性 -->
+              <div class="cc-spec-list">
+                <div class="cc-spec-item">
+                  <div class="cc-spec-icon" style="--accent:${defaultClass.accent}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.5 2L19 6.5l-11 11-4.5 1.5 1.5-4.5L14.5 2z"/></svg>
+                  </div>
+                  <div class="cc-spec-text">
+                    <div class="cc-spec-label">Main Weapon</div>
+                    <div class="cc-spec-value" id="cc-spec-weapon">${defaultClass.weapon}</div>
+                  </div>
+                </div>
+                <div class="cc-spec-item">
+                  <div class="cc-spec-icon" style="--accent:${defaultClass.accent}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>
+                  </div>
+                  <div class="cc-spec-text">
+                    <div class="cc-spec-label">Combat Type</div>
+                    <div class="cc-spec-value" id="cc-spec-type">${defaultClass.type}</div>
+                  </div>
+                </div>
+                <div class="cc-spec-item">
+                  <div class="cc-spec-icon" style="--accent:${defaultClass.accent}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/></svg>
+                  </div>
+                  <div class="cc-spec-text">
+                    <div class="cc-spec-label">職業特性</div>
+                    <div class="cc-spec-value" id="cc-spec-trait">${defaultClass.trait}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 分隔飾紋 -->
+              <div class="cc-divider"><span>CHARACTER NAME</span></div>
+
+              <!-- 名稱輸入（精簡） -->
+              <div class="cc-name-area">
+                <input type="text" id="cc-name-input" class="cc-name-input" maxlength="10" placeholder="輸入角色名稱（2-10字元）" autocomplete="off" />
+                <button class="cc-check-btn" id="cc-check-btn">查重</button>
+              </div>
+              <div class="cc-name-status" id="cc-name-status"></div>
+
+              <!-- 底部：創建按鈕 -->
+              <div class="cc-footer-area">
+                <button class="cc-create-parchment-btn" id="cc-create-btn" disabled>
+                  <span class="cc-btn-text">完 成 創 建</span>
+                  <span class="cc-btn-glow"></span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -831,7 +917,7 @@
         document.querySelectorAll('.char-slot').forEach(slot => {
           slot.addEventListener('click', () => {
             if (slot.dataset.create === '1') {
-              // v2.0.9 修復：進入角色建立頁，不再直接跳進空世界
+              // v2.1.0 修復：進入角色建立頁，不再直接跳進空世界
               switchView('charCreate');
             } else {
               // 載入既有角色
@@ -842,30 +928,42 @@
         $('btn-char-back').addEventListener('click', () => switchView('server'));
         break;
       case 'charCreate':
-        // 職業選擇切換
-        document.querySelectorAll('.cc-class-item').forEach(item => {
-          item.addEventListener('click', () => {
-            document.querySelectorAll('.cc-class-item').forEach(i => i.classList.remove('active'));
-            item.classList.add('active');
-            const cid = item.dataset.classId;
-            const classData = CC_CLASS_DATA[cid];
-            if (!classData) return;
-            $('cc-class-name-display').textContent = classData.name;
-            $('cc-class-title').textContent = classData.name;
-            $('cc-class-desc').textContent = classData.desc;
-            $('cc-weapon').textContent = classData.weapon;
-            $('cc-type').textContent = classData.type;
-            $('cc-trait').textContent = classData.trait;
-            renderInitStats(cid);
-            updateTpPreview(cid);
-            // 同步更換立繪
-            const portraitEl = $('cc-portrait');
-            if (portraitEl && typeof window.SPRITE !== 'undefined') {
-              const sp = window.SPRITE[cid];
-              if (sp && sp.idle) {
-                portraitEl.style.backgroundImage = 'url(' + sp.idle + ')';
-              }
+        // v2.1.0：職業選擇切換（新羊皮紙風 DOM）
+        document.querySelectorAll('.cc-class-tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            document.querySelectorAll('.cc-class-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const cid = tab.dataset.classId;
+            const d = CC_CLASS_DATA[cid];
+            if (!d) return;
+            // 更新立繪
+            const img = $('cc-portrait-img');
+            if (img) { img.src = d.portrait; img.alt = d.name; }
+            // 更新職業名 banner
+            const banner = $('cc-class-banner');
+            if (banner) {
+              banner.style.setProperty('--accent', d.accent);
+              banner.querySelector('.cc-banner-cn').textContent = d.name;
+              banner.querySelector('.cc-banner-en').textContent = d.topTransform;
             }
+            // 更新右側資訊
+            const title = $('cc-info-title');
+            if (title) { title.style.setProperty('--accent', d.accent); title.textContent = d.name; }
+            const sub = $('cc-info-subtitle');
+            if (sub) sub.textContent = d.topTransform;
+            const desc = $('cc-info-desc');
+            if (desc) desc.textContent = d.desc;
+            // spec 三項
+            const weaponEl = $('cc-spec-weapon');
+            if (weaponEl) weaponEl.textContent = d.weapon;
+            const typeEl = $('cc-spec-type');
+            if (typeEl) typeEl.textContent = d.type;
+            const traitEl = $('cc-spec-trait');
+            if (traitEl) traitEl.textContent = d.trait;
+            // spec icon accent
+            document.querySelectorAll('.cc-spec-icon').forEach(icon => {
+              icon.style.setProperty('--accent', d.accent);
+            });
           });
         });
         // 名稱輸入
@@ -904,7 +1002,7 @@
               nameStatus.className = 'cc-name-status error';
             }
           } catch (e) {
-            // v2.0.9：後端不可用時顯示錯誤，不允許創建（避免重名漏洞）
+            // v2.1.0：後端不可用時顯示錯誤，不允許創建（避免重名漏洞）
             nameChecked = false;
             nameStatus.textContent = '✗ 未連線伺服器（靜態站模式）。需以 Web Service 部署（npm start）才能創建角色';
             nameStatus.className = 'cc-name-status error';
@@ -913,7 +1011,7 @@
         });
         // 創建按鈕
         createBtn.addEventListener('click', async () => {
-          const selected = document.querySelector('.cc-class-item.active');
+          const selected = document.querySelector('.cc-class-tab.active');
           const classId = selected ? selected.dataset.classId : 'warrior';
           const name = nameInput.value.trim();
           if (!name || !nameChecked) return;
@@ -938,7 +1036,7 @@
             localStorage.setItem('mmo_characters', JSON.stringify(chars));
             localStorage.setItem('mmo_new_char', JSON.stringify(newChar));
           } catch (e) {}
-          // 呼叫後端創建 API（v2.0.9：失敗時阻擋，不直接進遊戲）
+          // 呼叫後端創建 API（v2.1.0：失敗時阻擋，不直接進遊戲）
           let createOk = false;
           try {
             const result = await api('/characters/create', {
@@ -967,7 +1065,7 @@
         // 初始渲染
         renderInitStats('warrior');
         updateTpPreview('warrior');
-        // v2.0.9：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
+        // v2.1.0：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
         setTimeout(() => {
           if (typeof window.SPRITE !== 'undefined' && typeof assetUrl === 'function') {
             document.querySelectorAll('.cc-class-item').forEach(item => {
@@ -1125,6 +1223,9 @@
   function startGameCommon() {
     const overlay = $('auth-overlay');
     if (overlay) overlay.classList.add('hidden');
+    // v2.1.0：玩家真正進入遊戲時才顯示遊戲世界/HUD（避免官網前閃爍）
+    const gameRoot = document.getElementById('game-root');
+    if (gameRoot) gameRoot.classList.remove('game-hidden');
 
     // 設定遊戲的伺服器位址（同源）
     if (window.MultiplayerClient && currentServer) {
@@ -1489,6 +1590,8 @@
       // 玩家必須主動點擊開始 / 登入 / 註冊按鈕才進入下一步
       // 禁止自動跳轉到伺服器選擇或遊戲畫面
       switchView('home');
+      // v2.1.0：啟動時立即進行健康檢查，精準判定連線狀態
+      checkServerHealth();
     },
     getToken() {
       try { return localStorage.getItem(STORAGE_TOKEN_KEY) || ''; } catch (e) { return ''; }
