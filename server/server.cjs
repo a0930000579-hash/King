@@ -251,7 +251,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.1.2',
+      version: '2.1.3',
       time: Date.now(),
       socketIo: socketIoInstalled,
     });
