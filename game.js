@@ -3859,7 +3859,7 @@ function getTransformIcon(iconKey) {
 // ==================== 职业定义 ====================
 const CLASSES = {
   warrior: {
-    id: 'warrior', name: '戰士', desc: '高血量高防禦，重甲雙手武器，近戰物理', race: 'human',
+    id: 'warrior', name: '騎士', desc: '高血量高防禦，重甲雙手武器，近戰物理', race: 'human',
     sprite: SPRITE.warrior, atkType: 'melee',
     baseStats: { atk: 18, def: 12, hpMax: 260, mpMax: 80, crit: 4, critDmg: 150 },
     allSkills: [
@@ -3897,7 +3897,7 @@ const CLASSES = {
     skillPoints: 0,
   },
   archer: {
-    id: 'archer', name: '弓箭手', desc: '高敏捷高暴擊，皮甲弓箭，遠程物理', race: 'elf',
+    id: 'archer', name: '精靈', desc: '高敏捷高暴擊，皮甲弓箭，遠程物理', race: 'elf',
     sprite: SPRITE.archer, atkType: 'ranged',
     baseStats: { atk: 18, def: 5, hpMax: 180, mpMax: 100, crit: 18, critDmg: 170 },
     allSkills: [
@@ -3916,7 +3916,7 @@ const CLASSES = {
     skillPoints: 0,
   },
   rogue: {
-    id: 'rogue', name: '盜賊', desc: '高攻速高閃避，輕甲雙持匕首，近戰爆發', race: 'elf',
+    id: 'rogue', name: '黑暗妖精', desc: '高攻速高閃避，輕甲雙持匕首，近戰爆發', race: 'elf',
     sprite: SPRITE.rogue, atkType: 'melee',
     baseStats: { atk: 20, def: 4, hpMax: 160, mpMax: 90, crit: 22, critDmg: 180 },
     allSkills: [
@@ -3954,7 +3954,7 @@ const CLASSES = {
     skillPoints: 0,
   },
   warlock: {
-    id: 'warlock', name: '術士', desc: '持續傷害，暗袍魔法書，遠程暗影魔法', race: 'undead',
+    id: 'warlock', name: '幻術師', desc: '持續傷害，暗袍魔法書，遠程暗影魔法', race: 'undead',
     sprite: SPRITE.warlock, atkType: 'ranged',
     baseStats: { atk: 19, def: 4, hpMax: 170, mpMax: 150, crit: 7, critDmg: 155 },
     allSkills: [
@@ -11141,7 +11141,7 @@ const CLASS_TRANSFORM_MAP = {
 // 職業詳細資訊（繁中）
 const CLASS_DETAIL = {
   warrior: {
-    name: '戰士',
+    name: '騎士',
     desc: '以強大的體力與厚重的鎧甲站在戰場最前線，揮舞雙手巨劍，將戰鬥帶往勝利。',
     mainWeapon: '雙手劍 / 長槍',
     combatType: '近戰物理',
@@ -11155,14 +11155,14 @@ const CLASS_DETAIL = {
     trait: '治癒・護盾・不死不滅',
   },
   rogue: {
-    name: '刺客',
+    name: '黑暗妖精',
     desc: '潛伏於暗影中的暗殺者，以極快的速度與致命的暴擊，在瞬間取人性命。',
     mainWeapon: '雙刃 / 短劍',
     combatType: '近戰物理',
     trait: '高暴擊・高閃躲・速攻爆發',
   },
   archer: {
-    name: '弓手',
+    name: '精靈',
     desc: '百步穿楊的遠程射手，以精準的箭術與風一般的速度，從遠方擊潰敵人。',
     mainWeapon: '長弓 / 十字弓',
     combatType: '遠程物理',
@@ -11176,7 +11176,7 @@ const CLASS_DETAIL = {
     trait: '高魔攻・範圍傷害・法力充沛',
   },
   warlock: {
-    name: '術士',
+    name: '幻術師',
     desc: '與深淵締結契約的召喚者，統御死靈與惡魔大軍，以詛咒與召喚蠶食敵人。',
     mainWeapon: '魂珠 / 咒書',
     combatType: '遠程魔法 + 召喚',
@@ -11346,7 +11346,7 @@ function updateCC2TransformPreview() {
   const sp = SPRITE[spKey];
   if (sp && sp.useImg && spriteEl) {
     const frames = [sp.idle, sp.walk, sp.walk2, sp.walk3, sp.walk4].filter(Boolean);
-    spriteEl.innerHTML = `<img src="${sp.idle}" alt="${tf.name}" class="cc2-transform-img"/>`;
+    spriteEl.innerHTML = `<img src="${sp.idle}" alt="${tf.name}" class="cc2-transform-img" onerror="this.parentElement.innerHTML='<div class=\\"cc2-transform-fallback\\"><div class=\\"cc2-tf-name\\">' + this.alt + '</div></div>'"/>`;
     const img = spriteEl.querySelector('img');
     if (frames.length > 1) {
       let idx = 0;
@@ -11356,6 +11356,9 @@ function updateCC2TransformPreview() {
         if (img) img.src = frames[idx];
       }, 280);
     }
+  } else if (spriteEl) {
+    // v2.1.1：sprite 不存在時，用暗色漸層 + 金變名稱兜底，絕不露藍底問號
+    spriteEl.innerHTML = `<div class="cc2-transform-fallback"><div class="cc2-tf-name">${tf.name}</div></div>`;
   }
 }
 

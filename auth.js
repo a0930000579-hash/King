@@ -1,5 +1,5 @@
 /* ============================================================
-    君主之刃 v2.1.0 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
+    君主之刃 v2.1.1 · 前端帳號系統 / 官方首頁 / 登入 / 註冊 / 伺服器選擇 / GM面板
     對接後端 /api/auth/* 與 Socket.IO 多人連線
     ============================================================ */
 
@@ -14,7 +14,7 @@
   let currentView = 'home'; // home | login | register | server | char | charCreate
   let currentServer = null;
   let serverList = [];
-  // ========== 連線狀態判定（v2.1.0 改為 /api/health 精準判斷）==========
+  // ========== 連線狀態判定（v2.1.1 改為 /api/health 精準判斷）==========
   // 邏輯：fetch('/api/health') 回 HTTP 200 且 JSON.status === 'online' 才標已連線
   // 任何其他情況（404/HTML/網路錯誤/非 JSON/欄位不符）一律視為未連線
   let onlineState = 'unknown';
@@ -32,39 +32,47 @@
     }
   }
 
-  // v2.1.0：健康檢查，精準判定是否為營運伺服器
+  // v2.1.1：健康檢查，精準判定是否為營運伺服器
+  // v2.1.1：健康檢查（寬鬆判定，避免 Content-Type 差異導致誤判離線）
+  // 只要 HTTP 200 + 本體能 JSON.parse + data.status==='online' 就算連上線
+  // 加上時間戳防快取，首次失敗重試 3 次（0.5s / 1s / 1.5s）
   async function checkServerHealth() {
-    try {
-      const res = await fetch('/api/health', { cache: 'no-store', method: 'GET' });
-      // 必須是 HTTP 200
-      if (res.status !== 200) {
-        setOnlineState('offline');
-        healthChecked = true;
+    const MAX_RETRY = 3;
+    const RETRY_DELAYS = [500, 1000, 1500]; // ms
+
+    async function tryOnce() {
+      try {
+        const url = '/api/health?ts=' + Date.now();
+        const res = await fetch(url, { cache: 'no-store', method: 'GET' });
+        // 非 200 直接失敗
+        if (res.status !== 200) return false;
+        // 嘗試解析本體為 JSON（不論 Content-Type）
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { return false; }
+        if (data && data.status === 'online') return true;
+        return false;
+      } catch (e) {
         return false;
       }
-      // Content-Type 必須是 JSON（不是 HTML）
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json') && !ct.includes('json')) {
-        setOnlineState('offline');
-        healthChecked = true;
-        return false;
-      }
-      const data = await res.json();
-      // status 必須是 online
-      if (data && data.status === 'online') {
+    }
+
+    for (let i = 0; i < MAX_RETRY; i++) {
+      const ok = await tryOnce();
+      if (ok) {
         setOnlineState('online');
         healthChecked = true;
         return true;
       }
-      setOnlineState('offline');
-      healthChecked = true;
-      return false;
-    } catch (e) {
-      // fetch 失敗 → 連不到 → 離線
-      setOnlineState('offline');
-      healthChecked = true;
-      return false;
+      // 最後一次就不等了
+      if (i < MAX_RETRY - 1) {
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[i]));
+      }
     }
+    // 三次都失敗 → 離線
+    setOnlineState('offline');
+    healthChecked = true;
+    return false;
   }
 
   function isServerOnline() {
@@ -92,7 +100,7 @@
       const res = await fetch(url, opts);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        // v2.1.0：伺服器有回應但 4xx/5xx → 仍算連得上，只是業務錯誤
+        // v2.1.1：伺服器有回應但 4xx/5xx → 仍算連得上，只是業務錯誤
         if (onlineState !== 'online') setOnlineState('online');
         const err = new Error(data.error || ('HTTP ' + res.status));
         err.status = res.status;
@@ -125,7 +133,7 @@
 
   // ========== 創角頁職業資料與輔助 ==========
   const CC_CLASS_DATA = {
-    warrior: { name: '戰士', weapon: '雙手劍', type: '近戰物理', trait: '高血量・高防禦',
+    warrior: { name: '騎士', weapon: '雙手劍', type: '近戰物理', trait: '高血量・高防禦',
       desc: '以強大的鎧甲和體力站在戰場的最前線，揮舞巨劍將一切阻擋者化為廢土。',
       stats: { STR: 15, DEX: 8, INT: 5, CON: 14, LUK: 3 },
       topTransform: '真・死亡騎士',
@@ -137,13 +145,13 @@
       topTransform: '真・墮落聖執者',
       portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksavuxkohg_ve_miaoda',
       accent: '#7d6a3a' },
-    rogue: { name: '盜賊', weapon: '雙刀', type: '近戰物理', trait: '高爆擊・高閃避',
+    rogue: { name: '黑暗妖精', weapon: '雙刀', type: '近戰物理', trait: '高爆擊・高閃避',
       desc: '潛伏於暗影中的死亡信使，以迅雷不及掩耳的速度給予敵人最後一擊。',
       stats: { STR: 10, DEX: 16, INT: 4, CON: 10, LUK: 10 },
       topTransform: '真・死亡刺客',
       portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksatqzaeeo_ve_miaoda',
       accent: '#2d5a3d' },
-    archer: { name: '弓手', weapon: '長弓', type: '遠程物理', trait: '高輸出・遠程',
+    archer: { name: '精靈', weapon: '長弓', type: '遠程物理', trait: '高輸出・遠程',
       desc: '百步穿楊的亡靈射手，以白骨之弓從遠處給予敵人穩定而致命的審判。',
       stats: { STR: 7, DEX: 18, INT: 4, CON: 9, LUK: 12 },
       topTransform: '真・死亡弓箭手',
@@ -155,7 +163,7 @@
       topTransform: '真・死亡法師',
       portrait: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadksawepqahq_ve_miaoda',
       accent: '#5a2d6b' },
-    warlock: { name: '術士', weapon: '權杖', type: '遠程魔法', trait: '召喚・持續傷害',
+    warlock: { name: '幻術師', weapon: '權杖', type: '遠程魔法', trait: '召喚・持續傷害',
       desc: '與黑暗締結契約的亡靈咒術師，以惡魔召喚與死亡詛咒逐漸吞噬敵人。',
       stats: { STR: 3, DEX: 6, INT: 16, CON: 10, LUK: 15 },
       topTransform: '真・死亡術士',
@@ -201,12 +209,12 @@
       case 'charCreate': html = renderCharCreate(); break;
     }
     overlay.innerHTML = '<div class="auth-particles"></div>' + html;
-    // v2.1.0：滾動回頂（針對長頁官網）
+    // v2.1.1：滾動回頂（針對長頁官網）
     overlay.scrollTop = 0;
     bindCurrentViewEvents();
   }
 
-  // ========== 官方首頁（天堂M風長頁 / v2.1.0 動畫強化版）==========
+  // ========== 官方首頁（天堂M風長頁 / v2.1.1 動畫強化版）==========
   function renderHome() {
     const HERO_IMG = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7s6dsyii_ve_miaoda';
     const SCENE_BANNER = 'https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk-resource/static/aadkr7xjuwips_ve_miaoda';
@@ -361,7 +369,7 @@
               <div class="feature-card-img" style="background-image:url('${FEATURE_JOBS}')"></div>
               <div class="feature-card-info">
                 <div class="feature-card-title">六 大 職 業</div>
-                <div class="feature-card-desc">戰士 · 法師 · 弓箭手 · 俠客 · 聖騎士 · 盜賊</div>
+                <div class="feature-card-desc">騎士 · 法師 · 精靈 · 黑暗妖精 · 聖騎士 · 幻術師</div>
               </div>
             </div>
             <div class="feature-card-row">
@@ -584,7 +592,7 @@
     `;
   }
 
-  // ========== 角色建立（羊皮紙暗黑奇幻風 / v2.1.0 精簡版）==========
+  // ========== 角色建立（羊皮紙暗黑奇幻風 / v2.1.1 精簡版）==========
   function renderCharCreate() {
     const classList = ['warrior','paladin','rogue','archer','mage','warlock'];
     const defaultClass = CC_CLASS_DATA[classList[0]];
@@ -917,7 +925,7 @@
         document.querySelectorAll('.char-slot').forEach(slot => {
           slot.addEventListener('click', () => {
             if (slot.dataset.create === '1') {
-              // v2.1.0 修復：進入角色建立頁，不再直接跳進空世界
+              // v2.1.1 修復：進入角色建立頁，不再直接跳進空世界
               switchView('charCreate');
             } else {
               // 載入既有角色
@@ -928,7 +936,9 @@
         $('btn-char-back').addEventListener('click', () => switchView('server'));
         break;
       case 'charCreate':
-        // v2.1.0：職業選擇切換（新羊皮紙風 DOM）
+        // v2.1.1：進創角頁時主動再檢查一次連線（避免快取/競態）
+        checkServerHealth();
+        // v2.1.1：職業選擇切換（新羊皮紙風 DOM）
         document.querySelectorAll('.cc-class-tab').forEach(tab => {
           tab.addEventListener('click', () => {
             document.querySelectorAll('.cc-class-tab').forEach(t => t.classList.remove('active'));
@@ -1002,7 +1012,7 @@
               nameStatus.className = 'cc-name-status error';
             }
           } catch (e) {
-            // v2.1.0：後端不可用時顯示錯誤，不允許創建（避免重名漏洞）
+            // v2.1.1：後端不可用時顯示錯誤，不允許創建（避免重名漏洞）
             nameChecked = false;
             nameStatus.textContent = '✗ 未連線伺服器（靜態站模式）。需以 Web Service 部署（npm start）才能創建角色';
             nameStatus.className = 'cc-name-status error';
@@ -1036,7 +1046,7 @@
             localStorage.setItem('mmo_characters', JSON.stringify(chars));
             localStorage.setItem('mmo_new_char', JSON.stringify(newChar));
           } catch (e) {}
-          // 呼叫後端創建 API（v2.1.0：失敗時阻擋，不直接進遊戲）
+          // 呼叫後端創建 API（v2.1.1：失敗時阻擋，不直接進遊戲）
           let createOk = false;
           try {
             const result = await api('/characters/create', {
@@ -1065,7 +1075,7 @@
         // 初始渲染
         renderInitStats('warrior');
         updateTpPreview('warrior');
-        // v2.1.0：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
+        // v2.1.1：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
         setTimeout(() => {
           if (typeof window.SPRITE !== 'undefined' && typeof assetUrl === 'function') {
             document.querySelectorAll('.cc-class-item').forEach(item => {
@@ -1223,7 +1233,7 @@
   function startGameCommon() {
     const overlay = $('auth-overlay');
     if (overlay) overlay.classList.add('hidden');
-    // v2.1.0：玩家真正進入遊戲時才顯示遊戲世界/HUD（避免官網前閃爍）
+    // v2.1.1：玩家真正進入遊戲時才顯示遊戲世界/HUD（避免官網前閃爍）
     const gameRoot = document.getElementById('game-root');
     if (gameRoot) gameRoot.classList.remove('game-hidden');
 
@@ -1590,7 +1600,7 @@
       // 玩家必須主動點擊開始 / 登入 / 註冊按鈕才進入下一步
       // 禁止自動跳轉到伺服器選擇或遊戲畫面
       switchView('home');
-      // v2.1.0：啟動時立即進行健康檢查，精準判定連線狀態
+      // v2.1.1：啟動時立即進行健康檢查，精準判定連線狀態
       checkServerHealth();
     },
     getToken() {
