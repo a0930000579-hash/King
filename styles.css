@@ -110,7 +110,7 @@ img { display: block; pointer-events: none; }
   overflow: hidden;
 }
 
-/* v2.1.0：頁面載入時遊戲世界預設隱藏，避免官網前閃出遊戲 HUD/畫面
+/* v2.4.0：頁面載入時遊戲世界預設隱藏，避免官網前閃出遊戲 HUD/畫面
    玩家真正登入進世界後才由 JS 移除 .game-hidden 顯示遊戲 */
 #game-root.game-hidden .top-bar,
 #game-root.game-hidden .skill-bar,
@@ -1882,15 +1882,15 @@ img { display: block; pointer-events: none; }
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 140px;
-  height: 140px;
+  width: 70px;
+  height: 70px;
   margin-left: 0;
   transform: translate(-50%, -50%);
   border-radius: 50%;
   pointer-events: none;
   z-index: 0;
   animation: aura-glow-pulse 2.2s ease-in-out infinite alternate;
-  filter: blur(10px);
+  filter: blur(8px);
 }
 @keyframes aura-glow-pulse {
   0%   { opacity: 0.45; transform: translate(-50%, -50%) scale(0.92); }
@@ -1900,10 +1900,11 @@ img { display: block; pointer-events: none; }
 /* ===== 冒烟效果（从角色脚下/周围上升） ===== */
 .transform-aura .aura-smoke {
   position: absolute;
-  left: 0;
-  bottom: 5%;
-  width: 100%;
-  height: 85%;
+  left: 50%;
+  bottom: 8%;
+  width: 50px;
+  height: 70%;
+  margin-left: -25px;
   pointer-events: none;
   overflow: visible;
   z-index: 0;
@@ -1912,38 +1913,38 @@ img { display: block; pointer-events: none; }
   position: absolute;
   bottom: 0;
   left: 50%;
-  width: 28px;
-  height: 28px;
-  margin-left: -14px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
   border-radius: 50%;
   pointer-events: none;
   animation: smoke-rise 2.6s ease-out infinite;
-  filter: blur(6px);
+  filter: blur(4px);
 }
-/* 8个烟雾粒子，随机位置/延迟/大小 */
-.aura-smoke span:nth-child(1) { left: 35%; animation-delay: 0s;    width: 22px; height: 22px; animation-duration: 2.4s; }
-.aura-smoke span:nth-child(2) { left: 55%; animation-delay: 0.35s; width: 30px; height: 30px; animation-duration: 2.8s; }
-.aura-smoke span:nth-child(3) { left: 25%; animation-delay: 0.7s;  width: 20px; height: 20px; animation-duration: 2.2s; }
-.aura-smoke span:nth-child(4) { left: 65%; animation-delay: 1.0s;  width: 26px; height: 26px; animation-duration: 3.0s; }
-.aura-smoke span:nth-child(5) { left: 45%; animation-delay: 1.3s;  width: 24px; height: 24px; animation-duration: 2.6s; }
-.aura-smoke span:nth-child(6) { left: 30%; animation-delay: 1.65s; width: 32px; height: 32px; animation-duration: 2.9s; }
-.aura-smoke span:nth-child(7) { left: 60%; animation-delay: 1.95s; width: 18px; height: 18px; animation-duration: 2.3s; }
-.aura-smoke span:nth-child(8) { left: 50%; animation-delay: 2.2s;  width: 28px; height: 28px; animation-duration: 2.7s; }
+/* 6个烟雾粒子，随机位置/延迟/大小（v2.4.0 縮減，不遮角色） */
+.aura-smoke span:nth-child(1) { left: 30%; animation-delay: 0s;    width: 11px; height: 11px; animation-duration: 2.4s; }
+.aura-smoke span:nth-child(2) { left: 60%; animation-delay: 0.4s;  width: 14px; height: 14px; animation-duration: 2.8s; }
+.aura-smoke span:nth-child(3) { left: 45%; animation-delay: 0.8s;  width: 10px; height: 10px; animation-duration: 2.2s; }
+.aura-smoke span:nth-child(4) { left: 70%; animation-delay: 1.2s;  width: 13px; height: 13px; animation-duration: 3.0s; }
+.aura-smoke span:nth-child(5) { left: 55%; animation-delay: 1.6s;  width: 12px; height: 12px; animation-duration: 2.6s; }
+.aura-smoke span:nth-child(6) { left: 35%; animation-delay: 2.0s;  width: 15px; height: 15px; animation-duration: 2.7s; }
+.aura-smoke span:nth-child(7),
+.aura-smoke span:nth-child(8) { display: none; }
 @keyframes smoke-rise {
   0%   { opacity: 0;   transform: translateY(0)    scale(0.6); }
-  15%  { opacity: 0.9; }
-  60%  { opacity: 0.5; }
-  100% { opacity: 0;   transform: translateY(-120px) scale(1.6); }
+  15%  { opacity: 0.8; }
+  60%  { opacity: 0.4; }
+  100% { opacity: 0;   transform: translateY(-60px) scale(1.4); }
 }
 
-/* ===== 闪电效果：SVG不規則鋸齒狀，從天而降 ===== */
+/* ===== 闪电效果：鋸齒狀，從天而降（v2.4.0 縮小到不遮角色） ===== */
 .transform-aura .aura-lightning {
   position: absolute;
   left: 50%;
-  top: -20%;
-  width: 80px;
-  height: 130%;
-  margin-left: -40px;
+  top: 0;
+  width: 40px;
+  height: 100%;
+  margin-left: -20px;
   pointer-events: none;
   z-index: 2;
   overflow: visible;
@@ -1952,17 +1953,17 @@ img { display: block; pointer-events: none; }
   position: absolute;
   top: 0;
   left: 50%;
-  width: 28px;
+  width: 14px;
   height: 100%;
-  margin-left: -14px;
+  margin-left: -7px;
   fill: currentColor;
   opacity: 0;
-  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
+  filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor);
 }
-.aura-lightning .bolt-1 { left: 30%; animation: bolt-strike 2.6s ease-in-out infinite; }
-.aura-lightning .bolt-2 { left: 65%; animation: bolt-strike 2.2s ease-in-out infinite 0.7s; }
+.aura-lightning .bolt-1 { left: 25%; animation: bolt-strike 2.6s ease-in-out infinite; }
+.aura-lightning .bolt-2 { left: 70%; animation: bolt-strike 2.2s ease-in-out infinite 0.7s; }
 .aura-lightning .bolt-3 { left: 45%; animation: bolt-strike 2.8s ease-in-out infinite 1.3s; }
-.aura-lightning .bolt-4 { left: 55%; animation: bolt-strike 2.4s ease-in-out infinite 1.9s; }
+.aura-lightning .bolt-4 { display: none; }
 @keyframes bolt-strike {
   0%, 92%, 100% { opacity: 0; transform: scaleY(0.3) translateY(-10px); }
   93%           { opacity: 1; transform: scaleY(1) translateY(0); }
@@ -1973,60 +1974,59 @@ img { display: block; pointer-events: none; }
 
 /* ===== 紫变：紫色发光 + 紫烟雾 + 紫闪电 ===== */
 .world-unit.hero.transform-rarity-purple .transform-aura .aura-glow-outer {
-  background: radial-gradient(circle, rgba(180,80,255,0.55) 0%, rgba(140,40,220,0.25) 55%, transparent 75%);
-  box-shadow: 0 0 35px rgba(180,80,255,0.7);
+  background: radial-gradient(circle, rgba(160,70,240,0.5) 0%, rgba(120,30,200,0.2) 55%, transparent 75%);
+  box-shadow: 0 0 20px rgba(160,70,240,0.6);
 }
 .world-unit.hero.transform-rarity-purple .aura-smoke span {
-  background: radial-gradient(circle, rgba(220,160,255,0.85), rgba(160,60,220,0.55) 50%, transparent 100%);
+  background: radial-gradient(circle, rgba(210,150,255,0.8), rgba(140,50,210,0.5) 50%, transparent 100%);
 }
 .world-unit.hero.transform-rarity-purple .aura-lightning .bolt {
-  color: #c460ff;
+  color: #c060ff;
 }
 .world-unit.hero.transform-rarity-purple .unit-sprite-img {
-  filter: drop-shadow(0 0 8px rgba(200,100,255,0.9)) drop-shadow(0 0 16px rgba(160,50,220,0.65)) drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.08) !important;
+  filter: drop-shadow(0 0 6px rgba(190,90,255,0.85)) drop-shadow(0 0 12px rgba(150,40,210,0.6)) drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.06) !important;
 }
 
-/* ===== 金变：金色发光 + 金烟雾 + 金闪电 ===== */
+/* ===== 金变：金色发光 + 金烟雾 + 金闪电（v2.4.0 縮小到不遮角色）===== */
 .world-unit.hero.transform-rarity-gold .transform-aura .aura-glow-outer {
-  width: 170px;
-  height: 170px;
+  width: 85px;
+  height: 85px;
   left: 50%;
   top: 50%;
   margin-left: 0;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(255,220,80,0.65) 0%, rgba(255,170,20,0.3) 55%, transparent 75%);
-  box-shadow: 0 0 50px rgba(255,200,50,0.9), 0 0 80px rgba(255,180,30,0.5);
+  background: radial-gradient(circle, rgba(255,215,70,0.6) 0%, rgba(255,160,15,0.25) 55%, transparent 75%);
+  box-shadow: 0 0 25px rgba(255,190,40,0.8), 0 0 40px rgba(255,160,20,0.4);
   animation-duration: 1.8s;
 }
 .world-unit.hero.transform-rarity-gold .aura-smoke span {
-  background: radial-gradient(circle, rgba(255,240,160,0.95), rgba(255,190,40,0.6) 50%, transparent 100%);
+  background: radial-gradient(circle, rgba(255,235,150,0.9), rgba(255,180,30,0.55) 50%, transparent 100%);
   animation-duration: 2.1s;
 }
 .world-unit.hero.transform-rarity-gold .aura-lightning {
-  width: 100px;
-  margin-left: -50px;
+  width: 50px;
+  margin-left: -25px;
 }
 .world-unit.hero.transform-rarity-gold .aura-lightning .bolt {
-  color: #ffe060;
-  filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 18px currentColor) drop-shadow(0 0 30px rgba(255,180,20,0.6));
-  width: 36px;
-  margin-left: -18px;
+  color: #ffd850;
+  filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor);
+  width: 18px;
+  margin-left: -9px;
 }
 .world-unit.hero.transform-rarity-gold .aura-lightning .bolt-1 { animation-duration: 1.8s; }
 .world-unit.hero.transform-rarity-gold .aura-lightning .bolt-2 { animation-duration: 1.6s; }
 .world-unit.hero.transform-rarity-gold .aura-lightning .bolt-3 { animation-duration: 2.0s; }
-.world-unit.hero.transform-rarity-gold .aura-lightning .bolt-4 { animation-duration: 1.7s; }
 .world-unit.hero.transform-rarity-gold .unit-sprite-img {
-  filter: drop-shadow(0 0 10px rgba(255,210,60,1)) drop-shadow(0 0 24px rgba(255,170,20,0.75)) drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.12) !important;
+  filter: drop-shadow(0 0 7px rgba(255,200,50,1)) drop-shadow(0 0 16px rgba(255,160,20,0.7)) drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.1) !important;
 }
 
-/* ===== 真系列金變：最強特效（金色冒煙+閃電+周身強光+底部魔法陣） ===== */
+/* ===== 真系列金變：最強特效（v2.4.0 縮小到不遮角色）===== */
 .world-unit.hero.transform-true-gold .transform-aura.aura-true-gold .aura-glow-outer {
-  width: 220px;
-  height: 220px;
-  background: radial-gradient(circle, rgba(255,240,140,0.85) 0%, rgba(255,200,50,0.5) 40%, rgba(255,140,0,0.25) 65%, transparent 80%);
-  box-shadow: 0 0 70px rgba(255,210,60,1), 0 0 120px rgba(255,180,30,0.7), 0 0 180px rgba(255,140,0,0.4);
-  animation: true-gold-glow-pulse 1.2s ease-in-out infinite;
+  width: 110px;
+  height: 110px;
+  background: radial-gradient(circle, rgba(255,240,140,0.75) 0%, rgba(255,190,40,0.45) 40%, rgba(255,130,0,0.2) 65%, transparent 80%);
+  box-shadow: 0 0 35px rgba(255,200,40,0.9), 0 0 60px rgba(255,160,20,0.6), 0 0 90px rgba(255,120,0,0.3);
+  animation: true-gold-glow-pulse 1.5s ease-in-out infinite;
 }
 @keyframes true-gold-glow-pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
@@ -2037,48 +2037,48 @@ img { display: block; pointer-events: none; }
   animation-duration: 1.6s;
   filter: drop-shadow(0 0 6px rgba(255,200,40,0.9));
 }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(1) { width: 28px; height: 28px; animation-duration: 1.8s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(2) { width: 38px; height: 38px; animation-duration: 2.0s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(3) { width: 24px; height: 24px; animation-duration: 1.6s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(4) { width: 32px; height: 32px; animation-duration: 2.2s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(5) { width: 30px; height: 30px; animation-duration: 1.9s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(6) { width: 40px; height: 40px; animation-duration: 2.1s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(7) { width: 22px; height: 22px; animation-duration: 1.7s; }
-.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(8) { width: 36px; height: 36px; animation-duration: 2.3s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(1) { width: 14px; height: 14px; animation-duration: 1.8s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(2) { width: 18px; height: 18px; animation-duration: 2.0s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(3) { width: 12px; height: 12px; animation-duration: 1.6s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(4) { width: 16px; height: 16px; animation-duration: 2.2s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(5) { width: 15px; height: 15px; animation-duration: 1.9s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(6) { width: 20px; height: 20px; animation-duration: 2.1s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(7) { width: 11px; height: 11px; animation-duration: 1.7s; }
+.world-unit.hero.transform-true-gold .aura-smoke span:nth-child(8) { display: none; }
 .world-unit.hero.transform-true-gold .aura-lightning {
-  width: 130px;
-  margin-left: -65px;
+  width: 65px;
+  margin-left: -32px;
   height: 100%;
-  top: -10%;
+  top: 0;
 }
 .world-unit.hero.transform-true-gold .aura-lightning .bolt {
   color: #fff5a0;
-  filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 20px #ffd040) drop-shadow(0 0 40px rgba(255,180,20,0.8));
-  width: 44px;
-  margin-left: -22px;
+  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px #ffd040) drop-shadow(0 0 20px rgba(255,180,20,0.6));
+  width: 22px;
+  margin-left: -11px;
 }
-.world-unit.hero.transform-true-gold .aura-lightning .bolt-1 { animation-duration: 1.1s; left: 20%; }
-.world-unit.hero.transform-true-gold .aura-lightning .bolt-2 { animation-duration: 0.9s; left: 75%; }
-.world-unit.hero.transform-true-gold .aura-lightning .bolt-3 { animation-duration: 1.3s; left: 40%; }
-.world-unit.hero.transform-true-gold .aura-lightning .bolt-4 { animation-duration: 1.0s; left: 60%; }
+.world-unit.hero.transform-true-gold .aura-lightning .bolt-1 { animation-duration: 1.3s; left: 20%; }
+.world-unit.hero.transform-true-gold .aura-lightning .bolt-2 { animation-duration: 1.1s; left: 75%; }
+.world-unit.hero.transform-true-gold .aura-lightning .bolt-3 { animation-duration: 1.5s; left: 45%; }
+.world-unit.hero.transform-true-gold .aura-lightning .bolt-4 { display: none; }
 .world-unit.hero.transform-true-gold .unit-sprite-img {
-  filter: drop-shadow(0 0 14px rgba(255,230,100,1)) drop-shadow(0 0 30px rgba(255,190,40,0.9)) drop-shadow(0 0 60px rgba(255,150,20,0.6)) drop-shadow(0 2px 4px rgba(0,0,0,0.85)) brightness(1.18) !important;
+  filter: drop-shadow(0 0 9px rgba(255,225,90,1)) drop-shadow(0 0 18px rgba(255,180,30,0.85)) drop-shadow(0 0 35px rgba(255,140,20,0.55)) drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.14) !important;
   animation: true-gold-sprite-shimmer 2.4s ease-in-out infinite;
 }
 @keyframes true-gold-sprite-shimmer {
-  0%, 100% { filter: drop-shadow(0 0 14px rgba(255,230,100,1)) drop-shadow(0 0 30px rgba(255,190,40,0.9)) drop-shadow(0 0 60px rgba(255,150,20,0.6)) drop-shadow(0 2px 4px rgba(0,0,0,0.85)) brightness(1.18); }
-  50%      { filter: drop-shadow(0 0 20px rgba(255,245,150,1)) drop-shadow(0 0 45px rgba(255,210,60,1))   drop-shadow(0 0 90px rgba(255,170,30,0.8)) drop-shadow(0 2px 4px rgba(0,0,0,0.85)) brightness(1.25); }
+  0%, 100% { filter: drop-shadow(0 0 9px rgba(255,225,90,1)) drop-shadow(0 0 18px rgba(255,180,30,0.85)) drop-shadow(0 0 35px rgba(255,140,20,0.55)) drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.14); }
+  50%      { filter: drop-shadow(0 0 13px rgba(255,240,130,1)) drop-shadow(0 0 26px rgba(255,200,50,1))   drop-shadow(0 0 50px rgba(255,160,30,0.7))  drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.2); }
 }
-/* 真系列底部光暈（不旋轉，柔和呼吸感） */
+/* 真系列底部光暈（v2.4.0 縮小，置中於腳下） */
 .world-unit.hero.transform-true-gold .transform-aura.aura-true-gold::after {
   content: '';
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 90px;
-  height: 36px;
-  background: radial-gradient(ellipse at center, rgba(255,200,40,0.55) 0%, rgba(255,160,20,0.25) 40%, transparent 70%);
+  width: 50px;
+  height: 20px;
+  background: radial-gradient(ellipse at center, rgba(255,190,40,0.5) 0%, rgba(255,150,20,0.22) 40%, transparent 70%);
   border-radius: 50%;
   filter: blur(1px);
   animation: true-gold-floor-glow 2.4s ease-in-out infinite;
@@ -2086,8 +2086,8 @@ img { display: block; pointer-events: none; }
   z-index: -1;
 }
 @keyframes true-gold-floor-glow {
-  0%, 100% { transform: translateX(-50%) scaleX(1.6) scaleY(0.55); opacity: 0.8; }
-  50%      { transform: translateX(-50%) scaleX(1.75) scaleY(0.65); opacity: 1; }
+  0%, 100% { transform: translateX(-50%) scaleX(1.4) scaleY(0.6); opacity: 0.7; }
+  50%      { transform: translateX(-50%) scaleX(1.55) scaleY(0.7); opacity: 0.9; }
 }
 /* 真系列場景金光更強 */
 .scene.gold-mythic-flash.true-gold-scene {
@@ -2325,7 +2325,7 @@ img { display: block; pointer-events: none; }
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
 }
 .skill-btn .skill-icon svg { width: 100%; height: 100%; }
-/* ===== v2.0.4 技能圖示雙層結構（漸層底 + 圖 + 文字fallback） ===== */
+/* ===== v2.4.0 技能圖示雙層結構（漸層底 + 圖 + 文字fallback） ===== */
 .skill-icon-tiered {
   position: relative;
   overflow: hidden;
@@ -2366,7 +2366,7 @@ img { display: block; pointer-events: none; }
 .skill-icon-tiered .skill-icon-img[style*="hidden"] {
   display: none;
 }
-/* v2.1.0：空槽位時隱藏 label 文字（避免顯示「技3/技4/??」），單純漸層底 */
+/* v2.4.0：空槽位時隱藏 label 文字（避免顯示「技3/技4/??」），單純漸層底 */
 .skill-btn.empty .skill-icon-tiered::after {
   content: '';
 }
@@ -3389,7 +3389,7 @@ img { display: block; pointer-events: none; }
 }
 .quest-icon { font-size: 13px; display: flex; align-items: center; justify-content: center; }
 .quest-icon-img { width: 18px; height: 18px; object-fit: contain; display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
-/* v2.0.4 任務文字icon */
+/* v2.4.0 任務文字icon */
 .quest-icon-text {
   width: 22px;
   height: 22px;
@@ -3419,7 +3419,7 @@ img { display: block; pointer-events: none; }
 }
 .kill-icon { font-size: 13px; display: flex; align-items: center; justify-content: center; }
 .kill-icon-img { width: 14px; height: 14px; object-fit: contain; display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
-/* v2.0.4 擊殺文字icon */
+/* v2.4.0 擊殺文字icon */
 .kill-icon-text {
   width: 18px;
   height: 18px;
@@ -3680,7 +3680,7 @@ img { display: block; pointer-events: none; }
 .nav-btn.active .nav-icon { color: var(--gold-bright); filter: drop-shadow(0 0 4px rgba(240,192,64,0.5)); }
 .nav-icon { width: 42px; height: 42px; border-radius: 50%; overflow: hidden; border: 2px solid var(--gold-dark); background-color: #0a0604; display:flex;align-items:center;justify-content:center; box-shadow: 0 2px 6px rgba(0,0,0,0.6), inset 0 0 4px rgba(255,200,80,0.15); transition: all 0.2s; flex-shrink: 0; }
 .nav-icon img { width:140%;height:140%;object-fit:cover;display:block; border-radius: 50%; background-color: #0a0604; transform: scale(1.4); filter: brightness(0.95); }
-/* ===== v2.0.4 底部導航文字icon ===== */
+/* ===== v2.4.0 底部導航文字icon ===== */
 .nav-icon-text {
   background: radial-gradient(circle at 50% 35%, #2a1d0e 0%, #120b05 70%, #0a0603 100%);
   position: relative;
@@ -6677,7 +6677,7 @@ img { display: block; pointer-events: none; }
   padding-left: 20px;
 }
 .side-menu-item .menu-icon { font-size: 20px; width: 28px; text-align: center; }
-/* ===== v2.0.4 側邊選單文字icon ===== */
+/* ===== v2.4.0 側邊選單文字icon ===== */
 .menu-icon.menu-icon-text {
   width: 36px;
   height: 36px;
@@ -11636,19 +11636,22 @@ img { display: block; pointer-events: none; }
   100% { filter: brightness(1) drop-shadow(0 0 0 transparent); }
 }
 
-/* ===== 變身魔法陣放大2倍並強化 ===== */
+/* ===== 變身魔法陣（v2.4.0 縮小到不遮角色，置中於腳下）===== */
 .world-unit.hero.transform-rarity-gold .transform-aura .effect-magic-circle,
 .world-unit.hero.transform-rarity-purple .transform-aura .effect-magic-circle {
-  width: 160% !important; /* 放大2倍（原80%） */
-  bottom: -10%;
-  opacity: 0.85 !important; /* 發光強度增加50% */
-  animation: magic-circle-rot-spin 1.8s linear infinite, magic-circle-breath-fast 1.5s ease-in-out infinite alternate !important;
+  width: 80% !important;
+  bottom: -5%;
+  left: 50% !important;
+  margin-left: 0 !important;
+  transform: translateX(-50%) !important;
+  opacity: 0.6 !important;
+  animation: magic-circle-rot-spin 2.5s linear infinite, magic-circle-breath-fast 2s ease-in-out infinite alternate !important;
 }
 .world-unit.hero.transform-rarity-gold .transform-aura .effect-magic-circle {
-  filter: brightness(1.5) drop-shadow(0 0 12px rgba(255, 220, 60, 0.95)) drop-shadow(0 0 24px rgba(255, 180, 40, 0.5)) !important;
+  filter: brightness(1.3) drop-shadow(0 0 8px rgba(255, 200, 50, 0.8)) drop-shadow(0 0 16px rgba(255, 160, 20, 0.4)) !important;
 }
 .world-unit.hero.transform-rarity-purple .transform-aura .effect-magic-circle {
-  filter: hue-rotate(260deg) saturate(2.5) brightness(1.3) drop-shadow(0 0 12px rgba(200, 100, 255, 0.95)) drop-shadow(0 0 24px rgba(150, 60, 220, 0.5)) !important;
+  filter: hue-rotate(260deg) saturate(2) brightness(1.2) drop-shadow(0 0 8px rgba(180, 80, 240, 0.8)) drop-shadow(0 0 16px rgba(140, 40, 200, 0.4)) !important;
 }
 @keyframes magic-circle-rot-spin {
   from { transform: translateX(-50%) rotate(0deg); }
@@ -11918,7 +11921,7 @@ img { display: block; pointer-events: none; }
   object-fit: contain;
   filter: drop-shadow(0 6px 20px rgba(0,0,0,0.8)) drop-shadow(0 0 10px rgba(232,192,96,0.2));
 }
-/* v2.1.2：立繪兜底，圖片失敗時也不會出現破圖 */
+/* v2.4.0：立繪兜底，圖片失敗時也不會出現破圖 */
 .cc2-portrait-fallback {
   position: absolute;
   inset: 0;
@@ -12213,7 +12216,7 @@ img { display: block; pointer-events: none; }
   box-shadow: none;
 }
 
-/* ===== v2.1.1 金變預覽兜底：暗色漸層 + 金變名稱，絕不露藍底問號 ===== */
+/* ===== v2.4.0 金變預覽兜底：暗色漸層 + 金變名稱，絕不露藍底問號 ===== */
 .cc2-transform-fallback {
   width: 100%;
   height: 100%;
@@ -12246,7 +12249,7 @@ img { display: block; pointer-events: none; }
 }
 
 /* ============================================================
-   v2.2.1：四方向 Sprite 動畫系統
+   v2.4.0：四方向 Sprite 動畫系統
    單位有方向圖時，.unit-sprite-wrap 加上 .sprite-dir-mode
    方向由 .dir-down / .dir-up / .dir-left / .dir-right 控制
    攻擊時額外顯示 .dir-attack-* 並播放攻擊動畫
@@ -12265,7 +12268,7 @@ img { display: block; pointer-events: none; }
   object-fit: contain;
   object-position: center bottom;
   opacity: 0;
-  /* v2.3.5-patch: 移除 transition，避免方向切換時疊加殘影 */
+  /* v2.4.0-patch: 移除 transition，避免方向切換時疊加殘影 */
 }
 
 /* 方向顯示控制 */

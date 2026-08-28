@@ -11,7 +11,7 @@ try { USE_LOCAL_ASSETS = localStorage.getItem('useLocal') === '1'; } catch(e) {}
 //   1. file:// 離線開啟 → 一定走本地（因為 CDN 可能被 CORS 擋 / 離線無網路）
 //   2. http(s) 網域 → 預設優先 CDN（避免本地 404 閃爍）；若玩家手動開啟離線模式則走本地
 //   3. 本地 assets/ 是否存在會在啟動時用一張探針圖偵測，結果緩存在 _LOCAL_ASSETS_AVAILABLE
-const CDN_BASE = ''; // v2.2.2：停用 CDN，完全本地資產
+const CDN_BASE = ''; // v2.4.0：停用 CDN，完全本地資產
 
 function _isFileProtocol() {
   return location.protocol === 'file:';
@@ -42,7 +42,7 @@ function detectLocalAssets() {
 }
 
 // 是否「應該優先走 CDN」
-// v2.0.9：預設一律本地分類目錄優先，CDN 僅作最後 fallback
+// v2.4.0：預設一律本地分類目錄優先，CDN 僅作最後 fallback
 // 規範順序：assets/<分類>/<id>.png → assets/<id>.png → CDN
 // 例外：USE_CDN_FIRST 全域設為 true 時才反轉
 function _preferCdn() {
@@ -50,9 +50,9 @@ function _preferCdn() {
   return false;
 }
 
-// v2.0.3：圖片 ID → 分類目錄對照表
+// v2.4.0：圖片 ID → 分類目錄對照表
 // 對應 assets/<slug>/<id>.png 路徑，與後端分類資料夾結構一致
-// v2.0.3：CDN 圖片 ID → 分類目錄對照表（1086 張唯一圖檔）
+// v2.4.0：CDN 圖片 ID → 分類目錄對照表（1086 張唯一圖檔）
 // 對應 assets/<slug>/<id>.png 路徑，assetUrl() 優先走分類目錄
 // fallback：分類目錄不存在 → 扁平 assets/<id>.png → CDN
 const SPRITE_CATEGORY_MAP = {
@@ -241,7 +241,7 @@ const SPRITE_CATEGORY_MAP = {
   'xw3G6UpfC7': '14_mount', 'yg2cOCZTyG': '14_mount', 'ywIBCICmss': '14_mount', 'zAHEBQikh7': '14_mount', 'zW8cznuehh': '14_mount',
   'aadkrg2chcolq_ve_miaoda': '15_effect', 'aadkrg42s6ggo_ve_miaoda': '15_effect', 'aadkrg5b5ssco_ve_miaoda': '15_effect', 'aadkrgnianeeg_ve_miaoda': '15_effect', 'aadkrgx6ejygg_ve_miaoda': '15_effect', 'aadkrgxgcxmcg_ve_miaoda': '15_effect',
   'aadkrgyn27sli_ve_miaoda': '15_effect', 'aadkrgyrnfyci_ve_miaoda': '15_effect', 'aadkrgyumjgag_ve_miaoda': '15_effect', 'aadkrgzhmdgdg_ve_miaoda': '15_effect',
-  // v2.0.4 補齊：技能欄 / 底部導航 / 側邊選單 / 任務擊殺 等 /spark/ 靜資
+  // v2.4.0 補齊：技能欄 / 底部導航 / 側邊選單 / 任務擊殺 等 /spark/ 靜資
   'aadkrg7agpycu_ve_miaoda': '07_skill', 'aadkrg5vdv4kw_ve_miaoda': '07_skill', 'aadkrhadazias_ve_miaoda': '07_skill',
   'aadkrg5gyhsms_ve_miaoda': '07_skill', 'aadkrg5gyhsns_ve_miaoda': '07_skill', 'aadkrhbk652cs_ve_miaoda': '07_skill',
   'aadkrhbuwxsas_ve_miaoda': '11_ui', 'aadkrettaiwci_ve_miaoda': '11_ui', 'aadkreo4cpwaq_ve_miaoda': '11_ui',
@@ -249,7 +249,7 @@ const SPRITE_CATEGORY_MAP = {
   'aadkrhellu6fs_ve_miaoda': '11_ui', 'aadkrhhp4kwps_ve_miaoda': '11_ui', 'aadkrhajdtwmu_ve_miaoda': '11_ui',
   'aadkrhhpqp6au_ve_miaoda': '11_ui', 'aadkrhihjjamu_ve_miaoda': '11_ui', 'aadkrhbjjeudw_ve_miaoda': '11_ui',
   'aadkrhdxc3opw_ve_miaoda': '11_ui', 'aadkrhihcnigw_ve_miaoda': '11_ui', 'aadkrxeb2kaes_ve_miaoda': '11_ui',
-  'KAfhPeuFaN': '06_npc', // v2.2.2 守衛 NPC
+  'KAfhPeuFaN': '06_npc', // v2.4.0 守衛 NPC
 };
 
 // 取得圖片 ID 對應的分類 slug；找不到回傳 null
@@ -259,7 +259,7 @@ function getSpriteCategory(id) {
   return SPRITE_CATEGORY_MAP[pure] || null;
 }
 
-// v2.0.9：資源 manifest（{圖id: "相對於assets的子路徑"}）
+// v2.4.0：資源 manifest（{圖id: "相對於assets的子路徑"}）
 // 啟動時 fetch 一次 /assets/assets-manifest.json，缺失時 fallback 到分類目錄邏輯
 // v2.4.0-patch：新增 ASSETS_REV_INDEX（basename → value path）
 //   因為 assetUrl 常收到單純 hash id（如 '0yfRk9msfe'），但 manifest key 是 'boss/0yfRk9msfe'
@@ -346,11 +346,11 @@ function assetUrl(id) {
   // 去除副檔名（png/jpg/jpeg/webp/gif）
   const pureId = id.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
   // 根據環境決定優先路徑
-  // v2.0.3：本地優先 → 分類目錄 assets/<slug>/<id>.png；CDN 優先 → 直接 CDN
+  // v2.4.0：本地優先 → 分類目錄 assets/<slug>/<id>.png；CDN 優先 → 直接 CDN
   if (_preferCdn()) {
     return CDN_BASE + pureId;
   }
-  // v2.2.0：manifest 優先級最高（若已載入且有此 id）
+  // v2.4.0：manifest 優先級最高（若已載入且有此 id）
   if (ASSETS_MANIFEST_LOADED && ASSETS_MANIFEST && ASSETS_MANIFEST[pureId]) {
     const mpath = ASSETS_MANIFEST[pureId];
     // CDN URL 直接回傳（/spark/ 平台靜資或 http 開頭）
@@ -419,7 +419,7 @@ function _extractCdnId(src) {
 // 圖片載入失敗備援：
 //   本地 assets/ 失敗 → 切換到 CDN
 //   CDN 失敗 → 隱藏圖片並為父層加上背景占位（避免顯示破裂圖示）
-// 圖片載入失敗備援（v2.0.3 三層 fallback）：
+// 圖片載入失敗備援（v2.4.0 三層 fallback）：
 //   1. assets/<分類>/<id>.png 失敗 → 嘗試 assets/<id>.png（舊扁平結構）
 //   2. 扁平結構也失敗 → 切換到 CDN
 //   3. CDN 失敗 → 隱藏圖片並為父層加上背景占位
@@ -427,7 +427,7 @@ function handleImgError(img) {
   if (!img || img.dataset.errFallback === 'fail') return;
   const src = img.src || '';
 
-  // ===== v2.1.3：精靈 frame 圖片失敗 → 直接替換成 idle frame，絕不閃爍/透明 =====
+  // ===== v2.4.0：精靈 frame 圖片失敗 → 直接替換成 idle frame，絕不閃爍/透明 =====
   if (img.classList && img.classList.contains('unit-sprite-img')) {
     // 已經處理過就跳過
     if (img.dataset.errFallback === 'sprite_fixed') return;
@@ -4214,7 +4214,7 @@ const SKILL_SVG_MAP = {};
 
 // 暗黑天堂W 風格技能圖標圖片（替代SVG/emoji）
 // 全部統一用 CDN ID 形式，assetUrl / _extractCdnId 都能正確 fallback
-// v2.2.2：技能圖標改用本地獨立 icon（skill/icon_*.jpg）
+// v2.4.0：技能圖標改用本地獨立 icon（skill/icon_*.jpg）
 const SKILL_IMG_MAP = {
   slash:       'skill/icon_fireball.jpg',
   fire:        'skill/icon_fireball.jpg',
@@ -6544,7 +6544,7 @@ function init() {
     _initCore();
   } catch (e) {
     console.error('[Init] 嚴重錯誤：init 中途崩潰，仍嘗試啟動遊戲主循環以避免黑屏', e);
-    // 顯示錯誤提示給玩家（v2.0.9：不再靜默黑屏）
+    // 顯示錯誤提示給玩家（v2.4.0：不再靜默黑屏）
     showInitError(e);
     // 嘗試恢復：若 loadMap / createPlayerSprite 沒跑完，補上最小可運行狀態
     try {
@@ -6564,7 +6564,7 @@ function init() {
   requestAnimationFrame(gameLoop);
 }
 
-// v2.0.9：manifest 載入後刷新所有 sprite 圖片路徑（玩家、怪物、NPC）
+// v2.4.0：manifest 載入後刷新所有 sprite 圖片路徑（玩家、怪物、NPC）
 function refreshAllSprites() {
   try {
     const unit = worldLayer?.querySelector('.world-unit.hero');
@@ -6615,7 +6615,7 @@ function showInitError(err) {
 }
 
 function _initCore() {
-  // v2.0.9：啟動時非同步載入 assets-manifest（失敗也不影響，走 fallback）
+  // v2.4.0：啟動時非同步載入 assets-manifest（失敗也不影響，走 fallback）
   loadAssetsManifest().then(manifest => {
     if (manifest) {
       console.log('[Init] assets-manifest 已就緒，刷新圖片路徑中...');
@@ -6826,7 +6826,7 @@ function _initCore() {
   addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/軍團/城堡。');
 
   // 顯示角色創建介面（僅新帳號無角色時才顯示）
-  // v2.0.4：有角色直接進世界，不要無條件跳創角頁導致黑屏體驗
+  // v2.4.0：有角色直接進世界，不要無條件跳創角頁導致黑屏體驗
   if (!GS.player || !GS.player.created) {
     showCharCreate();
   } else {
@@ -11007,7 +11007,7 @@ function initCastles() {
   });
 }
 
-// v2.2.2：有四方向+攻擊真圖的單位清單（用 frames/ 子目錄結構）
+// v2.4.0：有四方向+攻擊真圖的單位清單（用 frames/ 子目錄結構）
 // key 為方向檔案夾名，cat 為分類
 const DIRECTIONAL_SPRITES_DIRKEY = {
   warrior:            { cat: '01_class' },
@@ -11080,7 +11080,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
   const emojiAttack = s.attack || s.idle || '技';
   // lean 模式：AI/怪物/召唤只用 1 张图（idle）+ CSS 动画，大幅减少 DOM
   // 只有玩家/英雄/变身用完整8帧结构
-  // v2.2.2：有方向圖的單位疊加方向層
+  // v2.4.0：有方向圖的單位疊加方向層
   const hasDir = hasDirectionalSprites(s);
   const dirDownSrc = hasDir ? getDirSpriteUrl(s, 'down') : '';
   const dirUpSrc = hasDir ? getDirSpriteUrl(s, 'up') : '';
@@ -11251,7 +11251,7 @@ function applyUnitAnimFrame(unitEl, uid, state) {
   // 狀態與索引都沒變 → 跳過 DOM 操作
   if (frames.lastState === showFrame && frames.lastIdx === showIdx) return;
 
-  // 全部隱藏再顯示目標（v2.1.3：只用 display 切換，絕不設 opacity/visibility 0 導致閃爍）
+  // 全部隱藏再顯示目標（v2.4.0：只用 display 切換，絕不設 opacity/visibility 0 導致閃爍）
   frames.idle.style.display = 'none';
   for (let i = 0; i < frames.walk.length; i++) frames.walk[i].style.display = 'none';
   for (let i = 0; i < frames.attack.length; i++) frames.attack[i].style.display = 'none';
@@ -11259,7 +11259,7 @@ function applyUnitAnimFrame(unitEl, uid, state) {
   if (frames.tomb) frames.tomb.style.display = 'none';
 
   const isFrameBroken = (el) => el && el.classList && el.classList.contains('frame-error');
-  // v2.1.3：從當前索引往前找，找到第一個沒壞的 frame；找不到才退回 idle
+  // v2.4.0：從當前索引往前找，找到第一個沒壞的 frame；找不到才退回 idle
   function findGoodFrame(arr, idx) {
     if (!arr || arr.length === 0) return null;
     const start = ((idx % arr.length) + arr.length) % arr.length;
@@ -11315,7 +11315,7 @@ const CLASS_STAT_PREFS = {
   warlock: { int: 13, wis: 14, cha: 10, con: 9,  str: 6,  dex: 8  },
 };
 
-// ===== v2.0.1 創角頁：天堂經典樣式 =====
+// ===== v2.4.0 創角頁：天堂經典樣式 =====
 // 職業 → 對應真•系列金變 映射
 const CLASS_TRANSFORM_MAP = {
   warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
@@ -11650,7 +11650,7 @@ function updateCC2CreateBtnState() {
   const btn = $('cc2-create-btn');
   if (!btn) return;
   const name = charCreateState.name.trim();
-  // v2.1.2：完成創建按鈕一律可按，只驗證名稱長度，不被健康檢查/查重結果擋住
+  // v2.4.0：完成創建按鈕一律可按，只驗證名稱長度，不被健康檢查/查重結果擋住
   const valid = name.length >= 2 && name.length <= 10;
   btn.disabled = !valid;
 }
@@ -11679,7 +11679,7 @@ function confirmCC2CharCreate() {
   const cls = CLASSES[cid];
   if (!cls) return;
   
-  // v2.1.2：建立 loading 狀態，避免重複點擊
+  // v2.4.0：建立 loading 狀態，避免重複點擊
   const createBtn = $('cc2-create-btn');
   const originBtnText = createBtn ? createBtn.textContent : '';
   if (createBtn) { createBtn.disabled = true; createBtn.textContent = '創建中...'; }
@@ -11689,7 +11689,7 @@ function confirmCC2CharCreate() {
   const pref = CLASS_STAT_PREFS[cid] || CLASS_STAT_PREFS.warrior;
   GS.player.name = name;
   GS.player.classId = cid;
-  GS.player.created = true;  // v2.0.4：標記角色已創建，下次直接進世界
+  GS.player.created = true;  // v2.4.0：標記角色已創建，下次直接進世界
   
   // 計算初始屬性（基於職業偏好 + 基礎值）
   const s = pref;
@@ -11745,7 +11745,7 @@ function confirmCC2CharCreate() {
     if (!GS.nation) showNationSelect();
   }
   
-  // v2.1.2：直接 POST /api/characters/create，成功進世界；失敗顯示具體錯誤並恢復按鈕
+  // v2.4.0：直接 POST /api/characters/create，成功進世界；失敗顯示具體錯誤並恢復按鈕
   const apiFn = window.AuthSystem?.api || null;
   const serverInfo = (window.AuthSystem && typeof window.AuthSystem.getCurrentServer === 'function')
     ? window.AuthSystem.getCurrentServer()
@@ -11767,7 +11767,7 @@ function confirmCC2CharCreate() {
         if (createBtn) { createBtn.disabled = false; createBtn.textContent = originBtnText; }
       }
     }).catch(err => {
-      // v2.1.2：真失敗才提示，用伺服器具體錯誤訊息，不用靜態模式文字擋人
+      // v2.4.0：真失敗才提示，用伺服器具體錯誤訊息，不用靜態模式文字擋人
       const msg = err?.message || '網路異常，請稍後重試';
       updateCC2NameStatus(msg, 'error');
       if (createBtn) { createBtn.disabled = false; createBtn.textContent = originBtnText; }
@@ -12275,7 +12275,7 @@ function renderPlayer() {
   unit.classList.remove('idle','walking','attacking','casting','hit','dead');
   if (p.hitTimer > 0) unit.classList.add('hit');
   else unit.classList.add(p.state);
-  // v2.2.2：四方向 sprite 方向更新
+  // v2.4.0：四方向 sprite 方向更新
   const wrap = unit.querySelector('.unit-sprite-wrap');
   if (wrap && wrap.classList.contains('sprite-dir-mode')) {
     let dir = p._lastDir || 'down';
@@ -12462,7 +12462,7 @@ function renderNPCs(map) {
     let spriteHTML = '';
     if (isImg && multiFrame) {
       // 8 幀 NPC：完整圖片結構 + 呼吸動畫
-      // v2.2.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍；動畫靠 CSS transform 驅動
+      // v2.4.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍；動畫靠 CSS transform 驅動
       const walkSrcs = [sp.idle, sp.idle, sp.idle, sp.idle];
       const atkSrcs = [sp.idle, sp.idle];
       spriteHTML = `
@@ -21680,7 +21680,7 @@ function exportGameFile() {
   }, 100);
 }
 
-// ========== v2.0.3 正式營運版 ==========
+// ========== v2.4.0 正式營運版 ==========
 // 下載原始碼功能已移除：正式對外版不提供用戶端原始碼下載入口
 // 原始碼僅由營運方保管，不對玩家開放
 
@@ -23553,7 +23553,7 @@ function renderSiegeDefenderSprite(guard) {
 
   // 构建8帧精灵HTML（与普通多帧怪物一致的结构）
   const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8)) hue-rotate(-10deg) saturate(1.2)';
-  // v2.2.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍
+  // v2.4.0：所有 frame 統一用 idle 真圖，外觀一致不閃爍
   const idleSrc = sp.idle || '';
   const walkSrc = idleSrc;
   const walk2Src = idleSrc;
@@ -24487,7 +24487,7 @@ function bindEvents() {
   // 匯出遊戲按鈕
   const exportBtn = $('export-game-btn');
   if (exportBtn) exportBtn.addEventListener('click', exportGameFile);
-  // 下載原始碼按鈕（v2.0.3 已移除對外入口，保留 DOM 節點避免 JS 報錯）
+  // 下載原始碼按鈕（v2.4.0 已移除對外入口，保留 DOM 節點避免 JS 報錯）
   const downloadSrcBtn = $('download-src-btn');
   if (downloadSrcBtn) downloadSrcBtn.style.display = 'none';
   const sourceUrlRow = $('source-url-row');
@@ -24500,7 +24500,7 @@ function bindEvents() {
   if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', () => {
     el.settingsPanel.classList.remove('open');
   });
-  // 登出 / 返回首頁按鈕（v2.0.2）
+  // 登出 / 返回首頁按鈕（v2.4.0）
   const settingsLogoutBtn = $('settings-logout-btn');
   if (settingsLogoutBtn) settingsLogoutBtn.addEventListener('click', () => {
     if (!confirm('確定要登出並返回官方首頁嗎？')) return;
@@ -25157,7 +25157,7 @@ window.addEventListener('load', function() {
     AuthSystem.init();
     // 遊戲進入點由 AuthSystem 觸發
     window.onAuthReady = function(server) {
-      // v2.0.9 修復：若剛完成創角（auth.js 寫入 mmo_new_char），用其資料初始化
+      // v2.4.0 修復：若剛完成創角（auth.js 寫入 mmo_new_char），用其資料初始化
       try {
         const raw = localStorage.getItem('mmo_new_char');
         if (raw) {

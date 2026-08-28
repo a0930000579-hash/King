@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v2.4.0 · 本地化自足版</title>
+  <title>君主之刃 v2.4.0</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1a0f05" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,15 +12,14 @@
   <meta name="apple-mobile-web-app-title" content="君主之刃" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="apple-touch-icon" href="assets/11_ui/apple-touch-icon.jpg" />
-  <link rel="stylesheet" href="styles.css?v=2.3.0" />
-  <link rel="stylesheet" href="auth.css?v=2.3.0" />
+  <link rel="stylesheet" href="styles.css?v=2.4.0" />
+  <link rel="stylesheet" href="auth.css?v=2.4.0" />
   <!-- v2.4.0：移除外部字體CDN，使用系統字型確保離線可用 -->
-  <script src="lang.js?v=2.3.0"></script>
-  <script src="assets/17_lib/jszip.min.js"></script>
+  <script src="lang.js?v=2.4.0"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
-  <script src="multiplayer.js?v=2.3.0" defer></script>
-  <script src="bug-report.js?v=2.3.0" defer></script>
-  <script src="auth.js?v=2.3.0" defer></script>
+  <script src="multiplayer.js?v=2.4.0" defer></script>
+  <script src="bug-report.js?v=2.4.0" defer></script>
+  <script src="auth.js?v=2.4.0" defer></script>
   <style>
     /* ========== 首屏骨架（JS 載入前就顯示，杜絕空白） ========== */
     .splash-screen {
@@ -113,7 +112,7 @@
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v2.4.0 · 美術與資料庫重構版</div>
+    <div class="splash-version">v2.4.0</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->
@@ -438,7 +437,7 @@
         </button>
       </div>
       <div class="side-menu-footer">
-        <div class="export-tip">v2.0.9 君主之刃</div>
+        <div class="export-tip">君主之刃 v2.4.0</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -707,16 +706,11 @@
           </div>
          <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
             <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">多人連線</div>
-            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">輸入你的 Socket.IO 伺服器位址，例如 https://xxx.onrender.com</div>
-            <div style="display:flex;gap:4px;margin-bottom:8px">
-              <input type="text" id="mp-server-input" placeholder="https://xxx.onrender.com" style="flex:1;padding:5px 8px;background:rgba(0,0,0,0.5);border:1px solid var(--gold-dark);border-radius:4px;color:var(--parchment);font-size:11px;font-family:inherit" />
-              <button class="lang-btn" id="mp-connect-btn" style="font-size:10px;padding:4px 10px;min-width:56px">連線</button>
-            </div>
+            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">同網址自動長輪詢連線，無需手動設定</div>
             <div class="settings-row">
               <span class="settings-label">連線狀態</span>
               <span id="mp-status-text" class="mp-status-text mp-status-offline">連線中</span>
             </div>
-            <div style="font-size:9px;color:var(--parchment-dark);margin-top:4px;line-height:1.4">Render 免費版冷啟動約 30~60 秒，請稍候</div>
           </div>
 
         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
@@ -854,11 +848,11 @@
     </div>
   </div>
 
-  <script src="transform.js?v=2.3.0"></script>
-  <script src="audio.js?v=2.3.0"></script>
-  <script src="audio-manager.js?v=2.3.0"></script>
-  <script src="iso-map.js?v=2.3.0"></script>
-  <script src="game.js?v=2.3.0"></script>
+  <script src="transform.js?v=2.4.0"></script>
+  <script src="audio.js?v=2.4.0"></script>
+  <script src="audio-manager.js?v=2.4.0"></script>
+  <script src="iso-map.js?v=2.4.0"></script>
+  <script src="game.js?v=2.4.0"></script>
   <script>
     // 骨架屏淡出：DOM 就緒後立即隱藏，避免玩家看到空白或容器骨架
     (function() {

@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.4.0 · 正式營運後端伺服器
+  君主之刃 v2.1.2 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -176,7 +176,7 @@ async function handleMpApi(req, res, pathname, query, account) {
     const charIdx = body.charIdx ?? 0;
     try {
       const charData = await db.getCharacter(account, serverId, charIdx);
-      if (!charData || (!charData.save_data && !charData.player && !charData.name)) { sendJson(res, 404, { error: '角色不存在' }); return; }
+      if (!charData || (!charData.save_data && !charData.player)) { sendJson(res, 404, { error: '角色不存在' }); return; }
       const sd = charData.save_data || charData;
       const playerId = account + ':' + charIdx;
       const state = {
@@ -420,9 +420,7 @@ function serveStatic(req, res, pathname) {
   let decoded = decodeURIComponent(pathname);
   let filePath = path.join(ROOT_DIR, decoded);
 
-  if (pathname === '/gm' || pathname === '/gm/') {
-    filePath = path.join(ROOT_DIR, 'gm.html');
-  } else if (pathname === '/' || pathname === '') {
+  if (pathname === '/' || pathname === '') {
     filePath = path.join(ROOT_DIR, 'index.html');
   }
 
@@ -454,7 +452,7 @@ function serveStatic(req, res, pathname) {
   try {
     const stat = fs.statSync(filePath);
     const mime = getMime(filePath);
-    // v2.4.0：HTML/JS/CSS/JSON/manifest 一律 no-cache，避免手機/CDN舊快取導致版本不一致
+    // v2.1.2：HTML/JS/CSS/JSON 一律 no-cache，避免手機/CDN舊快取導致版本不一致
     const isStaticAsset = pathname.endsWith('.png') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.gif') || pathname.endsWith('.webp') || pathname.endsWith('.svg') || pathname.endsWith('.mp3') || pathname.endsWith('.wav') || pathname.endsWith('.ogg') || pathname.endsWith('.mp4') || pathname.endsWith('.woff') || pathname.endsWith('.woff2') || pathname.endsWith('.ttf');
     const headers = {
       'Content-Type': mime,
@@ -936,46 +934,6 @@ async function handleApi(req, res, pathname, query) {
           });
         }
         break;
-      case 'addTransform':
-        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (transformId)' });
-        if (!saveData.transforms) saveData.transforms = [];
-        if (!saveData.transforms.find(t => t && t.id === itemId)) {
-          saveData.transforms.push({
-            id: itemId,
-            name: body.itemName || itemId,
-            unlocked: true,
-            level: 1,
-          });
-        }
-        break;
-      case 'removeTransform':
-        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (transformId)' });
-        if (saveData.transforms) {
-          saveData.transforms = saveData.transforms.filter(t => !(t && t.id === itemId));
-        }
-        break;
-      case 'addHero':
-        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (heroId)' });
-        if (!saveData.ownedHeroes) saveData.ownedHeroes = [];
-        if (!saveData.ownedHeroes.find(h => h && h.id === itemId)) {
-          saveData.ownedHeroes.push({
-            id: itemId,
-            name: body.itemName || itemId,
-            level: 1,
-            star: 1,
-          });
-        }
-        break;
-      case 'removeHero':
-        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (heroId)' });
-        if (saveData.ownedHeroes) {
-          saveData.ownedHeroes = saveData.ownedHeroes.filter(h => !(h && h.id === itemId));
-        }
-        break;
-      case 'setExp':
-        if (!saveData.player) saveData.player = { level: 1, exp: 0 };
-        saveData.player.exp = parseInt(value) || 0;
-        break;
       case 'teleport':
         if (mapId) saveData.currentMap = mapId;
         break;
@@ -997,309 +955,6 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, { ok: true, action, resources: saveData.resources, level: saveData.player?.level });
   }
-
-  // POST /api/gm/login — GM 獨立登入
-  if (req.method === 'POST' && pathname === '/api/gm/login') {
-    let body;
-    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
-    const account = String(body.account || '').trim();
-    const password = String(body.password || '');
-    if (!account || !password) return sendJson(res, 400, { error: '缺少帳號或密碼' });
-
-    const acc = await db.getAccount(account);
-    if (!acc) return sendJson(res, 401, { error: '帳號或密碼錯誤' });
-    const inputHash = hashPassword(password);
-    if (acc.passwordHash !== inputHash && password !== acc.passwordHash) {
-      return sendJson(res, 401, { error: '帳號或密碼錯誤' });
-    }
-    if (!acc.isGM) return sendJson(res, 403, { error: '非 GM 帳號' });
-
-    const gmToken = genToken(account);
-    console.log('[GM] GM 登入成功:', account);
-    return sendJson(res, 200, {
-      ok: true,
-      token: gmToken,
-      account,
-      isGM: true,
-    });
-  }
-
-  // GET /api/gm/players — 玩家搜尋清單
-  if (req.method === 'GET' && pathname === '/api/gm/players') {
-    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    const search = String(query.search || '').trim().toLowerCase();
-    const page = Math.max(1, parseInt(query.page) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize) || 20));
-
-    let allAccounts = [];
-    if (db.getBackend() === 'postgres') {
-      try {
-        const { rows } = await pgPool.query(
-          'SELECT account, created_at, is_gm FROM accounts ORDER BY created_at DESC'
-        );
-        allAccounts = rows.map(r => ({
-          account: r.account,
-          createdAt: r.created_at && r.created_at.toISOString ? r.created_at.toISOString() : r.created_at,
-          isGM: !!r.is_gm,
-        }));
-      } catch (e) { console.error('[GM] players list pg error:', e.message); }
-    } else {
-      const f = path.join(DATA_DIR, 'accounts.json');
-      let accounts = {};
-      if (fs.existsSync(f)) {
-        try { accounts = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch(_) { accounts = {}; }
-      }
-      for (const accName in accounts) {
-        const a = accounts[accName];
-        allAccounts.push({
-          account: a.account,
-          createdAt: a.createdAt,
-          isGM: !!a.isGM,
-        });
-      }
-      allAccounts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    }
-
-    // 模糊搜尋
-    if (search) {
-      allAccounts = allAccounts.filter(a => a.account.toLowerCase().includes(search));
-    }
-
-    const total = allAccounts.length;
-    const start = (page - 1) * pageSize;
-    const pageItems = allAccounts.slice(start, start + pageSize);
-
-    // 為每個帳號計算角色數
-    const list = [];
-    for (const a of pageItems) {
-      const charCount = await db.getCharacterCount(a.account, 'zeus');
-      list.push({
-        account: a.account,
-        isGM: a.isGM,
-        createdAt: a.createdAt,
-        characterCount: charCount,
-      });
-    }
-
-    return sendJson(res, 200, {
-      ok: true,
-      list,
-      total,
-      page,
-      pageSize,
-      totalPages: Math.ceil(total / pageSize),
-    });
-  }
-
-  // GET /api/gm/player/:account — 玩家詳細資料
-  if (req.method === 'GET' && pathname.startsWith('/api/gm/player/')) {
-    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    const targetAccount = decodeURIComponent(pathname.slice('/api/gm/player/'.length));
-    const acc = await db.getAccount(targetAccount);
-    if (!acc) return sendJson(res, 404, { error: '帳號不存在' });
-
-    const serverId = 'zeus';
-    const charCount = await db.getCharacterCount(targetAccount, serverId);
-    const characters = [];
-    for (let i = 0; i < charCount; i++) {
-      const saveData = await db.getCharacter(targetAccount, serverId, i);
-      if (saveData) {
-        characters.push({
-          charIdx: i,
-          name: (saveData.player && saveData.player.name) || '',
-          level: (saveData.player && saveData.player.level) || 1,
-          classId: (saveData.player && saveData.player.classId) || 'warrior',
-          saveData: saveData,
-        });
-      }
-    }
-
-    return sendJson(res, 200, {
-      ok: true,
-      account: {
-        account: acc.account,
-        isGM: !!acc.isGM,
-        createdAt: acc.createdAt,
-      },
-      characters,
-      characterCount: characters.length,
-    });
-  }
-
-  // POST /api/gm/give-all — 全服發放獎勵
-  if (req.method === 'POST' && pathname === '/api/gm/give-all') {
-    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    let body;
-    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
-    const type = body.type; // gem | gold | item
-    const amount = parseInt(body.amount) || 0;
-    const itemId = body.itemId;
-    const itemName = body.itemName || itemId;
-
-    if (!type || (type !== 'item' && amount <= 0)) {
-      return sendJson(res, 400, { error: '參數錯誤' });
-    }
-    if (type === 'item' && !itemId) {
-      return sendJson(res, 400, { error: '缺少 itemId' });
-    }
-
-    let grantedCount = 0;
-    const serverId = 'zeus';
-
-    if (db.getBackend() === 'postgres') {
-      try {
-        const { rows } = await pgPool.query(
-          'SELECT DISTINCT account FROM characters WHERE server_id = $1',
-          [serverId]
-        );
-        const accounts = rows.map(r => r.account);
-        for (const acc of accounts) {
-          const charCnt = await db.getCharacterCount(acc, serverId);
-          for (let i = 0; i < charCnt; i++) {
-            const saveData = await db.getCharacter(acc, serverId, i);
-            if (!saveData) continue;
-            if (!saveData.resources) saveData.resources = { gold: 0, gem: 0 };
-            if (type === 'gem') {
-              saveData.resources.gem = (saveData.resources.gem || 0) + amount;
-            } else if (type === 'gold') {
-              saveData.resources.gold = (saveData.resources.gold || 0) + amount;
-            } else if (type === 'item') {
-              if (!saveData.inventory) saveData.inventory = [];
-              const inv = saveData.inventory;
-              let found = false;
-              for (let j = 0; j < inv.length; j++) {
-                if (inv[j] && inv[j].id === itemId && inv[j].stackable !== false) {
-                  inv[j].count = (inv[j].count || 1) + amount;
-                  found = true;
-                  break;
-                }
-              }
-              if (!found) {
-                inv.push({
-                  id: itemId, name: itemName, type: 'consumable',
-                  itemType: 'consumable', rarity: 'green',
-                  count: amount || 1,
-                });
-              }
-            }
-            await db.saveCharacter(acc, serverId, i, saveData);
-            grantedCount++;
-          }
-        }
-      } catch (e) {
-        console.error('[GM] give-all pg error:', e.message);
-        return sendJson(res, 500, { error: e.message });
-      }
-    } else {
-      // JSON 模式：遍歷 accounts.json
-      const f = path.join(DATA_DIR, 'accounts.json');
-      const accounts = JSON.parse(fs.readFileSync(f, 'utf-8') || '{}');
-      for (const accName in accounts) {
-        const acc = accounts[accName];
-        const chars = (acc.characters && acc.characters[serverId]) || [];
-        for (let i = 0; i < chars.length; i++) {
-          if (!chars[i]) continue;
-          if (!chars[i].resources) chars[i].resources = { gold: 0, gem: 0 };
-          if (type === 'gem') {
-            chars[i].resources.gem = (chars[i].resources.gem || 0) + amount;
-          } else if (type === 'gold') {
-            chars[i].resources.gold = (chars[i].resources.gold || 0) + amount;
-          } else if (type === 'item') {
-            if (!chars[i].inventory) chars[i].inventory = [];
-            const inv = chars[i].inventory;
-            let found = false;
-            for (let j = 0; j < inv.length; j++) {
-              if (inv[j] && inv[j].id === itemId && inv[j].stackable !== false) {
-                inv[j].count = (inv[j].count || 1) + amount;
-                found = true;
-                break;
-              }
-            }
-            if (!found) {
-              inv.push({
-                id: itemId, name: itemName, type: 'consumable',
-                itemType: 'consumable', rarity: 'green',
-                count: amount || 1,
-              });
-            }
-          }
-          grantedCount++;
-        }
-      }
-      fs.writeFileSync(f, JSON.stringify(accounts, null, 2));
-    }
-
-    console.log('[GM] 全服發放: type=' + type + ', amount=' + amount + ', 發放角色數=' + grantedCount);
-    return sendJson(res, 200, { ok: true, type, amount, grantedCount });
-  }
-
-  // POST /api/gm/broadcast — 全服廣播
-  if (req.method === 'POST' && pathname === '/api/gm/broadcast') {
-    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    let body;
-    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
-    const text = String(body.text || '').trim();
-    const btype = body.type || 'system';
-    if (!text) return sendJson(res, 400, { error: '缺少 text' });
-
-    const broadcast = {
-      id: 'bc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      type: btype,
-      text,
-      time: Date.now(),
-    };
-
-    // 存入全服廣播歷史
-    mpBroadcasts.push(broadcast);
-    while (mpBroadcasts.length > 50) mpBroadcasts.shift();
-
-    // 持久化到 broadcasts.json
-    try {
-      const bfile = path.join(DATA_DIR, 'broadcasts.json');
-      let history = [];
-      if (fs.existsSync(bfile)) {
-        try { history = JSON.parse(fs.readFileSync(bfile, 'utf-8')); } catch(_) { history = []; }
-      }
-      history.push(broadcast);
-      while (history.length > 200) history.shift();
-      fs.writeFileSync(bfile, JSON.stringify(history, null, 2));
-    } catch (e) {
-      console.error('[GM] 廣播持久化失敗:', e.message);
-    }
-
-    // 透過 long-poll 通知所有線上玩家
-    for (const [mapId, waiters] of mpPollWaiters) {
-      for (const w of waiters) {
-        try {
-          w.res.end(JSON.stringify({ ok: true, events: [], broadcasts: [broadcast], time: Date.now() }));
-        } catch(e) {}
-      }
-      mpPollWaiters.set(mapId, []);
-    }
-
-    // Socket.IO 也廣播
-    if (io) {
-      io.emit('gm_broadcast', broadcast);
-    }
-
-    console.log('[GM] 全服廣播: [' + btype + '] ' + text);
-    return sendJson(res, 200, { ok: true, broadcast });
-  }
-
-  // GET /api/gm/broadcasts — 廣播歷史
-  if (req.method === 'GET' && pathname === '/api/gm/broadcasts') {
-    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    let history = [];
-    try {
-      const bfile = path.join(DATA_DIR, 'broadcasts.json');
-      if (fs.existsSync(bfile)) {
-        history = JSON.parse(fs.readFileSync(bfile, 'utf-8'));
-      }
-    } catch(e) { history = []; }
-    history = history.slice().reverse();
-    return sendJson(res, 200, { ok: true, list: history });
-  }
-
 
   return sendJson(res, 404, { error: 'not found' });
 }
