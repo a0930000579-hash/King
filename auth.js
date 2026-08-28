@@ -24,7 +24,7 @@
     onlineState = state;
     const labels = document.querySelectorAll('.auth-online-state');
     labels.forEach(l => {
-      l.textContent = state === 'online' ? '● 已連線' : state === 'offline' ? '● 未連線伺服器' : '● 連線中';
+      l.textContent = state === 'online' ? '● 已連線' : state === 'offline' ? '● 連線中' : '● 連線中';
       l.className = 'auth-online-state ' + state;
     });
     if (window.__updateOnlineState) {
@@ -122,7 +122,7 @@
       serverList = data.servers || [];
       return serverList;
     } catch (e) {
-      // 離線模式 fallback：顯示兩個神話伺服器
+      // 連線模式 fallback：顯示兩個神話伺服器
       serverList = [
         { id: 'zeus', name: '宙斯', desc: '開放 · 順暢', status: 'smooth', players: 0, online: true },
         { id: 'hades', name: '黑帝斯', desc: '準備中 · 即將開放', status: 'maintain', players: 0, online: false },
@@ -131,62 +131,8 @@
     }
   }
 
-  // ========== 創角頁職業資料與輔助 ==========
-  const CC_CLASS_DATA = {
-    warrior: { name: '騎士', weapon: '雙手劍', type: '近戰物理', trait: '高血量・高防禦',
-      desc: '以強大的鎧甲和體力站在戰場的最前線，揮舞巨劍將一切阻擋者化為廢土。',
-      stats: { STR: 15, DEX: 8, INT: 5, CON: 14, LUK: 3 },
-      topTransform: '真・死亡騎士',
-      portrait: 'assets/transform/gold/true_death_knight/portrait.jpg',
-      accent: '#8b3a3a' },
-    paladin: { name: '聖騎士', weapon: '劍盾', type: '近戰物理', trait: '坦克・治癒',
-      desc: '曾經的聖光守護者，如今背負著黑暗的詛咒，以墮落的聖裁審判一切罪惡。',
-      stats: { STR: 10, DEX: 6, INT: 8, CON: 18, LUK: 3 },
-      topTransform: '真・墮落聖執者',
-      portrait: 'assets/transform/gold/true_fallen_paladin/portrait.jpg',
-      accent: '#7d6a3a' },
-    rogue: { name: '黑暗妖精', weapon: '雙刀', type: '近戰物理', trait: '高爆擊・高閃避',
-      desc: '潛伏於暗影中的死亡信使，以迅雷不及掩耳的速度給予敵人最後一擊。',
-      stats: { STR: 10, DEX: 16, INT: 4, CON: 10, LUK: 10 },
-      topTransform: '真・死亡刺客',
-      portrait: 'assets/transform/gold/true_death_assassin/portrait.jpg',
-      accent: '#2d5a3d' },
-    archer: { name: '精靈', weapon: '長弓', type: '遠程物理', trait: '高輸出・遠程',
-      desc: '百步穿楊的亡靈射手，以白骨之弓從遠處給予敵人穩定而致命的審判。',
-      stats: { STR: 7, DEX: 18, INT: 4, CON: 9, LUK: 12 },
-      topTransform: '真・死亡弓箭手',
-      portrait: 'assets/transform/gold/true_death_archer/portrait.jpg',
-      accent: '#3a4d6b' },
-    mage: { name: '法師', weapon: '法杖', type: '遠程魔法', trait: '高魔攻・範圍',
-      desc: '操控死亡奧義的智者，以巴風特之力召喚毀滅級的暗影魔法吞噬一切。',
-      stats: { STR: 4, DEX: 8, INT: 18, CON: 8, LUK: 12 },
-      topTransform: '真・死亡法師',
-      portrait: 'assets/transform/gold/true_death_mage/portrait.jpg',
-      accent: '#5a2d6b' },
-    warlock: { name: '幻術師', weapon: '權杖', type: '遠程魔法', trait: '召喚・持續傷害',
-      desc: '與黑暗締結契約的亡靈咒術師，以惡魔召喚與死亡詛咒逐漸吞噬敵人。',
-      stats: { STR: 3, DEX: 6, INT: 16, CON: 10, LUK: 15 },
-      topTransform: '真・死亡術士',
-      portrait: 'assets/transform/gold/true_death_sorcerer/portrait.jpg',
-      accent: '#2d5a5a' },
-  };
-  function renderInitStats(classId) {
-    const box = $('cc-init-stats');
-    if (!box) return;
-    const stats = CC_CLASS_DATA[classId]?.stats || CC_CLASS_DATA.warrior.stats;
-    const labels = { STR: '力量', DEX: '敏捷', INT: '智力', CON: '體質', LUK: '幸運' };
-    box.innerHTML = Object.entries(stats).map(([k,v]) => `
-      <div class="cc-init-stat">
-        <div class="cc-init-stat-key">${labels[k] || k}</div>
-        <div class="cc-init-stat-val">${v}</div>
-      </div>
-    `).join('');
-  }
-  function updateTpPreview(classId) {
-    const nameEl = $('cc-tp-name');
-    const data = CC_CLASS_DATA[classId];
-    if (nameEl && data) nameEl.textContent = data.topTransform || '真系列金變';
-  }
+
+
 
   // ========== 視圖切換 ==========
   function switchView(view) {
@@ -206,7 +152,6 @@
       case 'register': html = renderRegister(); break;
       case 'server': html = renderServerSelect(); break;
       case 'char': html = renderCharSelect(); break;
-      case 'charCreate': html = renderCharCreate(); break;
     }
     overlay.innerHTML = '<div class="auth-particles"></div>' + html;
     // v2.1.2：滾動回頂（針對長頁官網）
@@ -292,11 +237,11 @@
                 註 冊 帳 號
               </button>
             </div>
-            <!-- PWA 下載遊戲按鈕（取代版本字樣） -->
-            <div class="hero-install-row reveal-anim delay4">
-              <button class="install-btn" id="btn-install">
+            <!-- PWA 按鈕（取代版本字樣） -->
+            <div class="hero-install-row-disabled reveal-anim delay4">
+              <button class="install-btn-disabled" id="btn-install">
                 <span class="install-icon">&#8681;</span>
-                下 載 遊 戲
+                
               </button>
             </div>
           </div>
@@ -593,124 +538,7 @@
   }
 
   // ========== 角色建立（羊皮紙暗黑奇幻風 / v2.1.2 精簡版）==========
-  function renderCharCreate() {
-    const classList = ['warrior','paladin','rogue','archer','mage','warlock'];
-    const defaultClass = CC_CLASS_DATA[classList[0]];
-
-    // 職業選擇按鈕列（頁面頂部，簡潔文字按鈕）
-    const classTabs = classList.map((cid, i) => {
-      const c = CC_CLASS_DATA[cid];
-      return `<button class="cc-class-tab ${i === 0 ? 'active' : ''}" data-class-id="${cid}">${c.name}</button>`;
-    }).join('');
-
-    return `
-      <div class="auth-fullpage cc-parchment-bg">
-        <div class="cc-parchment-panel">
-          <!-- 頂部：返回 + 標題 + 連線狀態 -->
-          <div class="cc-top-bar">
-            <button class="cc-back-btn" id="btn-cc-back">‹ 返回</button>
-            <div class="cc-page-title">創建角色</div>
-            <div class="auth-online-state unknown" title="連線狀態">● 連線中</div>
-          </div>
-
-          <!-- 職業選擇標籤列 -->
-          <div class="cc-class-tabs" id="cc-class-tabs">
-            ${classTabs}
-          </div>
-
-          <!-- 主要內容區 -->
-          <div class="cc-main-parchment">
-            <!-- 左側：大立繪 -->
-            <div class="cc-portrait-section">
-              <div class="cc-portrait-frame-deco">
-                <div class="cc-portrait-inner">
-                  <!-- 預設顯示：暗色漸層 + 金變名稱文字（確保不會有破圖 ?） -->
-                  <div class="cc-portrait-fallback" id="cc-portrait-fallback">
-                    <div class="cc-fallback-title" id="cc-fallback-title">${defaultClass.topTransform}</div>
-                    <div class="cc-fallback-sub">真・系列金變</div>
-                    <div class="cc-fallback-deco">[ 金變 ] [ 神話 ] [ 金變 ]</div>
-                  </div>
-                  <img class="cc-portrait-img" id="cc-portrait-img" src="${defaultClass.portrait}" alt="${defaultClass.name}" style="display:none" onload="this.style.display='block'" onerror="this.style.display='none'"/>
-                  <div class="cc-portrait-vignette"></div>
-                </div>
-                <!-- 角飾 -->
-                <div class="cc-corner cc-corner-tl"></div>
-                <div class="cc-corner cc-corner-tr"></div>
-                <div class="cc-corner cc-corner-bl"></div>
-                <div class="cc-corner cc-corner-br"></div>
-              </div>
-              <!-- 立繪下方職業名 -->
-              <div class="cc-class-banner" id="cc-class-banner" style="--accent:${defaultClass.accent}">
-                <span class="cc-banner-cn">${defaultClass.name}</span>
-                <span class="cc-banner-en">${defaultClass.topTransform}</span>
-              </div>
-            </div>
-
-            <!-- 右側：資訊面板 -->
-            <div class="cc-info-section">
-              <!-- 職業名（大字） -->
-              <div class="cc-info-title" id="cc-info-title" style="--accent:${defaultClass.accent}">
-                ${defaultClass.name}
-              </div>
-              <div class="cc-info-subtitle" id="cc-info-subtitle">${defaultClass.topTransform}</div>
-
-              <!-- 描述 -->
-              <p class="cc-info-desc" id="cc-info-desc">${defaultClass.desc}</p>
-
-              <!-- 資訊列：Main Weapon / Combat Type / 職業特性 -->
-              <div class="cc-spec-list">
-                  <div class="cc-spec-item">
-                    <div class="cc-spec-icon" style="--accent:${defaultClass.accent}">
-                      <span class="cc-spec-glyph">⚔</span>
-                    </div>
-                    <div class="cc-spec-text">
-                      <div class="cc-spec-label">Main Weapon</div>
-                      <div class="cc-spec-value" id="cc-spec-weapon">${defaultClass.weapon}</div>
-                    </div>
-                  </div>
-                  <div class="cc-spec-item">
-                    <div class="cc-spec-icon" style="--accent:${defaultClass.accent}">
-                      <span class="cc-spec-glyph">◈</span>
-                    </div>
-                    <div class="cc-spec-text">
-                      <div class="cc-spec-label">Combat Type</div>
-                      <div class="cc-spec-value" id="cc-spec-type">${defaultClass.type}</div>
-                    </div>
-                  </div>
-                  <div class="cc-spec-item">
-                    <div class="cc-spec-icon" style="--accent:${defaultClass.accent}">
-                      <span class="cc-spec-glyph">✦</span>
-                    </div>
-                    <div class="cc-spec-text">
-                      <div class="cc-spec-label">職業特性</div>
-                      <div class="cc-spec-value" id="cc-spec-trait">${defaultClass.trait}</div>
-                    </div>
-                  </div>
-              </div>
-
-              <!-- 分隔飾紋 -->
-              <div class="cc-divider"><span>CHARACTER NAME</span></div>
-
-              <!-- 名稱輸入（精簡） -->
-              <div class="cc-name-area">
-                <input type="text" id="cc-name-input" class="cc-name-input" maxlength="10" placeholder="輸入角色名稱（2-10字元）" autocomplete="off" />
-                <button class="cc-check-btn" id="cc-check-btn">查重</button>
-              </div>
-              <div class="cc-name-status" id="cc-name-status"></div>
-
-              <!-- 底部：創建按鈕 -->
-              <div class="cc-footer-area">
-                <button class="cc-create-parchment-btn" id="cc-create-btn" disabled>
-                  <span class="cc-btn-text">完 成 創 建</span>
-                  <span class="cc-btn-glow"></span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
+  
 
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
@@ -733,7 +561,7 @@
     try {
       localStorage.setItem(STORAGE_OFFLINE_KEY, JSON.stringify(offlineData));
       localStorage.setItem(STORAGE_ACC_KEY, acc);
-      // 離線模式下也放一個 token 佔位，避免 game.js 報錯
+      // 連線模式下也放一個 token 佔位，避免 game.js 報錯
       localStorage.setItem(STORAGE_TOKEN_KEY, 'offline_' + Date.now());
     } catch (e) {}
     return offlineData;
@@ -760,7 +588,7 @@
     // 避免影響正式營運頁面形象
     const dot = document.createElement('div');
     dot.className = 'offline-indicator-dot';
-    dot.title = '離線模式';
+    dot.title = '連線模式';
     document.body.appendChild(dot);
     setTimeout(() => dot.classList.add('show'), 30);
     setTimeout(() => {
@@ -856,7 +684,7 @@
               body.innerHTML = `
                 <div style="text-align:center;padding:8px 0">
                   <div style="font-size:40px;margin-bottom:12px">&#9881;</div>
-                  <div style="font-size:14px;color:#e8d090;letter-spacing:2px;margin-bottom:14px">下載遊戲</div>
+                  <div style="font-size:14px;color:#e8d090;letter-spacing:2px;margin-bottom:14px"></div>
                   <div style="font-size:12px;color:#a89060;line-height:1.8;letter-spacing:1px">
                     將遊戲加到主畫面<br/>
                     免開網頁直接全螢幕玩<br/>
@@ -932,7 +760,7 @@
           slot.addEventListener('click', () => {
             if (slot.dataset.create === '1') {
               // v2.1.2 修復：進入角色建立頁，不再直接跳進空世界
-              switchView('charCreate');
+              (window.showCharCreate && showCharCreate());
             } else {
               // 載入既有角色
               startGameWithChar(parseInt(slot.dataset.charIdx));
@@ -941,191 +769,7 @@
         });
         $('btn-char-back').addEventListener('click', () => switchView('server'));
         break;
-      case 'charCreate':
-        // v2.1.2：進創角頁時主動再檢查一次連線（避免快取/競態）
-        checkServerHealth();
-        // v2.1.2：職業選擇切換（新羊皮紙風 DOM）
-        document.querySelectorAll('.cc-class-tab').forEach(tab => {
-          tab.addEventListener('click', () => {
-            document.querySelectorAll('.cc-class-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            const cid = tab.dataset.classId;
-            const d = CC_CLASS_DATA[cid];
-            if (!d) return;
-            // 更新立繪
-            const img = $('cc-portrait-img');
-            const fallbackTitle = $('cc-fallback-title');
-            if (fallbackTitle) fallbackTitle.textContent = d.topTransform || '真系列金變';
-            if (img) {
-              // 切換前先隱藏舊圖，顯示兜底，避免破圖
-              img.style.display = 'none';
-              img.src = d.portrait;
-              img.alt = d.name;
-              // 重新觸發 onload 判斷
-              if (img.complete) {
-                // 若已快取完成：判斷naturalWidth
-                if (img.naturalWidth > 0) { img.style.display = 'block'; }
-              }
-            }
-            // 更新職業名 banner
-            const banner = $('cc-class-banner');
-            if (banner) {
-              banner.style.setProperty('--accent', d.accent);
-              banner.querySelector('.cc-banner-cn').textContent = d.name;
-              banner.querySelector('.cc-banner-en').textContent = d.topTransform;
-            }
-            // 更新右側資訊
-            const title = $('cc-info-title');
-            if (title) { title.style.setProperty('--accent', d.accent); title.textContent = d.name; }
-            const sub = $('cc-info-subtitle');
-            if (sub) sub.textContent = d.topTransform;
-            const desc = $('cc-info-desc');
-            if (desc) desc.textContent = d.desc;
-            // spec 三項
-            const weaponEl = $('cc-spec-weapon');
-            if (weaponEl) weaponEl.textContent = d.weapon;
-            const typeEl = $('cc-spec-type');
-            if (typeEl) typeEl.textContent = d.type;
-            const traitEl = $('cc-spec-trait');
-            if (traitEl) traitEl.textContent = d.trait;
-            // spec icon accent
-            document.querySelectorAll('.cc-spec-icon').forEach(icon => {
-              icon.style.setProperty('--accent', d.accent);
-            });
-          });
-        });
-        // 名稱輸入
-        const nameInput = $('cc-name-input');
-        const checkBtn = $('cc-check-btn');
-        const createBtn = $('cc-create-btn');
-        const nameStatus = $('cc-name-status');
-        let nameChecked = false;
-        const updateBtnState = () => {
-          const v = nameInput.value.trim();
-          // v2.1.2：完成創建按鈕一律可按，不被 health / 查重結果擋住
-          // 只需名稱長度在 2-10 字元範圍內就允許點擊，最終重名由 server 端把關
-          createBtn.disabled = !(v.length >= 2 && v.length <= 10);
-        };
-        nameInput.addEventListener('input', () => {
-          nameChecked = false;
-          nameStatus.textContent = '';
-          updateBtnState();
-        });
-        checkBtn.addEventListener('click', async () => {
-          const v = nameInput.value.trim();
-          if (v.length < 2 || v.length > 10) {
-            nameStatus.textContent = '名稱長度需 2-10 字元';
-            nameStatus.className = 'cc-name-status error';
-            return;
           }
-          nameStatus.textContent = '檢查中…';
-          nameStatus.className = 'cc-name-status';
-          try {
-            const data = await api('/characters/check-name?name=' + encodeURIComponent(v) + '&server=' + encodeURIComponent(currentServer?.id || ''));
-            if (data && data.available) {
-              nameChecked = true;
-              nameStatus.textContent = '可用：此名稱可使用';
-              nameStatus.className = 'cc-name-status ok';
-            } else {
-              nameChecked = false;
-              nameStatus.textContent = '已占用：此名稱已被使用';
-              nameStatus.className = 'cc-name-status error';
-            }
-          } catch (e) {
-            // v2.1.2：查重失敗僅提示稍後重試，不阻止玩家用 create 直接嘗試
-            // 最終重名由 server 端把關
-            nameChecked = false;
-            nameStatus.textContent = '檢查失敗：名稱檢查暫時失敗，稍後可重試；仍可直接嘗試創建';
-            nameStatus.className = 'cc-name-status warn';
-          }
-          updateBtnState();
-        });
-        // 創建按鈕
-        createBtn.addEventListener('click', async () => {
-          const selected = document.querySelector('.cc-class-tab.active');
-          const classId = selected ? selected.dataset.classId : 'warrior';
-          const name = nameInput.value.trim();
-          if (!name || name.length < 2 || name.length > 10) {
-            nameStatus.textContent = '名稱長度需 2-10 字元';
-            nameStatus.className = 'cc-name-status error';
-            return;
-          }
-          createBtn.disabled = true;
-          nameStatus.textContent = '創建中…';
-          nameStatus.className = 'cc-name-status';
-          // 寫入角色資訊到暫存（無論 server 成敗先存一份，避免快取問題）
-          try {
-            const newChar = {
-              name: name,
-              classId: classId,
-              level: 1,
-              exp: 0,
-              created: true,
-              createdAt: Date.now(),
-              serverId: currentServer?.id || 'zeus',
-            };
-            let chars = [];
-            try {
-              const raw = localStorage.getItem('mmo_characters');
-              if (raw) chars = JSON.parse(raw);
-            } catch (e) {}
-            chars.push(newChar);
-            localStorage.setItem('mmo_characters', JSON.stringify(chars));
-            localStorage.setItem('mmo_new_char', JSON.stringify(newChar));
-          } catch (e) {}
-          // v2.1.2：直接 POST /api/characters/create，成功進世界，失敗顯示具體錯誤
-          try {
-            const result = await api('/characters/create', {
-              name: name,
-              classId: classId,
-              server: currentServer?.id || 'zeus',
-            });
-            if (result && result.ok) {
-              // 進入遊戲世界
-              startGameCommon();
-              return;
-            } else {
-              // server 回 ok:false 或其他非預期格式
-              const msg = result?.error || result?.message || '創建失敗，請重試';
-              nameStatus.textContent = '失敗：' + msg;
-              nameStatus.className = 'cc-name-status error';
-              createBtn.disabled = false;
-              return;
-            }
-          } catch (e) {
-            // v2.1.2：真的失敗才彈出伺服器回傳的具體錯誤，不用靜態模式文字擋人
-            const msg = e?.message || '網路異常，請稍後重試';
-            nameStatus.textContent = '✗ ' + msg;
-            nameStatus.className = 'cc-name-status error';
-            createBtn.disabled = false;
-            return;
-          }
-        });
-        $('btn-cc-back').addEventListener('click', () => switchView('char'));
-        // 初始渲染
-        renderInitStats('warrior');
-        updateTpPreview('warrior');
-        // v2.1.2：動態載入職業 icon 圖（從 game.js 的 SPRITE 取 idle 圖）
-        setTimeout(() => {
-          if (typeof window.SPRITE !== 'undefined' && typeof assetUrl === 'function') {
-            document.querySelectorAll('.cc-class-item').forEach(item => {
-              const cid = item.dataset.classId;
-              const sp = window.SPRITE[cid];
-              const iconEl = item.querySelector('.cc-class-icon');
-              if (sp && sp.idle && iconEl) {
-                iconEl.style.backgroundImage = 'url(' + sp.idle + ')';
-              }
-            });
-            const portraitEl = $('cc-portrait');
-            const firstClass = document.querySelector('.cc-class-item.active')?.dataset.classId || 'warrior';
-            const sp = window.SPRITE[firstClass];
-            if (portraitEl && sp && sp.idle) {
-              portraitEl.style.backgroundImage = 'url(' + sp.idle + ')';
-            }
-          }
-        }, 50);
-        break;
-    }
   }
 
   // ========== 背景探測後端狀態（僅探測，不自動跳轉） ==========
@@ -1271,8 +915,8 @@
     if (window.MultiplayerClient && currentServer) {
       const serverUrl = window.location.origin;
       // 連線到 socket.io（自動）
-      window.MultiplayerClient.connect(serverUrl).catch(() => {
-        console.warn('[Auth] 自動連線失敗，退回單機');
+      window.MultiplayerClient.connect(serverUrl, AuthSystem.getToken()).catch(() => {
+        console.warn('[Auth] 自動連線失敗，重新連線中');
       });
     }
 
@@ -1499,7 +1143,7 @@
     const remoteCount = window.MultiplayerClient?._getRemotePlayers()?.size || 0;
     const p = window.GS?.player;
     el.innerHTML = `
-      連線狀態：<span>${online ? '已連線' : '離線'}</span><br/>
+      連線狀態：<span>${online ? '已連線' : '連線中'}</span><br/>
       我的 ID：<span>${myId || '--'}</span><br/>
       線上玩家：<span>${remoteCount + (online ? 1 : 0)}</span> 人<br/>
       角色名：<span>${p?.name || '--'}</span><br/>

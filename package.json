@@ -1,16 +1,8 @@
 {
-  "name": "monarch-blade",
-  "version": "2.3.5",
+  "name": "monarch-blade-mmorpg",
+  "version": "2.4.0",
   "private": true,
-  "main": "server/server.cjs",
-  "engines": {
-    "node": ">=18"
-  },
   "scripts": {
     "start": "node server/server.cjs"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "socket.io": "^4.7.5"
   }
 }

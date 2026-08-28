@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v2.3.4 · 本地化自足版</title>
+  <title>君主之刃 v2.4.0 · 本地化自足版</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1a0f05" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="assets/11_ui/apple-touch-icon.jpg" />
   <link rel="stylesheet" href="styles.css?v=2.3.0" />
   <link rel="stylesheet" href="auth.css?v=2.3.0" />
-  <!-- v2.3.4：移除外部字體CDN，使用系統字型確保離線可用 -->
+  <!-- v2.4.0：移除外部字體CDN，使用系統字型確保離線可用 -->
   <script src="lang.js?v=2.3.0"></script>
   <script src="assets/17_lib/jszip.min.js"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
@@ -113,7 +113,7 @@
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v2.3.4 · 美術與資料庫重構版</div>
+    <div class="splash-version">v2.4.0 · 美術與資料庫重構版</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->
@@ -153,7 +153,7 @@
 
       <div class="top-right">
         <div class="gem-pill">
-          <img src="assets/11_ui/gem-icon.jpg" class="gem-icon-img" alt="鑽石"/>
+          <img src="assets/ui/gem-icon.jpg" class="gem-icon-img" alt="鑽石"/>
           <span class="gem-num" id="gem-count">300,000</span>
         </div>
         <div class="map-badge-btn map-badge-display" id="map-btn">
@@ -378,7 +378,7 @@
         <button class="nav-btn" id="settings-btn">
           <div class="nav-icon nav-icon-text" data-label="設定" style="position:relative">
             <!-- 連線狀態點：綠=已連線多人、灰=單機模式 -->
-            <span id="mp-status-dot" class="mp-status-dot mp-status-offline" title="單機模式"></span>
+            <span id="mp-status-dot" class="mp-status-dot mp-status-offline" title="連線中"></span>
           </div>
           <span>設定</span>
         </button>
@@ -622,7 +622,7 @@
 
     <!-- 快捷栏設定弹窗 -->
     <div class="settings-panel" id="quickbar-settings-modal">
-      <div style="background:rgba(20,14,8,0.98);border:2px solid var(--gold);border-radius:10px;padding:16px;width:320px">
+      <div style="background:rgba(20,14,8,0.98);border:2px solid var(--gold);border-radius:10px;padding:16px;width:400px">
         <div class="settings-panel-title">快捷欄設置</div>
         <div id="quickbar-config-list" style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;margin-top:10px">
         </div>
@@ -635,7 +635,7 @@
 
     <!-- 設定面板 -->
     <div class="settings-panel" id="settings-panel">
-      <div style="background:rgba(20,14,8,0.98);border:2px solid var(--gold);border-radius:10px;padding:16px 20px 24px;width:320px;max-width:90vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="background:rgba(20,14,8,0.98);border:2px solid var(--gold);border-radius:10px;padding:16px 20px 24px;width:400px;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;overflow:hidden">
         <div class="settings-panel-title" style="flex-shrink:0">設置</div>
         <div id="settings-scroll-area" style="flex:1;overflow-y:auto;overflow-x:hidden;padding-right:4px;margin-right:-4px">
         <div class="settings-row">
@@ -653,7 +653,7 @@
             <button class="lang-btn" data-lang="en-US">EN</button>
           </div>
         </div>
-        <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+        <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
           <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">自動戰鬥設置</div>
           <div class="settings-row">
             <span class="settings-label">自動戰鬥</span>
@@ -699,13 +699,13 @@
              </div>
            </div>
          </div>
-         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
            <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">自動道具設置</div>
            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">8個欄位自由配置：選擇道具、設定閾值、開啟自動使用/自動購買</div>
             <div class="auto-items-grid" id="auto-items-grid" style="display:flex;flex-direction:column;gap:6px;padding-right:2px">
             </div>
           </div>
-         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+         <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
             <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">多人連線</div>
             <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">輸入你的 Socket.IO 伺服器位址，例如 https://xxx.onrender.com</div>
             <div style="display:flex;gap:4px;margin-bottom:8px">
@@ -714,12 +714,12 @@
             </div>
             <div class="settings-row">
               <span class="settings-label">連線狀態</span>
-              <span id="mp-status-text" class="mp-status-text mp-status-offline">未連線</span>
+              <span id="mp-status-text" class="mp-status-text mp-status-offline">連線中</span>
             </div>
             <div style="font-size:9px;color:var(--parchment-dark);margin-top:4px;line-height:1.4">Render 免費版冷啟動約 30~60 秒，請稍候</div>
           </div>
 
-        <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
+        <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
           <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">音效與音樂</div>
           <div class="settings-row">
             <span class="settings-label">音效</span>
@@ -753,21 +753,6 @@
               <span id="music-volume-value" class="volume-value">40</span>
             </div>
           </div>
-          <div style="border-top:1px solid rgba(139,105,20,0.3);margin:10px 0;padding-top:10px">
-            <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">離線工具</div>
-            <div class="settings-row">
-              <span class="settings-label">離線模式</span>
-              <label class="toggle-switch">
-                <input type="checkbox" id="offline-mode-toggle">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">開啟後從本地 assets/ 資料夾讀取圖片，需重新整理生效</div>
-            <button class="lang-btn" id="download-offline-btn" style="width:100%;padding:8px;font-size:12px;background:linear-gradient(180deg,#c9a24a,#7a5c1a);color:#fff;border:1px solid var(--gold);text-shadow:1px 1px 2px rgba(0,0,0,0.5)">
-              包 下載離線包
-            </button>
-            <div id="offline-download-status" style="font-size:10px;color:var(--parchment-dark);margin-top:6px;text-align:center;display:none"></div>
-          </div>
         </div>
         </div>
         <div style="flex-shrink:0;margin-top:12px;display:flex;flex-direction:column;gap:8px">
@@ -778,7 +763,7 @@
     </div>
 
     <!-- 职业選擇初始弹窗 -->
-    <!-- 角色創建介面（天堂經典樣式 / v2.3.4 唯一創角頁） -->
+    <!-- 角色創建介面（天堂經典樣式 / v2.4.0 唯一創角頁） -->
     <div class="char-create-screen hidden" id="char-create-screen">
       <div class="cc2-bg"></div>
       <div class="cc2-panel">

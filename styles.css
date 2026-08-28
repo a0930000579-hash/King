@@ -697,6 +697,8 @@ img { display: block; pointer-events: none; }
   visibility: hidden;
   opacity: 0;
   transition: opacity 0.2s, visibility 0.2s;
+  transform: scale(0.6);
+  transform-origin: center bottom;
 }
 
 .unit-sprite-img {
@@ -1033,6 +1035,11 @@ img { display: block; pointer-events: none; }
   100% { transform: rotate(90deg) scale(0.5); opacity: 0; filter: brightness(3) drop-shadow(0 0 80px rgba(255,200,80,0.8)); }
 }
 /* ===== 视口外单位性能优化：暂停动画，减少GPU压力 ===== */
+.world-unit.offscreen {
+  display: none !important;
+  pointer-events: none;
+  visibility: hidden;
+}
 .world-unit.offscreen .unit-sprite-wrap,
 .world-unit.offscreen .slash-effect,
 .world-unit.offscreen .dust-particles {
@@ -1046,6 +1053,100 @@ img { display: block; pointer-events: none; }
 .world-unit.offscreen .unit-info {
   display: none;
 }
+
+/* ===== v2.4.0 8幀精靈圖動畫（CSS 偽幀）=====
+   所有可動單位統一 8 步節奏，idle 呼吸 + walk 擺動 + attack 揮砍 + hit 閃爍
+   用 transform + filter 創造視覺差異，無需額外圖檔 */
+
+/* idle：8 步呼吸動畫（輕微上下 + 明暗 + 微幅左右） */
+@keyframes sprite-idle-8frame {
+  0%   { transform: translateY(0) scaleX(1); filter: brightness(1); }
+  12%  { transform: translateY(-1px) scaleX(1); filter: brightness(1.05); }
+  25%  { transform: translateY(-2px) scaleX(1.01); filter: brightness(1.08); }
+  37%  { transform: translateY(-1px) scaleX(0.99); filter: brightness(1.05); }
+  50%  { transform: translateY(0) scaleX(1); filter: brightness(1); }
+  62%  { transform: translateY(1px) scaleX(1); filter: brightness(0.97); }
+  75%  { transform: translateY(2px) scaleX(0.99); filter: brightness(0.95); }
+  87%  { transform: translateY(1px) scaleX(1.01); filter: brightness(0.97); }
+  100% { transform: translateY(0) scaleX(1); filter: brightness(1); }
+}
+
+/* walk：8 步行走擺動（上下起伏 + 左右微傾 + 陰影變化） */
+@keyframes sprite-walk-8frame {
+  0%   { transform: translateY(0) rotate(0deg); }
+  12%  { transform: translateY(-3px) rotate(-1deg); }
+  25%  { transform: translateY(-5px) rotate(-2deg); }
+  37%  { transform: translateY(-3px) rotate(-1deg); }
+  50%  { transform: translateY(0) rotate(0deg); }
+  62%  { transform: translateY(-3px) rotate(1deg); }
+  75%  { transform: translateY(-5px) rotate(2deg); }
+  87%  { transform: translateY(-3px) rotate(1deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+/* attack：8 步攻擊揮砍（往前衝 + 發光 + 旋轉） */
+@keyframes sprite-attack-8frame {
+  0%   { transform: translateX(0) scale(1); filter: brightness(1); }
+  12%  { transform: translateX(2px) scale(1.02); filter: brightness(1.1); }
+  25%  { transform: translateX(4px) scale(1.05); filter: brightness(1.2); }
+  37%  { transform: translateX(6px) scale(1.08) rotate(-3deg); filter: brightness(1.3); }
+  50%  { transform: translateX(8px) scale(1.1) rotate(-5deg); filter: brightness(1.4) drop-shadow(0 0 8px rgba(255,220,100,0.8)); }
+  62%  { transform: translateX(4px) scale(1.05) rotate(-2deg); filter: brightness(1.2); }
+  75%  { transform: translateX(2px) scale(1.02); filter: brightness(1.1); }
+  87%  { transform: translateX(1px) scale(1.01); filter: brightness(1.05); }
+  100% { transform: translateX(0) scale(1); filter: brightness(1); }
+}
+
+/* hit：受擊閃爍 8 步（變白 → 閃爍 → 恢復） */
+@keyframes sprite-hit-8frame {
+  0%   { filter: brightness(1) hue-rotate(0deg); }
+  12%  { filter: brightness(2) hue-rotate(-10deg); }
+  25%  { filter: brightness(3) hue-rotate(-20deg) saturate(2); }
+  37%  { filter: brightness(2.5) hue-rotate(-10deg) saturate(1.5); }
+  50%  { filter: brightness(1.5) hue-rotate(0deg); }
+  62%  { filter: brightness(2) hue-rotate(10deg); }
+  75%  { filter: brightness(1.3) hue-rotate(5deg); }
+  87%  { filter: brightness(1.1) hue-rotate(0deg); }
+  100% { filter: brightness(1) hue-rotate(0deg); }
+}
+
+/* 應用到所有精靈圖單位：8 幀動畫 */
+.world-unit.idle .unit-sprite img,
+.world-unit.idle .unit-sprite {
+  animation: sprite-idle-8frame 1.6s ease-in-out infinite;
+}
+.world-unit.walking .unit-sprite img,
+.world-unit.walking .unit-sprite {
+  animation: sprite-walk-8frame 0.6s ease-in-out infinite;
+}
+.world-unit.attacking .unit-sprite img,
+.world-unit.attacking .unit-sprite {
+  animation: sprite-attack-8frame 0.5s ease-out forwards;
+}
+.world-unit.hit .unit-sprite img,
+.world-unit.hit .unit-sprite {
+  animation: sprite-hit-8frame 0.3s ease-out;
+}
+
+/* 英雄/守護/Boss 用稍慢的節奏，體現重量感 */
+.world-unit.hero.idle .unit-sprite img {
+  animation-duration: 2s;
+}
+.world-unit.boss.idle .unit-sprite img {
+  animation-duration: 2.4s;
+}
+.world-unit.boss.walking .unit-sprite img {
+  animation-duration: 0.9s;
+}
+.world-unit.boss.attacking .unit-sprite img {
+  animation-duration: 0.8s;
+}
+
+/* 多幀精靈（已有 frame 圖）：關閉 CSS 動畫，用 JS 控制 */
+.world-unit.multi-frame .unit-sprite img {
+  animation: none;
+}
+
 
 /* ===== AI玩家和怪物：单图CSS动画性能调优 ===== */
 .world-unit.ai-player .unit-sprite-wrap,
@@ -1618,7 +1719,7 @@ img { display: block; pointer-events: none; }
 }
 /* 死亡坟墓图标 */
 .world-unit.dead::after {
-  content: '🪦';
+  content: '碑';
   position: absolute;
   bottom: -2px;
   left: 50%;
@@ -3583,6 +3684,13 @@ img { display: block; pointer-events: none; }
 .nav-icon-text {
   background: radial-gradient(circle at 50% 35%, #2a1d0e 0%, #120b05 70%, #0a0603 100%);
   position: relative;
+}
+.nav-icon-text::before {
+  content: attr(data-label);
+  color: #e8c870;
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 .nav-icon-text.gacha {
   background: radial-gradient(circle at 50% 35%, #3d2460 0%, #1e1230 70%, #0f0818 100%);
@@ -7085,8 +7193,8 @@ img { display: block; pointer-events: none; }
 .toggle-switch {
   position: relative;
   display: inline-block;
-  width: 36px;
-  height: 18px;
+  width: 44px;
+  height: 22px;
 }
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
@@ -7095,13 +7203,13 @@ img { display: block; pointer-events: none; }
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.5);
   border: 1px solid var(--gold-dark);
-  border-radius: 9px;
+  border-radius: 11px;
   transition: all 0.2s;
 }
 .toggle-slider:before {
   position: absolute;
   content: "";
-  height: 12px; width: 12px;
+  height: 16px; width: 16px;
   left: 2px; bottom: 2px;
   background: var(--parchment-dark);
   border-radius: 50%;
@@ -7121,7 +7229,7 @@ img { display: block; pointer-events: none; }
 .auto-item-slot select.auto-item-select {
   appearance: none;
   -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><polygon points='0,0 10,0 5,6' fill='%23f0c040'/></svg>");
+  background: linear-gradient(135deg, transparent 50%, #f0c040 50%) 0 0/50% 100% no-repeat, linear-gradient(-135deg, transparent 50%, #f0c040 50%) 100% 0/50% 100% no-repeat;
   background-repeat: no-repeat;
   background-position: right 4px center;
   padding-right: 16px !important;
@@ -7167,8 +7275,8 @@ img { display: block; pointer-events: none; }
   color: var(--gold-bright); text-align: center;
   margin-bottom: 14px; letter-spacing: 2px;
 }
-.settings-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.settings-label { font-size: 12px; color: var(--parchment-light); }
+.settings-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.settings-label { font-size: 15px; color: var(--parchment-light); }
 
 .pvp-mode-row {
   display: flex;
@@ -7177,7 +7285,7 @@ img { display: block; pointer-events: none; }
 .pvp-mode-btn {
   flex: 1;
   padding: 6px 4px;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--parchment);
   background: rgba(30, 20, 10, 0.8);
@@ -7213,8 +7321,8 @@ img { display: block; pointer-events: none; }
 .volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));
   border: 1px solid var(--gold-dark);
@@ -7227,8 +7335,8 @@ img { display: block; pointer-events: none; }
   box-shadow: 0 0 10px rgba(240,192,64,0.8);
 }
 .volume-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));
   border: 1px solid var(--gold-dark);
@@ -7245,12 +7353,12 @@ img { display: block; pointer-events: none; }
 }
 .lang-buttons { display: flex; gap: 5px; }
 .lang-btn {
-  padding: 4px 10px;
+  padding: 6px 14px;
   background: var(--bg-panel);
   border: 1px solid var(--gold-dark);
   border-radius: 4px;
   color: var(--parchment);
-  font-size: 11px; cursor: pointer;
+  font-size: 14px; cursor: pointer;
   font-family: inherit;
 }
 .lang-btn.active {
@@ -7515,12 +7623,12 @@ img { display: block; pointer-events: none; }
 .guild-card-desc, .castle-card-desc { font-size: 10px; color: var(--parchment-dark); }
 .castle-card-owner { font-size: 10px; color: var(--gold-bright); font-weight: 600; }
 .castle-card-btn {
-  padding: 4px 10px;
+  padding: 6px 14px;
   background: linear-gradient(180deg, var(--crimson-light), var(--crimson));
   border: 1px solid #ff6060;
   border-radius: 4px;
   color: #fff;
-  font-size: 10px; font-weight: 700;
+  font-size: 13px; font-weight: 700;
   cursor: pointer;
   font-family: inherit;
 }
@@ -7959,7 +8067,7 @@ img { display: block; pointer-events: none; }
   border-radius: 3px;
 }
 .siege-tower::after {
-  content: '🏹';
+  content: '弓';
   position: absolute;
   top: 30px;
   left: 50%; transform: translateX(-50%);
@@ -7979,7 +8087,7 @@ img { display: block; pointer-events: none; }
   box-shadow: 0 0 20px rgba(240,192,64,0.3);
 }
 .siege-throne-hall::before {
-  content: '👑';
+  content: '王';
   position: absolute;
   top: 20px; left: 50%; transform: translateX(-50%);
   font-size: 40px;
@@ -9089,6 +9197,8 @@ img { display: block; pointer-events: none; }
   position: absolute;
   inset: -6px;
   border-radius: 50%;
+  transform: scale(0.6);
+  transform-origin: center bottom;
   pointer-events: none;
   z-index: -1;
 }
@@ -11664,7 +11774,7 @@ img { display: block; pointer-events: none; }
   inset: 0;
   background: 
     radial-gradient(ellipse at 50% 30%, rgba(40,25,10,0.85) 0%, rgba(10,6,4,0.97) 60%, #000 100%),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' seed='2'/><feColorMatrix values='0 0 0 0 0.4  0 0 0 0 0.25  0 0 0 0 0.05  0 0 0 0.08 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    radial-gradient(circle at 20% 30%, rgba(100,60,10,0.15) 1px, transparent 2px), radial-gradient(circle at 70% 60%, rgba(80,40,10,0.12) 1px, transparent 2px), radial-gradient(circle at 40% 80%, rgba(60,30,5,0.1) 1px, transparent 2px);
   background-size: auto, 200px 200px;
 }
 
@@ -12155,7 +12265,7 @@ img { display: block; pointer-events: none; }
   object-fit: contain;
   object-position: center bottom;
   opacity: 0;
-  transition: opacity 0.05s linear;
+  /* v2.3.5-patch: 移除 transition，避免方向切換時疊加殘影 */
 }
 
 /* 方向顯示控制 */

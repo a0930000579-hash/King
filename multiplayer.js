@@ -1,104 +1,64 @@
-/* ============================================================
-   君主之刃 · 多人連線客戶端 (Socket.IO v4)
-   設計原則：
-     1. 絕不影響單機遊戲 — socket.io 載入失敗 / 連線失敗時，完全靜音退回單機
-     2. 玩家可在設定面板輸入伺服器位址，存 localStorage
-     3. 座標系統：伺服器世界為 0~2048，本機世界依地圖尺寸動態對應
-     4. 遠端玩家僅做視覺同步，不參與本機戰鬥與掉落結算
-   ============================================================ */
-
-(function () {
+(function() {
   'use strict';
 
-  // 狀態列舉
+  // v2.4.0：Long-Poll 多人連線客戶端（零依賴，純 fetch）
   const STATUS = {
-    OFFLINE: 'offline',       // 未連線（預設 / 關閉多人）
-    LOADING: 'loading',       // 正在載入 socket.io
-    CONNECTING: 'connecting', // 正在連線伺服器
-    ONLINE: 'online',         // 已連線
-    RECONNECTING: 'reconnecting', // 斷線重連中
-    ERROR: 'error',           // 連線錯誤
+    OFFLINE: 'offline',
+    LOADING: 'loading',
+    CONNECTING: 'connecting',
+    ONLINE: 'online',
+    RECONNECTING: 'reconnecting',
+    ERROR: 'error',
   };
 
-  const MOVE_THROTTLE_MS = 100;
-  const SERVER_WORLD_SIZE = 2048; // 伺服器世界座標 0~2048
-  const STORAGE_KEY = 'mp_server_url';
-
-  // 狀態
-  let socket = null;
   let status = STATUS.OFFLINE;
-  let mySocketId = null;
-  let lastMoveEmitAt = 0;
-  let lastSentX = null;
-  let lastSentY = null;
-  let lastSentDir = null;
+  let onStatusChange = null;
+  let onChatMessage = null;
+  let onMonsterDamage = null;
+  let onMonsterKilled = null;
+  let onGainReward = null;
 
-  // 遠端玩家池
-  const remotePlayers = new Map(); // key: socketId
+  let serverUrl = '';
+  let authToken = '';
+  let myPlayerId = null;
   let currentMapId = null;
+  let currentCharIdx = 0;
   let currentWorldW = 2496;
   let currentWorldH = 1664;
 
-  // 狀態改變回調（給 game.js 更新 UI）
-  let onStatusChange = null;
-  // 聊天訊息回調
-  let onChatMessage = null;
-  // 怪物傷害回調
-  let onMonsterDamage = null;
-  // 怪物擊殺回調
-  let onMonsterKilled = null;
-  // 獎勵回調
-  let onGainReward = null;
-
-  // ========== 座標轉換 ==========
-  function worldToServer(x, y) {
-    const sx = (x / currentWorldW) * SERVER_WORLD_SIZE;
-    const sy = (y / currentWorldH) * SERVER_WORLD_SIZE;
-    return { x: Math.round(sx * 10) / 10, y: Math.round(sy * 10) / 10 };
-  }
-  function serverToWorld(x, y) {
-    const wx = (x / SERVER_WORLD_SIZE) * currentWorldW;
-    const wy = (y / SERVER_WORLD_SIZE) * currentWorldH;
-    return { x: wx, y: wy };
-  }
+  const remotePlayers = new Map();
+  let pollAbortController = null;
+  let pollRunning = false;
+  let reconnectDelay = 1000;
+  let lastPollTime = 0;
+  let lastUpdateTime = 0;
+  const UPDATE_THROTTLE = 50; // 50ms 節流發位置
 
   // ========== 工具 ==========
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c]));
+  function getAuthHeader() {
+    return { 'Authorization': 'Bearer ' + authToken };
   }
 
-  function loadScript(src, timeoutMs) {
-    return new Promise((resolve, reject) => {
-      try {
-        const s = document.createElement('script');
-        s.src = src;
-        s.async = true;
-        let done = false;
-        const t = setTimeout(() => {
-          if (done) return;
-          done = true;
-          reject(new Error('timeout: ' + src));
-        }, timeoutMs || 8000);
-        s.onload = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(t);
-          resolve();
-        };
-        s.onerror = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(t);
-          reject(new Error('load failed: ' + src));
-        };
-        document.head.appendChild(s);
-      } catch (e) { reject(e); }
-    });
+  function apiPost(path, body) {
+    return fetch(serverUrl + path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      credentials: 'omit',
+      body: JSON.stringify(body || {}),
+    }).then(r => r.json());
   }
 
-  // ========== 狀態管理 ==========
+  function apiGet(path) {
+    return fetch(serverUrl + path, {
+      method: 'GET',
+      headers: getAuthHeader(),
+      credentials: 'omit',
+    }).then(r => r.json());
+  }
+
   function setStatus(newStatus) {
     if (status === newStatus) return;
     status = newStatus;
@@ -107,19 +67,26 @@
     }
   }
 
+  // 座標轉換（與原 socket.io 版一致）
+  function serverToWorld(sx, sy) {
+    return { x: sx, y: sy };
+  }
+  function worldToServer(wx, wy) {
+    return { x: wx, y: wy };
+  }
+
   // ========== 公開 API ==========
   const MultiplayerClient = {
     get status() { return status; },
-    get myId() { return mySocketId; },
+    get myId() { return myPlayerId; },
     get connected() { return status === STATUS.ONLINE; },
     STATUS: STATUS,
 
-    // 從 localStorage 讀取伺服器位址
     getSavedServerUrl() {
-      try { return localStorage.getItem(STORAGE_KEY) || ''; } catch (e) { return ''; }
+      try { return localStorage.getItem('mp_server_url') || ''; } catch (e) { return ''; }
     },
     saveServerUrl(url) {
-      try { localStorage.setItem(STORAGE_KEY, url || ''); } catch (e) { /* ignore */ }
+      try { localStorage.setItem('mp_server_url', url || ''); } catch (e) { /* ignore */ }
     },
 
     setStatusCallback(cb) { onStatusChange = typeof cb === 'function' ? cb : null; },
@@ -128,144 +95,216 @@
     setMonsterKilledCallback(cb) { onMonsterKilled = typeof cb === 'function' ? cb : null; },
     setGainRewardCallback(cb) { onGainReward = typeof cb === 'function' ? cb : null; },
 
-    // 設定當前世界尺寸（用於座標轉換）
     setWorldSize(w, h) {
       currentWorldW = w || 2496;
       currentWorldH = h || 1664;
     },
 
-    // 連線到指定伺服器（玩家按下連線時呼叫）
-    connect(serverUrl) {
-      const url = (serverUrl || '').trim();
-      if (!url) {
+    // 連線：token 從遊戲端傳入（與 cookie 同步）
+    connect(url, token) {
+      const u = (url || '').trim();
+      if (!u) {
         setStatus(STATUS.ERROR);
         return Promise.reject(new Error('伺服器位址為空'));
       }
-      // 保存位址
-      MultiplayerClient.saveServerUrl(url);
-      // 如果已連線或連線中，先斷開
-      if (socket) {
-        try { socket.disconnect(); } catch (e) { /* ignore */ }
-        socket = null;
+      serverUrl = u.replace(/\/+$/, '');
+      MultiplayerClient.saveServerUrl(u);
+      authToken = token || '';
+
+      // 先斷開舊的
+      if (pollAbortController) {
+        try { pollAbortController.abort(); } catch(e) {}
+        pollAbortController = null;
       }
       clearAllRemotePlayers();
-      mySocketId = null;
-      setStatus(STATUS.LOADING);
+      myPlayerId = null;
+      reconnectDelay = 1000;
+      setStatus(STATUS.CONNECTING);
 
-      // 先嘗試從伺服器載入 socket.io client
-      const clientUrl = url.replace(/\/+$/, '') + '/socket.io/socket.io.js';
-      return loadScript(clientUrl, 8000)
-        .catch(() => {
-          // 失敗則用 CDN 備援
-          console.info('[Multi] origin socket.io load failed, trying CDN');
-          if (typeof window.io === 'function') return;
-          return loadScript('https://cdn.socket.io/4.7.5/socket.io.min.js', 8000);
-        })
-        .then(() => {
-          if (typeof window.io !== 'function') {
-            throw new Error('socket.io 載入失敗');
+      // 用 health 檢查伺服器是否活著
+      return fetch(serverUrl + '/api/health')
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.status === 'online') {
+            setStatus(STATUS.ONLINE);
+            console.info('[Multi] 伺服器連線成功:', data.version);
+            // 若已有玩家資料，自動 join
+            if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
+              return MultiplayerClient.joinWorld();
+            }
+            return null;
+          } else {
+            setStatus(STATUS.ERROR);
+            throw new Error('伺服器狀態異常');
           }
-          doConnect(url);
         })
         .catch(err => {
-          console.warn('[Multi] connect init error:', err);
+          console.warn('[Multi] 連線失敗:', err.message);
           setStatus(STATUS.ERROR);
           throw err;
         });
     },
 
-    // 手動斷線
     disconnect() {
-      if (socket) {
-        try { socket.disconnect(); } catch (e) { /* ignore */ }
-        socket = null;
+      if (currentMapId) {
+        try {
+          apiPost('/api/mp/leave', { mapId: currentMapId, charIdx: currentCharIdx });
+        } catch(e) {}
       }
+      if (pollAbortController) {
+        try { pollAbortController.abort(); } catch(e) {}
+        pollAbortController = null;
+      }
+      pollRunning = false;
       clearAllRemotePlayers();
-      mySocketId = null;
+      myPlayerId = null;
+      currentMapId = null;
       setStatus(STATUS.OFFLINE);
     },
 
-    // 玩家建立後進入世界
-    joinWorld(playerInfo) {
-      if (!socket || status !== STATUS.ONLINE) return;
-      try {
-        socket.emit('join_world', {
-          name: playerInfo.name || 'Player',
-          class: playerInfo.classId || 'warrior',
-          level: playerInfo.level || 1,
-        });
-      } catch (e) { /* ignore */ }
+    // 加入世界（從 auth token 推斷帳號）
+    joinWorld(opts) {
+      opts = opts || {};
+      currentCharIdx = opts.charIdx ?? (GS.currentCharIdx ?? 0);
+      const mapId = opts.mapId || GS.currentMap || 'village_01';
+      return apiPost('/api/mp/join', {
+        mapId,
+        serverId: opts.serverId || 'zeus',
+        charIdx: currentCharIdx,
+      }).then(data => {
+        if (data.ok) {
+          myPlayerId = data.playerId;
+          currentMapId = mapId;
+          // 初始化遠端玩家列表
+          if (data.others && Array.isArray(data.others)) {
+            data.others.forEach(p => {
+              if (p.playerId !== myPlayerId) {
+                addOrUpdateRemotePlayer({
+                  id: p.playerId,
+                  name: p.name,
+                  class: p.classId,
+                  level: p.level,
+                  x: p.x, y: p.y, dir: p.dir,
+                  transform: p.transformId,
+                });
+              }
+            });
+          }
+          setStatus(STATUS.ONLINE);
+          startPollLoop();
+          console.info('[Multi] 加入地圖 ' + mapId + '，在線 ' + ((data.others||[]).length+1) + ' 人');
+          return data;
+        } else {
+          throw new Error(data.error || '加入失敗');
+        }
+      }).catch(err => {
+        console.warn('[Multi] joinWorld 失敗:', err.message);
+        return null;
+      });
     },
 
-    // 進入地圖
-    enterMap(mapId, channel, worldW, worldH) {
-      if (worldW != null) currentWorldW = worldW;
-      if (worldH != null) currentWorldH = worldH;
-      currentMapId = mapId || null;
-      // 切換地圖時清空本地遠端玩家
+    // 切換地圖
+    enterMap(mapId, charIdx, worldW, worldH) {
+      if (!mapId || mapId === currentMapId) return Promise.resolve();
+      // 先離開舊地圖
+      const oldMap = currentMapId;
+      currentMapId = mapId;
+      if (worldW) currentWorldW = worldW;
+      if (worldH) currentWorldH = worldH;
+      if (charIdx != null) currentCharIdx = charIdx;
+
+      // 清空遠端玩家
       clearAllRemotePlayers();
-      if (!socket || status !== STATUS.ONLINE) return;
-      try {
-        socket.emit('enter_map', {
-          mapId: mapId || 'village',
-          channel: channel || 0,
-        });
-      } catch (e) { /* ignore */ }
+
+      // 加入新地圖
+      return apiPost('/api/mp/join', {
+        mapId,
+        serverId: 'zeus',
+        charIdx: currentCharIdx,
+      }).then(data => {
+        if (data.ok) {
+          myPlayerId = data.playerId;
+          if (data.others && Array.isArray(data.others)) {
+            data.others.forEach(p => {
+              if (p.playerId !== myPlayerId) {
+                addOrUpdateRemotePlayer({
+                  id: p.playerId,
+                  name: p.name,
+                  class: p.classId,
+                  level: p.level,
+                  x: p.x, y: p.y, dir: p.dir,
+                  transform: p.transformId,
+                });
+              }
+            });
+          }
+          console.info('[Multi] 進入地圖 ' + mapId);
+          return data;
+        }
+        return null;
+      }).catch(() => null);
     },
 
-    // 玩家移動（節流 ~100ms）
+    // 回報移動（節流）
     reportMove(x, y, dir) {
-      if (!socket || status !== STATUS.ONLINE) return;
+      if (status !== STATUS.ONLINE || !currentMapId) return;
       const now = Date.now();
-      if (now - lastMoveEmitAt < MOVE_THROTTLE_MS) return;
-      const dirN = (dir === 'left' || dir === -1) ? -1 : 1;
-      if (lastSentX === x && lastSentY === y && lastSentDir === dirN) return;
-      lastMoveEmitAt = now;
-      lastSentX = x;
-      lastSentY = y;
-      lastSentDir = dirN;
+      if (now - lastUpdateTime < UPDATE_THROTTLE) return;
+      lastUpdateTime = now;
       const sPos = worldToServer(x, y);
-      try {
-        socket.emit('move', { x: sPos.x, y: sPos.y, dir: dirN });
-      } catch (e) { /* ignore */ }
+      apiPost('/api/mp/update', {
+        mapId: currentMapId,
+        charIdx: currentCharIdx,
+        x: sPos.x,
+        y: sPos.y,
+        dir: dir,
+      }).catch(() => {
+        // 失敗不影響
+      });
     },
 
-    // 玩家等級/變身/國家變更時同步
-    updateProfile(playerInfo) {
-      if (!socket || status !== STATUS.ONLINE) return;
-      try {
-        socket.emit('update_profile', {
-          name: playerInfo.name,
-          class: playerInfo.classId,
-          level: playerInfo.level,
-          transform: playerInfo.transformId || null,
-          country: playerInfo.nation || null,
-        });
-      } catch (e) { /* ignore */ }
+    // 回報血量變化
+    reportHp(hp, maxHp) {
+      if (status !== STATUS.ONLINE || !currentMapId) return;
+      apiPost('/api/mp/update', {
+        mapId: currentMapId,
+        charIdx: currentCharIdx,
+        hp, maxHp,
+      }).catch(() => {});
     },
 
-    // 發送聊天
+    // 回報變身變化
+    reportTransform(transformId) {
+      if (status !== STATUS.ONLINE || !currentMapId) return;
+      apiPost('/api/mp/update', {
+        mapId: currentMapId,
+        charIdx: currentCharIdx,
+        transformId,
+      }).catch(() => {});
+    },
+
     sendChat(text, channel) {
-      if (!socket || status !== STATUS.ONLINE) return false;
-      const ch = channel || 'world';
-      try {
-        socket.emit('chat', { channel: ch, text: String(text || '').slice(0, 200) });
-        return true;
-      } catch (e) { return false; }
+      if (status !== STATUS.ONLINE || !currentMapId) return;
+      return apiPost('/api/mp/chat', {
+        mapId: currentMapId,
+        charIdx: currentCharIdx,
+        channel: channel || 'map',
+        text,
+      });
     },
 
-    // 攻擊怪物
-    attackMonster(monsterId, skillId) {
-      if (!socket || status !== STATUS.ONLINE) return;
-      try {
-        socket.emit('attack_monster', {
-          monsterId: monsterId,
-          skillId: skillId || 'basic_attack',
-        });
-      } catch (e) { /* ignore */ }
+    attackMonster(monsterId, skillId, damage) {
+      if (status !== STATUS.ONLINE || !currentMapId) return;
+      apiPost('/api/mp/attack', {
+        mapId: currentMapId,
+        charIdx: currentCharIdx,
+        targetId: monsterId,
+        skillId,
+        damage,
+      }).catch(() => {});
     },
 
-    // 每幀更新遠端玩家位置（內插）與渲染
+    // 每幀更新遠端玩家位置（內插）
     tick(dt) {
       if (status !== STATUS.ONLINE || remotePlayers.size === 0) return;
       try { updateRemotePlayers(dt); } catch (e) { console.error('[Multi] tick error:', e); }
@@ -274,159 +313,147 @@
     _getRemotePlayers() { return remotePlayers; },
   };
 
-  // ========== 實際連線 ==========
-  function doConnect(url) {
-    try {
-      socket = window.io(url, {
-        reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1500,
-        reconnectionDelayMax: 8000,
-        timeout: 12000,
-      });
-    } catch (e) {
-      console.warn('[Multi] io() failed:', e);
-      setStatus(STATUS.ERROR);
+  // ========== Long-Poll 循環 ==========
+  function startPollLoop() {
+    if (pollRunning) return;
+    pollRunning = true;
+    pollLoop();
+  }
+
+  function pollLoop() {
+    if (status !== STATUS.ONLINE || !currentMapId) {
+      pollRunning = false;
       return;
     }
+    pollAbortController = new AbortController();
+    const since = Date.now();
+    const url = serverUrl + '/api/mp/poll?map=' + encodeURIComponent(currentMapId)
+      + '&charIdx=' + currentCharIdx
+      + '&since=' + since;
 
-    setStatus(STATUS.CONNECTING);
-
-    socket.on('connect', () => {
-      mySocketId = socket.id;
-      setStatus(STATUS.ONLINE);
-      console.info('[Multi] connected, id=' + mySocketId);
-      // 若玩家已建立，重新 join
-      if (typeof window.GS !== 'undefined' && window.GS.player && window.GS.player.name) {
-        MultiplayerClient.joinWorld({
-          name: GS.player.name,
-          classId: GS.player.classId,
-          level: GS.player.level,
-        });
-        if (GS.currentMap) {
-          MultiplayerClient.enterMap(GS.currentMap, 0, currentWorldW, currentWorldH);
+    fetch(url, {
+      method: 'GET',
+      headers: getAuthHeader(),
+      signal: pollAbortController.signal,
+      credentials: 'omit',
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.ok && data.events) {
+        handlePollEvents(data.events);
+        if (data.broadcasts && data.broadcasts.length) {
+          // 全服廣播處理
+          data.broadcasts.forEach(b => {
+            if (b.type === 'gm_broadcast' && onChatMessage) {
+              try {
+                onChatMessage({
+                  name: '【系統公告】',
+                  text: b.text || '',
+                  channel: 'system',
+                  system: true,
+                });
+              } catch(e) {}
+            }
+          });
         }
       }
-    });
-
-    socket.on('disconnect', (reason) => {
-      const wasOnline = status === STATUS.ONLINE;
-      mySocketId = null;
-      clearAllRemotePlayers();
-      if (wasOnline) {
-        // 斷線了，socket.io 會自動重連
-        setStatus(STATUS.RECONNECTING);
+      reconnectDelay = 1000; // 重置退避
+      // 繼續下一輪
+      if (pollRunning) setTimeout(pollLoop, 50);
+    })
+    .catch(err => {
+      if (err.name === 'AbortError') {
+        pollRunning = false;
+        return;
       }
-      console.info('[Multi] disconnected:', reason);
-    });
-
-    socket.on('connect_error', (err) => {
-      console.warn('[Multi] connect_error:', err?.message || err);
-      // Render 免費版冷啟動時常見，顯示連線中
-      if (status === STATUS.CONNECTING || status === STATUS.LOADING) {
-        // 保持 CONNECTING 狀態讓使用者知道還在嘗試
-      } else if (status === STATUS.ONLINE) {
-        setStatus(STATUS.RECONNECTING);
-      } else {
-        setStatus(STATUS.ERROR);
+      console.warn('[Multi] poll 失敗:', err.message);
+      // 退避重連
+      if (pollRunning) {
+        if (status === STATUS.ONLINE) setStatus(STATUS.RECONNECTING);
+        setTimeout(pollLoop, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 8000);
       }
     });
+  }
 
-    socket.on('reconnect', (attempt) => {
-      console.info('[Multi] reconnected after', attempt, 'attempts');
-      // connect 事件也會觸發，這裡不設 status
-    });
-
-    socket.on('reconnect_attempt', (attempt) => {
-      console.info('[Multi] reconnect attempt', attempt);
-      if (status !== STATUS.RECONNECTING) setStatus(STATUS.RECONNECTING);
-    });
-
-    // ========== 伺服器事件 ==========
-    socket.on('map_state', (data) => {
-      if (!data || !Array.isArray(data.entities)) return;
-      handleMapState(data.entities, data.monsters);
-    });
-
-    socket.on('player_move', (data) => {
-      if (!data || !data.id) return;
-      handlePlayerMove(data);
-    });
-
-    socket.on('player_left', (data) => {
-      if (!data || !data.id) return;
-      removeRemotePlayer(data.id);
-    });
-
-    socket.on('player_joined', (data) => {
-      if (!data || !data.id) return;
-      addOrUpdateRemotePlayer(data);
-    });
-
-    socket.on('player_profile', (data) => {
-      if (!data || !data.id) return;
-      const p = remotePlayers.get(data.id);
-      if (!p) return;
-      if (data.name != null) p.name = data.name;
-      if (data.class != null) p.classId = data.class;
-      if (data.level != null) p.level = data.level;
-      if (data.transform != null) p.transformId = data.transform;
-      if (data.country != null) p.nation = data.country;
-      if (p.el) refreshRemotePlayerVisual(p);
-    });
-
-    socket.on('chat', (data) => {
-      if (!data) return;
-      if (onChatMessage) {
-        try {
-          onChatMessage({
-            name: data.name || '匿名',
-            text: data.text || '',
-            channel: data.channel || 'world',
-            country: data.country || null,
-          });
-        } catch (e) { console.error('[Multi] chat cb error:', e); }
+  function handlePollEvents(events) {
+    if (!events || !events.length) return;
+    for (const ev of events) {
+      if (!ev || !ev.type) continue;
+      switch (ev.type) {
+        case 'join':
+          if (ev.playerId !== myPlayerId && ev.state) {
+            addOrUpdateRemotePlayer({
+              id: ev.playerId,
+              name: ev.state.name,
+              class: ev.state.classId,
+              level: ev.state.level,
+              x: ev.state.x, y: ev.state.y, dir: ev.state.dir,
+              transform: ev.state.transformId,
+            });
+          }
+          break;
+        case 'leave':
+          if (ev.playerId !== myPlayerId) {
+            removeRemotePlayer(ev.playerId);
+          }
+          break;
+        case 'move':
+          if (ev.playerId !== myPlayerId) {
+            handlePlayerMove({
+              id: ev.playerId,
+              x: ev.x, y: ev.y, dir: ev.dir,
+              hp: ev.hp, transform: ev.transformId,
+              moving: true,
+            });
+          }
+          break;
+        case 'chat':
+          if (onChatMessage) {
+            try {
+              onChatMessage({
+                name: ev.name || '匿名',
+                text: ev.text || '',
+                channel: ev.channel || 'map',
+                country: null,
+              });
+            } catch(e) {}
+          }
+          break;
+        case 'attack':
+          if (ev.playerId !== myPlayerId) {
+            // 觸發遠端玩家攻擊動畫
+            const p = remotePlayers.get(ev.playerId);
+            if (p && p.el) {
+              p.el.classList.add('attacking');
+              setTimeout(() => { if (p.el) p.el.classList.remove('attacking'); }, 300);
+            }
+            // 怪物傷害回調
+            if (onMonsterDamage && ev.targetId) {
+              const wPos = { x: ev.x || 0, y: ev.y || 0 };
+              try {
+                onMonsterDamage({
+                  monsterId: ev.targetId,
+                  damage: ev.damage || 0,
+                  isCrit: false,
+                  x: wPos.x,
+                  y: wPos.y,
+                  attackerName: '',
+                });
+              } catch(e) {}
+            }
+          }
+          break;
       }
-    });
+    }
+  }
 
-    socket.on('monster_damage', (data) => {
-      if (!data) return;
-      if (onMonsterDamage) {
-        try {
-          const wPos = serverToWorld(data.x || 0, data.y || 0);
-          onMonsterDamage({
-            monsterId: data.monsterId,
-            damage: data.damage || 0,
-            isCrit: !!data.isCrit,
-            x: wPos.x,
-            y: wPos.y,
-            attackerName: data.attackerName || '',
-          });
-        } catch (e) { console.error('[Multi] monster_damage cb error:', e); }
-      }
-    });
-
-    socket.on('monster_killed', (data) => {
-      if (!data) return;
-      if (onMonsterKilled) {
-        try {
-          const wPos = serverToWorld(data.x || 0, data.y || 0);
-          onMonsterKilled({
-            monsterId: data.monsterId,
-            x: wPos.x,
-            y: wPos.y,
-            killerName: data.killerName || '',
-          });
-        } catch (e) { console.error('[Multi] monster_killed cb error:', e); }
-      }
-    });
-
-    socket.on('gain_reward', (data) => {
-      if (!data) return;
-      if (onGainReward) {
-        try { onGainReward(data); } catch (e) { console.error('[Multi] gain_reward cb error:', e); }
-      }
-    });
+  // ========== 工具：清空遠端玩家 ==========
+  function clearAllRemotePlayers() {
+    for (const [id, p] of remotePlayers) {
+      if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+    }
+    remotePlayers.clear();
   }
 
   // ========== 遠端玩家管理 ==========
@@ -678,7 +705,7 @@
   // 頁面關閉/刷新前主動斷線
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', () => {
-      if (socket) { try { socket.disconnect(); } catch (e) { /* ignore */ } }
+      try { MultiplayerClient.disconnect(); } catch (e) { /* ignore */ }
     });
   }
 })();

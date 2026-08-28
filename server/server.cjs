@@ -117,6 +117,231 @@ const SERVERS = [
 // ========== 線上玩家狀態（Socket.IO 用） ==========
 const onlinePlayers = new Map(); // socketId -> { account, name, serverId, mapId, ... }
 
+
+// ========== Long-Poll 多人連線狀態 ==========
+// v2.4.0：零依賴 HTTP long-polling 實現真·多人同步
+const MP_POLL_TIMEOUT = 25000; // 25s long-poll 超時
+const MP_IDLE_TIMEOUT = 30000; // 30s 沒 update 踢離線
+const MP_MAX_PLAYERS_PER_MAP = 200;
+
+/** 地圖玩家狀態：mapId -> Map(playerId -> state) */
+const mpMapStates = new Map();
+/** 等待中的 poll 請求：mapId -> [{ res, since, playerId }] */
+const mpPollWaiters = new Map();
+/** 全服廣播歷史（最新 50 條） */
+const mpBroadcasts = [];
+
+function getMapState(mapId) {
+  if (!mpMapStates.has(mapId)) mpMapStates.set(mapId, new Map());
+  return mpMapStates.get(mapId);
+}
+
+function notifyMapUpdate(mapId, event) {
+  const waiters = mpPollWaiters.get(mapId) || [];
+  const remaining = [];
+  for (const w of waiters) {
+    if (w.playerId === event.playerId && event.type === 'move') {
+      remaining.push(w); // 不給自己推自己的 move
+      continue;
+    }
+    try {
+      w.res.end(JSON.stringify({ ok: true, events: [event], time: Date.now() }));
+    } catch(e) {}
+  }
+  mpPollWaiters.set(mapId, remaining);
+}
+
+function mpCleanupIdle() {
+  const now = Date.now();
+  for (const [mapId, players] of mpMapStates) {
+    for (const [pid, p] of players) {
+      if (now - p.lastUpdate > MP_IDLE_TIMEOUT) {
+        players.delete(pid);
+        notifyMapUpdate(mapId, { type: 'leave', playerId: pid, time: now });
+      }
+    }
+  }
+}
+setInterval(mpCleanupIdle, 5000);
+
+// ========== 多人連線 API 處理 ==========
+async function handleMpApi(req, res, pathname, query, account) {
+  if (!account) { sendJson(res, 401, { error: '未登入' }); return; }
+
+  // POST /api/mp/join 加入世界
+  if (req.method === 'POST' && pathname === '/api/mp/join') {
+    const body = await parseJsonBody(req);
+    const mapId = body.mapId || 'village_01';
+    const serverId = body.serverId || 'zeus';
+    const charIdx = body.charIdx ?? 0;
+    try {
+      const charData = await db.getCharacter(account, serverId, charIdx);
+      if (!charData || (!charData.save_data && !charData.player)) { sendJson(res, 404, { error: '角色不存在' }); return; }
+      const sd = charData.save_data || charData;
+      const playerId = account + ':' + charIdx;
+      const state = {
+        playerId,
+        account,
+        charIdx,
+        name: sd.player ? sd.player.name : account,
+        level: sd.player ? sd.player.level : 1,
+        classId: sd.player ? sd.player.classId : 'warrior',
+        mapId,
+        x: sd.player ? sd.player.x || 400 : 400,
+        y: sd.player ? sd.player.y || 400 : 400,
+        dir: sd.player ? sd.player.dir || 'down' : 'down',
+        hp: sd.player ? sd.player.hp || 100 : 100,
+        maxHp: sd.player ? sd.player.maxHp || 100 : 100,
+        transformId: sd.transformId || null,
+        lastUpdate: Date.now(),
+      };
+      const mapState = getMapState(mapId);
+      if (mapState.size >= MP_MAX_PLAYERS_PER_MAP) { sendJson(res, 503, { error: '地圖已滿' }); return; }
+      mapState.set(playerId, state);
+      notifyMapUpdate(mapId, { type: 'join', playerId, state, time: Date.now() });
+      // 返回當前地圖所有玩家（不含自己）
+      const others = [];
+      for (const [pid, s] of mapState) {
+        if (pid !== playerId) others.push(s);
+      }
+      sendJson(res, 200, { ok: true, playerId, others, mapId, time: Date.now() });
+    } catch(e) {
+      sendJson(res, 500, { error: e.message });
+    }
+    return;
+  }
+
+  // POST /api/mp/leave 離開
+  if (req.method === 'POST' && pathname === '/api/mp/leave') {
+    const body = await parseJsonBody(req);
+    const mapId = body.mapId;
+    const charIdx = body.charIdx ?? 0;
+    const playerId = account + ':' + charIdx;
+    if (mapId && mpMapStates.has(mapId)) {
+      mpMapStates.get(mapId).delete(playerId);
+      notifyMapUpdate(mapId, { type: 'leave', playerId, time: Date.now() });
+    }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // POST /api/mp/update 上傳自身狀態並等待更新
+  if (req.method === 'POST' && pathname === '/api/mp/update') {
+    const body = await parseJsonBody(req);
+    const mapId = body.mapId;
+    const charIdx = body.charIdx ?? 0;
+    const playerId = account + ':' + charIdx;
+    if (!mapId) { sendJson(res, 400, { error: '缺少 mapId' }); return; }
+    const mapState = getMapState(mapId);
+    const state = mapState.get(playerId);
+    if (!state) { sendJson(res, 401, { error: '未加入此地圖，請先 join' }); return; }
+    // 更新狀態
+    if (body.x != null) state.x = body.x;
+    if (body.y != null) state.y = body.y;
+    if (body.dir != null) state.dir = body.dir;
+    if (body.hp != null) state.hp = body.hp;
+    if (body.transformId != null) state.transformId = body.transformId;
+    state.lastUpdate = Date.now();
+    // 廣播給其他等待中的人
+    notifyMapUpdate(mapId, {
+      type: 'move',
+      playerId,
+      x: state.x, y: state.y, dir: state.dir,
+      hp: state.hp, transformId: state.transformId,
+      time: Date.now(),
+    });
+    // 立即返回（不等 long-poll，客戶端另外用 GET /api/mp/poll 拉）
+    sendJson(res, 200, { ok: true, time: Date.now() });
+    return;
+  }
+
+  // GET /api/mp/poll long-poll 拉取更新
+  if (req.method === 'GET' && pathname === '/api/mp/poll') {
+    const mapId = query.map;
+    const charIdx = query.charIdx ? parseInt(query.charIdx) : 0;
+    const playerId = account + ':' + charIdx;
+    const since = query.since ? parseInt(query.since) : 0;
+    if (!mapId) { sendJson(res, 400, { error: '缺少 map' }); return; }
+    // 檢查是否有新的廣播（全服）
+    const newBcasts = mpBroadcasts.filter(b => b.time > since);
+    // 掛起等待
+    if (!mpPollWaiters.has(mapId)) mpPollWaiters.set(mapId, []);
+    const waiters = mpPollWaiters.get(mapId);
+    const entry = { res, since, playerId, startTime: Date.now() };
+    waiters.push(entry);
+    // 超時返回空
+    setTimeout(() => {
+      const idx = waiters.indexOf(entry);
+      if (idx >= 0) {
+        waiters.splice(idx, 1);
+        try {
+          res.end(JSON.stringify({ ok: true, events: [], broadcasts: newBcasts, time: Date.now(), timeout: true }));
+        } catch(e) {}
+      }
+    }, MP_POLL_TIMEOUT);
+    // 如果當時就有廣播，提前返回
+    if (newBcasts.length > 0) {
+      const idx = waiters.indexOf(entry);
+      if (idx >= 0) {
+        waiters.splice(idx, 1);
+        try {
+          res.end(JSON.stringify({ ok: true, events: [], broadcasts: newBcasts, time: Date.now() }));
+        } catch(e) {}
+      }
+    }
+    return;
+  }
+
+  // POST /api/mp/chat 聊天
+  if (req.method === 'POST' && pathname === '/api/mp/chat') {
+    const body = await parseJsonBody(req);
+    const mapId = body.mapId;
+    const charIdx = body.charIdx ?? 0;
+    const playerId = account + ':' + charIdx;
+    const channel = body.channel || 'map';
+    const text = (body.text || '').slice(0, 200);
+    if (!mapId || !text) { sendJson(res, 400, { error: '參數錯誤' }); return; }
+    const mapState = getMapState(mapId);
+    const state = mapState.get(playerId);
+    if (!state) { sendJson(res, 401, { error: '未加入' }); return; }
+    const chatEvent = {
+      type: 'chat',
+      playerId,
+      name: state.name,
+      channel,
+      text,
+      time: Date.now(),
+    };
+    notifyMapUpdate(mapId, chatEvent);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // POST /api/mp/attack 廣播攻擊動畫
+  if (req.method === 'POST' && pathname === '/api/mp/attack') {
+    const body = await parseJsonBody(req);
+    const mapId = body.mapId;
+    const charIdx = body.charIdx ?? 0;
+    const playerId = account + ':' + charIdx;
+    const targetId = body.targetId;
+    if (!mapId) { sendJson(res, 400, { error: '缺少 mapId' }); return; }
+    const mapState = getMapState(mapId);
+    if (!mapState.has(playerId)) { sendJson(res, 401, { error: '未加入' }); return; }
+    notifyMapUpdate(mapId, {
+      type: 'attack',
+      playerId,
+      targetId,
+      skillId: body.skillId || 0,
+      damage: body.damage || 0,
+      time: Date.now(),
+    });
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  sendJson(res, 404, { error: '未知 API' });
+}
+
 // ========== MIME 類型 ==========
 function getMime(filePath) {
   const ext = path.extname(filePath).toLowerCase();
@@ -195,7 +420,9 @@ function serveStatic(req, res, pathname) {
   let decoded = decodeURIComponent(pathname);
   let filePath = path.join(ROOT_DIR, decoded);
 
-  if (pathname === '/' || pathname === '') {
+  if (pathname === '/gm' || pathname === '/gm/') {
+    filePath = path.join(ROOT_DIR, 'gm.html');
+  } else if (pathname === '/' || pathname === '') {
     filePath = path.join(ROOT_DIR, 'index.html');
   }
 
@@ -205,7 +432,7 @@ function serveStatic(req, res, pathname) {
     }
   } catch (e) { /* ignore */ }
 
-  // v2.3.5-patch：檔案不存在時，若為 /assets/* 則嘗試大小寫對照表備查
+  // v2.4.0-patch：檔案不存在時，若為 /assets/* 則嘗試大小寫對照表備查
   if (!fs.existsSync(filePath) && decoded.toLowerCase().startsWith('/assets/')) {
     const rel = decoded.slice(8).toLowerCase(); // 去掉 /assets/
     const real = assetIndex.get(rel);
@@ -243,11 +470,11 @@ function serveStatic(req, res, pathname) {
       headers['Content-Type'] = 'application/zip';
       headers['X-Accel-Buffering'] = 'yes';
     }
-    // v2.3.5：分卷資產 + 程式碼小包，直接可下載
+    // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.3.5-code.zip',
-      '/assets-part1.zip': 'monarch-blade-v2.3.5-assets-part1.zip',
-      '/assets-part2.zip': 'monarch-blade-v2.3.5-assets-part2.zip',
+      '/game-code.zip': 'monarch-blade-v2.4.0-code.zip',
+      '/assets-part1.zip': 'monarch-blade-v2.4.0-assets-part1.zip',
+      '/assets-part2.zip': 'monarch-blade-v2.4.0-assets-part2.zip',
     };
     if (dlFiles[pathname]) {
       headers['Content-Disposition'] = 'attachment; filename="' + dlFiles[pathname] + '"';
@@ -255,7 +482,7 @@ function serveStatic(req, res, pathname) {
       headers['X-Accel-Buffering'] = 'yes';
     }
     if (pathname === '/PARTS-MANIFEST.txt') {
-      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.3.5.txt"';
+      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.4.0.txt"';
     }
     res.writeHead(200, headers);
     const stream = fs.createReadStream(filePath);
@@ -294,13 +521,20 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.3.5',
+      version: '2.4.0',
       time: Date.now(),
       socketIo: socketIoInstalled,
       dbBackend: db.getBackend(),
       assetCount: assetCount,
       assetsReady: assetCount > 100,
     });
+  }
+
+  // === 多人連線 API（long-poll，v2.4.0）===
+  if (pathname.startsWith('/api/mp/')) {
+    const account = getAuthAccount(req);
+    await handleMpApi(req, res, pathname, query, account);
+    return;
   }
 
   // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
@@ -346,7 +580,7 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.3.5',
+      version: '2.4.0',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -702,6 +936,46 @@ async function handleApi(req, res, pathname, query) {
           });
         }
         break;
+      case 'addTransform':
+        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (transformId)' });
+        if (!saveData.transforms) saveData.transforms = [];
+        if (!saveData.transforms.find(t => t && t.id === itemId)) {
+          saveData.transforms.push({
+            id: itemId,
+            name: body.itemName || itemId,
+            unlocked: true,
+            level: 1,
+          });
+        }
+        break;
+      case 'removeTransform':
+        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (transformId)' });
+        if (saveData.transforms) {
+          saveData.transforms = saveData.transforms.filter(t => !(t && t.id === itemId));
+        }
+        break;
+      case 'addHero':
+        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (heroId)' });
+        if (!saveData.ownedHeroes) saveData.ownedHeroes = [];
+        if (!saveData.ownedHeroes.find(h => h && h.id === itemId)) {
+          saveData.ownedHeroes.push({
+            id: itemId,
+            name: body.itemName || itemId,
+            level: 1,
+            star: 1,
+          });
+        }
+        break;
+      case 'removeHero':
+        if (!itemId) return sendJson(res, 400, { error: '缺少 itemId (heroId)' });
+        if (saveData.ownedHeroes) {
+          saveData.ownedHeroes = saveData.ownedHeroes.filter(h => !(h && h.id === itemId));
+        }
+        break;
+      case 'setExp':
+        if (!saveData.player) saveData.player = { level: 1, exp: 0 };
+        saveData.player.exp = parseInt(value) || 0;
+        break;
       case 'teleport':
         if (mapId) saveData.currentMap = mapId;
         break;
@@ -723,6 +997,309 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, { ok: true, action, resources: saveData.resources, level: saveData.player?.level });
   }
+
+  // POST /api/gm/login — GM 獨立登入
+  if (req.method === 'POST' && pathname === '/api/gm/login') {
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const account = String(body.account || '').trim();
+    const password = String(body.password || '');
+    if (!account || !password) return sendJson(res, 400, { error: '缺少帳號或密碼' });
+
+    const acc = await db.getAccount(account);
+    if (!acc) return sendJson(res, 401, { error: '帳號或密碼錯誤' });
+    const inputHash = hashPassword(password);
+    if (acc.passwordHash !== inputHash && password !== acc.passwordHash) {
+      return sendJson(res, 401, { error: '帳號或密碼錯誤' });
+    }
+    if (!acc.isGM) return sendJson(res, 403, { error: '非 GM 帳號' });
+
+    const gmToken = genToken(account);
+    console.log('[GM] GM 登入成功:', account);
+    return sendJson(res, 200, {
+      ok: true,
+      token: gmToken,
+      account,
+      isGM: true,
+    });
+  }
+
+  // GET /api/gm/players — 玩家搜尋清單
+  if (req.method === 'GET' && pathname === '/api/gm/players') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const search = String(query.search || '').trim().toLowerCase();
+    const page = Math.max(1, parseInt(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize) || 20));
+
+    let allAccounts = [];
+    if (db.getBackend() === 'postgres') {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT account, created_at, is_gm FROM accounts ORDER BY created_at DESC'
+        );
+        allAccounts = rows.map(r => ({
+          account: r.account,
+          createdAt: r.created_at && r.created_at.toISOString ? r.created_at.toISOString() : r.created_at,
+          isGM: !!r.is_gm,
+        }));
+      } catch (e) { console.error('[GM] players list pg error:', e.message); }
+    } else {
+      const f = path.join(DATA_DIR, 'accounts.json');
+      let accounts = {};
+      if (fs.existsSync(f)) {
+        try { accounts = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch(_) { accounts = {}; }
+      }
+      for (const accName in accounts) {
+        const a = accounts[accName];
+        allAccounts.push({
+          account: a.account,
+          createdAt: a.createdAt,
+          isGM: !!a.isGM,
+        });
+      }
+      allAccounts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    // 模糊搜尋
+    if (search) {
+      allAccounts = allAccounts.filter(a => a.account.toLowerCase().includes(search));
+    }
+
+    const total = allAccounts.length;
+    const start = (page - 1) * pageSize;
+    const pageItems = allAccounts.slice(start, start + pageSize);
+
+    // 為每個帳號計算角色數
+    const list = [];
+    for (const a of pageItems) {
+      const charCount = await db.getCharacterCount(a.account, 'zeus');
+      list.push({
+        account: a.account,
+        isGM: a.isGM,
+        createdAt: a.createdAt,
+        characterCount: charCount,
+      });
+    }
+
+    return sendJson(res, 200, {
+      ok: true,
+      list,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    });
+  }
+
+  // GET /api/gm/player/:account — 玩家詳細資料
+  if (req.method === 'GET' && pathname.startsWith('/api/gm/player/')) {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const targetAccount = decodeURIComponent(pathname.slice('/api/gm/player/'.length));
+    const acc = await db.getAccount(targetAccount);
+    if (!acc) return sendJson(res, 404, { error: '帳號不存在' });
+
+    const serverId = 'zeus';
+    const charCount = await db.getCharacterCount(targetAccount, serverId);
+    const characters = [];
+    for (let i = 0; i < charCount; i++) {
+      const saveData = await db.getCharacter(targetAccount, serverId, i);
+      if (saveData) {
+        characters.push({
+          charIdx: i,
+          name: (saveData.player && saveData.player.name) || '',
+          level: (saveData.player && saveData.player.level) || 1,
+          classId: (saveData.player && saveData.player.classId) || 'warrior',
+          saveData: saveData,
+        });
+      }
+    }
+
+    return sendJson(res, 200, {
+      ok: true,
+      account: {
+        account: acc.account,
+        isGM: !!acc.isGM,
+        createdAt: acc.createdAt,
+      },
+      characters,
+      characterCount: characters.length,
+    });
+  }
+
+  // POST /api/gm/give-all — 全服發放獎勵
+  if (req.method === 'POST' && pathname === '/api/gm/give-all') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const type = body.type; // gem | gold | item
+    const amount = parseInt(body.amount) || 0;
+    const itemId = body.itemId;
+    const itemName = body.itemName || itemId;
+
+    if (!type || (type !== 'item' && amount <= 0)) {
+      return sendJson(res, 400, { error: '參數錯誤' });
+    }
+    if (type === 'item' && !itemId) {
+      return sendJson(res, 400, { error: '缺少 itemId' });
+    }
+
+    let grantedCount = 0;
+    const serverId = 'zeus';
+
+    if (db.getBackend() === 'postgres') {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT DISTINCT account FROM characters WHERE server_id = $1',
+          [serverId]
+        );
+        const accounts = rows.map(r => r.account);
+        for (const acc of accounts) {
+          const charCnt = await db.getCharacterCount(acc, serverId);
+          for (let i = 0; i < charCnt; i++) {
+            const saveData = await db.getCharacter(acc, serverId, i);
+            if (!saveData) continue;
+            if (!saveData.resources) saveData.resources = { gold: 0, gem: 0 };
+            if (type === 'gem') {
+              saveData.resources.gem = (saveData.resources.gem || 0) + amount;
+            } else if (type === 'gold') {
+              saveData.resources.gold = (saveData.resources.gold || 0) + amount;
+            } else if (type === 'item') {
+              if (!saveData.inventory) saveData.inventory = [];
+              const inv = saveData.inventory;
+              let found = false;
+              for (let j = 0; j < inv.length; j++) {
+                if (inv[j] && inv[j].id === itemId && inv[j].stackable !== false) {
+                  inv[j].count = (inv[j].count || 1) + amount;
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                inv.push({
+                  id: itemId, name: itemName, type: 'consumable',
+                  itemType: 'consumable', rarity: 'green',
+                  count: amount || 1,
+                });
+              }
+            }
+            await db.saveCharacter(acc, serverId, i, saveData);
+            grantedCount++;
+          }
+        }
+      } catch (e) {
+        console.error('[GM] give-all pg error:', e.message);
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      // JSON 模式：遍歷 accounts.json
+      const f = path.join(DATA_DIR, 'accounts.json');
+      const accounts = JSON.parse(fs.readFileSync(f, 'utf-8') || '{}');
+      for (const accName in accounts) {
+        const acc = accounts[accName];
+        const chars = (acc.characters && acc.characters[serverId]) || [];
+        for (let i = 0; i < chars.length; i++) {
+          if (!chars[i]) continue;
+          if (!chars[i].resources) chars[i].resources = { gold: 0, gem: 0 };
+          if (type === 'gem') {
+            chars[i].resources.gem = (chars[i].resources.gem || 0) + amount;
+          } else if (type === 'gold') {
+            chars[i].resources.gold = (chars[i].resources.gold || 0) + amount;
+          } else if (type === 'item') {
+            if (!chars[i].inventory) chars[i].inventory = [];
+            const inv = chars[i].inventory;
+            let found = false;
+            for (let j = 0; j < inv.length; j++) {
+              if (inv[j] && inv[j].id === itemId && inv[j].stackable !== false) {
+                inv[j].count = (inv[j].count || 1) + amount;
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              inv.push({
+                id: itemId, name: itemName, type: 'consumable',
+                itemType: 'consumable', rarity: 'green',
+                count: amount || 1,
+              });
+            }
+          }
+          grantedCount++;
+        }
+      }
+      fs.writeFileSync(f, JSON.stringify(accounts, null, 2));
+    }
+
+    console.log('[GM] 全服發放: type=' + type + ', amount=' + amount + ', 發放角色數=' + grantedCount);
+    return sendJson(res, 200, { ok: true, type, amount, grantedCount });
+  }
+
+  // POST /api/gm/broadcast — 全服廣播
+  if (req.method === 'POST' && pathname === '/api/gm/broadcast') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const text = String(body.text || '').trim();
+    const btype = body.type || 'system';
+    if (!text) return sendJson(res, 400, { error: '缺少 text' });
+
+    const broadcast = {
+      id: 'bc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      type: btype,
+      text,
+      time: Date.now(),
+    };
+
+    // 存入全服廣播歷史
+    mpBroadcasts.push(broadcast);
+    while (mpBroadcasts.length > 50) mpBroadcasts.shift();
+
+    // 持久化到 broadcasts.json
+    try {
+      const bfile = path.join(DATA_DIR, 'broadcasts.json');
+      let history = [];
+      if (fs.existsSync(bfile)) {
+        try { history = JSON.parse(fs.readFileSync(bfile, 'utf-8')); } catch(_) { history = []; }
+      }
+      history.push(broadcast);
+      while (history.length > 200) history.shift();
+      fs.writeFileSync(bfile, JSON.stringify(history, null, 2));
+    } catch (e) {
+      console.error('[GM] 廣播持久化失敗:', e.message);
+    }
+
+    // 透過 long-poll 通知所有線上玩家
+    for (const [mapId, waiters] of mpPollWaiters) {
+      for (const w of waiters) {
+        try {
+          w.res.end(JSON.stringify({ ok: true, events: [], broadcasts: [broadcast], time: Date.now() }));
+        } catch(e) {}
+      }
+      mpPollWaiters.set(mapId, []);
+    }
+
+    // Socket.IO 也廣播
+    if (io) {
+      io.emit('gm_broadcast', broadcast);
+    }
+
+    console.log('[GM] 全服廣播: [' + btype + '] ' + text);
+    return sendJson(res, 200, { ok: true, broadcast });
+  }
+
+  // GET /api/gm/broadcasts — 廣播歷史
+  if (req.method === 'GET' && pathname === '/api/gm/broadcasts') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let history = [];
+    try {
+      const bfile = path.join(DATA_DIR, 'broadcasts.json');
+      if (fs.existsSync(bfile)) {
+        history = JSON.parse(fs.readFileSync(bfile, 'utf-8'));
+      }
+    } catch(e) { history = []; }
+    history = history.slice().reverse();
+    return sendJson(res, 200, { ok: true, list: history });
+  }
+
 
   return sendJson(res, 404, { error: 'not found' });
 }
@@ -927,7 +1504,7 @@ async function initGM() {
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.3.5 · 正式營運伺服器');
+    console.log('  君主之刃 v2.4.0 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());
