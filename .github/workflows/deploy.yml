@@ -70,7 +70,9 @@ jobs:
           git checkout -- .github 2>/dev/null || true
           rm -f .github/workflows/*.zip 2>/dev/null || true
 
-          git add -A
+          # Force-add so a stray .gitignore (e.g. a line like "assets/")
+          # can NEVER silently skip the game images again.
+          git add -f -A
           # Make 100% sure nothing under .github is staged
           git reset -q -- .github 2>/dev/null || true
 
