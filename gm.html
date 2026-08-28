@@ -957,7 +957,7 @@ async function loadDashboard() {
       dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
     }
     document.getElementById('assetCount').textContent = health.assetCount || '--';
-    // 同步模式：優先 long-poll（v2.4.2 預設），其次 Socket.IO
+    // 同步模式：優先 long-poll（v2.4.3 預設），其次 Socket.IO
     const syncEl = document.getElementById('syncMode');
     if (health.longPoll) {
       syncEl.textContent = '長輪詢（已啟用）';

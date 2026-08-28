@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.4.2 · 正式營運後端伺服器
+  君主之刃 v2.4.3 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -472,10 +472,10 @@ function serveStatic(req, res, pathname) {
     }
     // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.4.2-code.zip',
-      '/game-code-2.4.2.zip': 'monarch-blade-v2.4.2-code.zip',
-      '/assets-part1.zip': 'monarch-blade-v2.4.2-assets-part1.zip',
-      '/assets-part2.zip': 'monarch-blade-v2.4.2-assets-part2.zip',
+      '/game-code.zip': 'monarch-blade-v2.4.3-code.zip',
+      '/game-code-2.4.3.zip': 'monarch-blade-v2.4.3-code.zip',
+      '/assets-part1.zip': 'monarch-blade-v2.4.3-assets-part1.zip',
+      '/assets-part2.zip': 'monarch-blade-v2.4.3-assets-part2.zip',
     };
     if (dlFiles[pathname]) {
       headers['Content-Disposition'] = 'attachment; filename="' + dlFiles[pathname] + '"';
@@ -483,7 +483,7 @@ function serveStatic(req, res, pathname) {
       headers['X-Accel-Buffering'] = 'yes';
     }
     if (pathname === '/PARTS-MANIFEST.txt') {
-      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.4.2.txt"';
+      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.4.3.txt"';
     }
     res.writeHead(200, headers);
     const stream = fs.createReadStream(filePath);
@@ -524,9 +524,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.4.2',
-      build: '2.4.2-2608281530',
-      buildId: '2.4.2-2608281530',
+      version: '2.4.3',
+      build: '2.4.3-2608281550',
+      buildId: '2.4.3-2608281550',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -587,9 +587,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.4.2',
-      build: '2.4.2-2608281530',
-      buildId: '2.4.2-2608281530',
+      version: '2.4.3',
+      build: '2.4.3-2608281550',
+      buildId: '2.4.3-2608281550',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -632,7 +632,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.4.2', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.4.3', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -836,9 +836,9 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, {
       ok: allPass,
-      version: '2.4.2',
-      build: '2.4.2-2608281530',
-      buildId: '2.4.2-2608281530',
+      version: '2.4.3',
+      build: '2.4.3-2608281550',
+      buildId: '2.4.3-2608281550',
       timestamp: new Date().toISOString(),
       totalMs,
       summary: { total: checks.length, passed, failed },
@@ -1583,7 +1583,7 @@ const server = http.createServer(async (req, res) => {
 <head>
 <meta charset=\"UTF-8\" />
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-<title>伺服器自體檢查 · 君主之刃 v2.4.2</title>
+<title>伺服器自體檢查 · 君主之刃 v2.4.3</title>
 <meta name=\"creative-medium\" content=\"other\" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1625,7 +1625,7 @@ const server = http.createServer(async (req, res) => {
 <div class=\"wrap\">
   <div class=\"header\">
     <div class=\"title\">&#9876; 君主之刃 · 伺服器自體檢查</div>
-    <div class=\"subtitle\">v2.4.2 · 即時驗證伺服器與遊戲功能</div>
+    <div class=\"subtitle\">v2.4.3 · 即時驗證伺服器與遊戲功能</div>
   </div>
   <div class=\"card overall\" id=\"overall\">
     <div class=\"status\"><span class=\"loading\"></span></div>
@@ -1635,7 +1635,7 @@ const server = http.createServer(async (req, res) => {
     <div style=\"text-align:center;color:#6666aa;font-size:13px;\">載入中…</div>
   </div>
   <button class=\"btn\" id=\"retryBtn\" onclick=\"runTest()\">重新檢查</button>
-  <div class=\"footer\">君主之刃 v2.4.2 · 伺服器自體檢查</div>
+  <div class=\"footer\">君主之刃 v2.4.3 · 伺服器自體檢查</div>
 </div>
 <script>
 async function runTest() {
@@ -1882,6 +1882,14 @@ if (socketIoInstalled) {
 
 // ========== 初始化 GM 帳號 ==========
 async function initGM() {
+  // Postgres 模式：用 db.ensureGMAccount 做 upsert（冪等，schema 就緒後才執行）
+  if (db.getBackend() === 'postgres') {
+    const hash = hashPassword(GM_PASSWORD);
+    await db.ensureGMAccount(GM_ACCOUNT, hash);
+    console.log('[Auth] GM 帳號已確保 (postgres):', GM_ACCOUNT);
+    return;
+  }
+  // JSON 模式沿用既有邏輯
   const existing = await db.getAccount(GM_ACCOUNT);
   if (!existing) {
     await db.createAccount(GM_ACCOUNT, hashPassword(GM_PASSWORD), true);
@@ -1914,7 +1922,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.4.2 · 正式營運伺服器');
+    console.log('  君主之刃 v2.4.3 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());

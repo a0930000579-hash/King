@@ -21,7 +21,16 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 // ==================== 後端選擇 ====================
 let backend = 'json';
 let pgPool = null;
-let lastError = null; // 最近一次連線錯誤（供 /api/health / /api/diag 顯示）
+let lastError = null;
+
+// migrationsReady: schema 初始化完成的 promise
+// 所有 pg 查詢函數進入前都 await 它，避免 bgInit 還在建表時請求進來報 relation does not exist
+let _migrationsResolve = null;
+const migrationsReady = new Promise(resolve => { _migrationsResolve = resolve; });
+async function ensureSchema() {
+  if (backend !== 'postgres') return;
+  await migrationsReady;
+}
 
 async function init() {
   lastError = null;
@@ -58,6 +67,7 @@ async function init() {
       console.log('[DB] SELECT 1 通過');
       await initPgSchema();
       backend = 'postgres';
+      _migrationsResolve(true); // 解鎖所有等待 schema 的請求
       console.log('[DB] 使用 PostgreSQL 後端：', process.env.DATABASE_URL.replace(/:.*@/, ':***@'));
       return 'postgres';
     } catch (e) {
@@ -73,17 +83,42 @@ async function init() {
       console.error('========================================');
       if (pgPool) { try { pgPool.end(); } catch (_) {} pgPool = null; }
       backend = 'json';
+      _migrationsResolve(false); // 失敗也解鎖，讓呼叫端落到 json 分支
       return 'json';
     }
   } else {
     console.log('[DB] 未設 DATABASE_URL，使用 JSON 檔案模式（離線）');
     backend = 'json';
+    _migrationsResolve(false);
     return 'json';
   }
 }
 
 function getBackend() { return backend; }
 function getLastError() { return lastError; }
+function getMigrationsPromise() { return migrationsReady; }
+
+/**
+ * 自動建立 GM 帳號（冪等，upsert）
+ * 只有 postgres 模式且 schema 就緒後才呼叫；JSON 模式由 server 端自己處理。
+ */
+async function ensureGMAccount(gmAccount, gmPasswordHash) {
+  if (backend !== 'postgres') return false;
+  await ensureSchema();
+  try {
+    await pgPool.query(
+      `INSERT INTO accounts (account, password_hash, is_gm)
+       VALUES ($1, $2, true)
+       ON CONFLICT (account) DO UPDATE SET is_gm = true, password_hash = EXCLUDED.password_hash`,
+      [gmAccount, gmPasswordHash]
+    );
+    console.log('[DB] GM 帳號已確保存在:', gmAccount);
+    return true;
+  } catch (e) {
+    console.error('[DB] 建立 GM 帳號失敗:', e.message);
+    return false;
+  }
+}
 
 // ==================== JSON 後端（舊有實作包裝） ====================
 function jsonPath(name) { return path.join(DATA_DIR, name); }
@@ -154,6 +189,7 @@ async function initPgSchema() {
 // ==================== 帳號 API ====================
 async function getAccount(account) {
   if (backend === 'postgres') {
+    await ensureSchema();
     const { rows } = await pgPool.query(
       'SELECT account, password_hash, created_at, is_gm, meta FROM accounts WHERE account = $1',
       [account]
@@ -175,6 +211,7 @@ async function getAccount(account) {
 
 async function createAccount(account, passwordHash, isGM) {
   if (backend === 'postgres') {
+    await ensureSchema();
     try {
       await pgPool.query(
         'INSERT INTO accounts (account, password_hash, is_gm) VALUES ($1, $2, $3)',
@@ -201,6 +238,7 @@ async function createAccount(account, passwordHash, isGM) {
 
 async function updatePassword(account, passwordHash) {
   if (backend === 'postgres') {
+    await ensureSchema();
     await pgPool.query('UPDATE accounts SET password_hash = $1 WHERE account = $2', [passwordHash, account]);
   } else {
     const accounts = loadJSON('accounts.json', {});
@@ -213,6 +251,7 @@ async function updatePassword(account, passwordHash) {
 
 async function getCharacterCount(account, serverId) {
   if (backend === 'postgres') {
+    await ensureSchema();
     const { rows } = await pgPool.query(
       'SELECT COUNT(*)::int AS cnt FROM characters WHERE account = $1 AND server_id = $2',
       [account, serverId]
@@ -228,6 +267,7 @@ async function getCharacterCount(account, serverId) {
 
 async function listCharacters(account, serverId) {
   if (backend === 'postgres') {
+    await ensureSchema();
     const { rows } = await pgPool.query(
       `SELECT char_idx, name, class_id, level, save_data, created_at, updated_at
        FROM characters WHERE account = $1 AND server_id = $2 ORDER BY char_idx ASC`,
@@ -270,6 +310,7 @@ async function listCharacters(account, serverId) {
 
 async function getCharacter(account, serverId, charIdx) {
   if (backend === 'postgres') {
+    await ensureSchema();
     const { rows } = await pgPool.query(
       'SELECT save_data FROM characters WHERE account = $1 AND server_id = $2 AND char_idx = $3',
       [account, serverId, charIdx]
@@ -286,6 +327,7 @@ async function getCharacter(account, serverId, charIdx) {
 
 async function checkNameUnique(name, serverId) {
   if (backend === 'postgres') {
+    await ensureSchema();
     const { rows } = await pgPool.query(
       `SELECT COUNT(*)::int AS cnt FROM characters
        WHERE server_id = $1 AND (name = $2 OR (save_data->'player'->>'name') = $2)`,
@@ -307,6 +349,7 @@ async function checkNameUnique(name, serverId) {
 
 async function createCharacter(account, serverId, charIdx, name, classId, saveData) {
   if (backend === 'postgres') {
+    await ensureSchema();
     await pgPool.query(
       `INSERT INTO characters (account, server_id, char_idx, name, class_id, level, save_data)
        VALUES ($1, $2, $3, $4, $5, 1, $6)
@@ -332,6 +375,7 @@ async function createCharacter(account, serverId, charIdx, name, classId, saveDa
 
 async function saveCharacter(account, serverId, charIdx, saveData) {
   if (backend === 'postgres') {
+    await ensureSchema();
     await pgPool.query(
       `INSERT INTO characters (account, server_id, char_idx, name, class_id, level, save_data)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -370,6 +414,7 @@ async function saveCharacter(account, serverId, charIdx, saveData) {
 
 async function deleteAccount(account) {
   if (backend === 'postgres') {
+    await ensureSchema();
     await pgPool.query('DELETE FROM accounts WHERE account = $1', [account]);
     return true;
   } else {
@@ -383,6 +428,7 @@ async function deleteAccount(account) {
 
 async function addBugReport(report) {
   if (backend === 'postgres') {
+    await ensureSchema();
     await pgPool.query(
       `INSERT INTO bug_reports (id, account, version, description, player, device, page_url, errors)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -406,6 +452,8 @@ module.exports = {
   init,
   getBackend,
   getLastError,
+  getMigrationsPromise,
+  ensureGMAccount,
   // 帳號
   getAccount,
   createAccount,
