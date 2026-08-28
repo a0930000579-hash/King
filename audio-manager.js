@@ -6,22 +6,22 @@
 const AudioManager = (() => {
   const AUDIO_VERSION = 'v5';
 
-  // ========== BGM 檔案 URL ==========
+  // ========== BGM 檔案 URL（本地優先，離線可用） ==========
   const BGM_URLS = {
-    village: 'https://aka.doubaocdn.com/s/l2XjNd5AUm?v=' + AUDIO_VERSION,
-    battle:  'https://aka.doubaocdn.com/s/UpWL2dPAVj?v=' + AUDIO_VERSION,
-    siege:   'https://aka.doubaocdn.com/s/qcJzYgilvz?v=' + AUDIO_VERSION,
+    village: 'assets/audio/bgm/village.wav',
+    battle:  'assets/audio/bgm/battle.wav',
+    siege:   'assets/audio/bgm/siege.wav',
   };
 
-  // ========== SFX 音效檔案 URL ==========
+  // ========== SFX 音效檔案 URL（本地優先，離線可用） ==========
   const SFX_URLS = {
-    slash:     'https://aka.doubaocdn.com/s/oS1d4hMpjd?v=' + AUDIO_VERSION,  // 近戰攻擊
-    spell:     'https://aka.doubaocdn.com/s/bAjRcT9pYU?v=' + AUDIO_VERSION,  // 法術施放
-    arrow:     'https://aka.doubaocdn.com/s/8xn9JbEggi?v=' + AUDIO_VERSION,  // 弓箭射擊
-    hit:       'https://aka.doubaocdn.com/s/JYX4uK7GLU?v=' + AUDIO_VERSION,  // 受擊命中
-    death:     'https://aka.doubaocdn.com/s/MKsNQTmTGd?v=' + AUDIO_VERSION,  // 死亡
-    levelup:   'https://aka.doubaocdn.com/s/fre0af1kVd?v=' + AUDIO_VERSION,  // 升級
-    gate_break:'https://aka.doubaocdn.com/s/3L0wL6IhE0?v=' + AUDIO_VERSION,  // 城門破壞
+    slash:     'assets/audio/sfx/slash.wav',      // 近戰攻擊
+    spell:     'assets/audio/sfx/spell.wav',      // 法術施放
+    arrow:     'assets/audio/sfx/arrow.wav',      // 弓箭射擊
+    hit:       'assets/audio/sfx/hit.wav',        // 受擊命中
+    death:     'assets/audio/sfx/death.wav',      // 死亡
+    levelup:   'assets/audio/sfx/levelup.wav',    // 升級
+    gate_break:'assets/audio/sfx/gate_break.wav', // 城門破壞
   };
 
   // ========== 配置 ==========
@@ -350,7 +350,8 @@ const AudioManager = (() => {
         case 'death': playSfxFromPool('death', volMult || 1); break;
         case 'levelup': playSfxFromPool('levelup', volMult || 1); break;
         case 'crit': sfxCrit(); break;
-        case 'gate_break': playSfxFromPool('gate_break', volMult || 1); break;
+        case 'gate_break':
+        case 'gatebreak':  playSfxFromPool('gate_break', volMult || 1); break;
       }
     },
     playBgm,

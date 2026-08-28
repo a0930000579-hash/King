@@ -5,25 +5,25 @@ const AudioSystem = (() => {
   // ========== 音效 / BGM URL（全部 v5 版本）==========
   const AUDIO_URLS = {
     sfx: {
-      melee:     'https://aka.doubaocdn.com/s/oS1d4hMpjd?v=5',   // 近戰攻擊
-      spell:     'https://aka.doubaocdn.com/s/bAjRcT9pYU?v=5',   // 法術
-      arrow:     'https://aka.doubaocdn.com/s/8xn9JbEggi?v=5',   // 弓箭
-      hit:       'https://aka.doubaocdn.com/s/JYX4uK7GLU?v=5',   // 命中 / 受擊
-      death:     'https://aka.doubaocdn.com/s/MKsNQTmTGd?v=5',   // 死亡
-      levelup:   'https://aka.doubaocdn.com/s/fre0af1kVd?v=5',   // 升級
-      gatebreak: 'https://aka.doubaocdn.com/s/3L0wL6IhE0?v=5',   // 城門破壞
+      melee:     'assets/audio/sfx/slash.wav',   // 近戰攻擊
+      spell:     'assets/audio/sfx/spell.wav',   // 法術
+      arrow:     'assets/audio/sfx/arrow.wav',   // 弓箭
+      hit:       'assets/audio/sfx/hit.wav',   // 命中 / 受擊
+      death:     'assets/audio/sfx/death.wav',   // 死亡
+      levelup:   'assets/audio/sfx/levelup.wav',   // 升級
+      gatebreak: 'assets/audio/sfx/gate_break.wav',   // 城門破壞
       // 以下複用現有音效（從通用集合中選最接近的）
-      crit:      'https://aka.doubaocdn.com/s/oS1d4hMpjd?v=5',   // 暴擊（複用近戰）
-      coin:      'https://aka.doubaocdn.com/s/JYX4uK7GLU?v=5',   // 金幣（複用命中）
-      gacha:     'https://aka.doubaocdn.com/s/fre0af1kVd?v=5',   // 抽卡（複用升級）
-      transform: 'https://aka.doubaocdn.com/s/bAjRcT9pYU?v=5',   // 變身（複用法術）
-      potion:    'https://aka.doubaocdn.com/s/JYX4uK7GLU?v=5',   // 藥水（複用命中）
-      boss:      'https://aka.doubaocdn.com/s/3L0wL6IhE0?v=5',   // Boss登場（複用城門破壞）
+      crit:      'assets/audio/sfx/slash.wav',   // 暴擊（複用近戰）
+      coin:      'assets/audio/sfx/hit.wav',   // 金幣（複用命中）
+      gacha:     'assets/audio/sfx/levelup.wav',   // 抽卡（複用升級）
+      transform: 'assets/audio/sfx/spell.wav',   // 變身（複用法術）
+      potion:    'assets/audio/sfx/hit.wav',   // 藥水（複用命中）
+      boss:      'assets/audio/sfx/gate_break.wav',   // Boss登場（複用城門破壞）
     },
     bgm: {
-      village:  'https://aka.doubaocdn.com/s/l2XjNd5AUm?v=5',    // 村莊
-      battle:   'https://aka.doubaocdn.com/s/UpWL2dPAVj?v=5',    // 戰鬥
-      siege:    'https://aka.doubaocdn.com/s/qcJzYgilvz?v=5',    // 攻城
+      village:  'assets/audio/bgm/village.wav',    // 村莊
+      battle:   'assets/audio/bgm/battle.wav',    // 戰鬥
+      siege:    'assets/audio/bgm/siege.wav',    // 攻城
     }
   };
 
