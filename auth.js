@@ -14,6 +14,7 @@
   let currentView = 'home'; // home | login | register | server | char | charCreate
   let currentServer = null;
   let serverList = [];
+  let _pendingCreateSlot = 0; // 待建立角色的 slot index
   // ========== 連線狀態判定（v2.1.2 改為 /api/health 精準判斷）==========
   // 邏輯：fetch('/api/health') 回 HTTP 200 且 JSON.status === 'online' 才標已連線
   // 任何其他情況（404/HTML/網路錯誤/非 JSON/欄位不符）一律視為未連線
@@ -508,6 +509,7 @@
               <div class="char-name-row">${escapeHtml(c.name)}</div>
               <div class="char-info-row">Lv.${c.level || 1} · ${escapeHtml(c.className || '戰士')} · ${escapeHtml(c.nationName || '無國籍')}</div>
             </div>
+            <button class="char-delete-btn" data-delete-idx="${i}" title="刪除角色">✕</button>
           </div>
         `);
       } else {
@@ -756,15 +758,61 @@
         $('btn-server-back').addEventListener('click', () => switchView('home'));
         break;
       case 'char':
+        // 點擊角色槽 → 進入遊戲
         document.querySelectorAll('.char-slot').forEach(slot => {
-          slot.addEventListener('click', () => {
+          slot.addEventListener('click', (e) => {
+            // 如果點的是刪除按鈕，不進入遊戲
+            if (e.target && e.target.dataset && e.target.dataset.deleteIdx !== undefined) return;
             if (slot.dataset.create === '1') {
-              // v2.1.2 修復：進入角色建立頁，不再直接跳進空世界
-              (window.showCharCreate && showCharCreate());
+              // v2.4.0 修復：確實開啟創角頁（game.js 暴露的全域方法）
+              if (window.showCharCreate) {
+                // 記住當前點的是哪個 slot，建立完成後回來寫入
+                _pendingCreateSlot = parseInt(slot.dataset.charIdx);
+                _hookCharCreateDone();
+                window.showCharCreate();
+              } else {
+                showToast('遊戲載入中，請稍後再試');
+              }
             } else {
               // 載入既有角色
               startGameWithChar(parseInt(slot.dataset.charIdx));
             }
+          });
+        });
+        // 刪除按鈕
+        document.querySelectorAll('.char-delete-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.deleteIdx);
+            const chars = [];
+            try {
+              const raw = localStorage.getItem('mmo_characters');
+              if (raw) chars.push(...JSON.parse(raw));
+            } catch(e) {}
+            const target = chars[idx];
+            if (!target) return;
+            if (!confirm(`確定要刪除角色「${target.name}」嗎？\n此操作無法復原。`)) return;
+            // 呼叫後端刪除 API（若有）
+            const srv = currentServer?.id || '';
+            api('/characters/delete', {
+              server: srv,
+              charIdx: idx,
+              name: target.name,
+            }).then(() => {
+              // 重新拉列表
+              return api('/characters?server=' + encodeURIComponent(srv));
+            }).then(data => {
+              const list = data.characters || [];
+              try { localStorage.setItem('mmo_characters', JSON.stringify(list)); } catch(e) {}
+              switchView('char');
+              showToast('角色已刪除');
+            }).catch(() => {
+              // 後端失敗：至少從前端快取移除
+              chars.splice(idx, 1);
+              try { localStorage.setItem('mmo_characters', JSON.stringify(chars)); } catch(e) {}
+              switchView('char');
+              showToast('角色已刪除');
+            });
           });
         });
         $('btn-char-back').addEventListener('click', () => switchView('server'));
@@ -885,6 +933,43 @@
   // ========== 進入伺服器 ==========
   function startGameWithNewChar() {
     startGameCommon();
+  }
+
+  // v2.4.0：創角完成鉤子——建立成功後關閉創角頁、刷新角色選擇列表
+  function _hookCharCreateDone() {
+    // 設定一次性回調：game.js 建立角色完成後呼叫
+    window.__onCharCreated = function(charInfo) {
+      // 隱藏遊戲畫面（回到角色選擇頁）
+      const gameRoot = document.getElementById('game-root');
+      if (gameRoot) gameRoot.classList.add('game-hidden');
+      // 重新載入角色列表並切換回角色選擇頁
+      api('/characters?server=' + encodeURIComponent(currentServer?.id || ''))
+        .then(data => {
+          const chars = data.characters || [];
+          try {
+            localStorage.setItem('mmo_characters', JSON.stringify(chars));
+          } catch (e) {}
+          switchView('char');
+        })
+        .catch(() => {
+          switchView('char');
+        });
+    };
+    // 返回按鈕回調：從創角頁返回角色選擇
+    window.__onCharCreateBack = function() {
+      // 重新載入角色列表（保險起見）
+      api('/characters?server=' + encodeURIComponent(currentServer?.id || ''))
+        .then(data => {
+          const chars = data.characters || [];
+          try {
+            localStorage.setItem('mmo_characters', JSON.stringify(chars));
+          } catch (e) {}
+          switchView('char');
+        })
+        .catch(() => {
+          switchView('char');
+        });
+    };
   }
   function startGameWithChar(idx) {
     // 從後端載入角色存檔

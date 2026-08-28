@@ -11443,6 +11443,19 @@ function initCC2UI() {
   const checkBtn = $('cc2-check-btn');
   if (checkBtn) checkBtn.addEventListener('click', checkCC2Name);
 
+  // 返回按鈕（關閉創角頁，回到角色選擇）
+  const backBtn = $('cc2-back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      const screen = $('char-create-screen');
+      if (screen) screen.classList.add('hidden');
+      // 如果有外部設定的返回回調，呼叫它
+      if (window.__onCharCreateBack && typeof window.__onCharCreateBack === 'function') {
+        try { window.__onCharCreateBack(); } catch(e) {}
+      }
+    });
+  }
+
   // 創建按鈕
   const createBtn = $('cc2-create-btn');
   if (createBtn) createBtn.addEventListener('click', confirmCC2CharCreate);
@@ -11743,6 +11756,24 @@ function confirmCC2CharCreate() {
     
     // 國家選擇
     if (!GS.nation) showNationSelect();
+
+    // v2.4.0：角色建立完成回調（供角色選擇頁刷新列表用）
+    // 若有外部 callback（auth.js 設定），呼叫它並傳回角色資訊
+    if (window.__onCharCreated && typeof window.__onCharCreated === 'function') {
+      try {
+        window.__onCharCreated({
+          name: name,
+          classId: cid,
+          level: GS.player.level || 1,
+          className: cls.name,
+        });
+        window.__onCharCreated = null; // 一次性
+      } catch(e) { console.warn('[CharCreate] callback error:', e); }
+    }
+
+    // 確保遊戲畫面顯示（從角色選擇頁進入時 game-root 可能還是 hidden）
+    const gameRoot = document.getElementById('game-root');
+    if (gameRoot) gameRoot.classList.remove('game-hidden');
   }
   
   // v2.4.0：直接 POST /api/characters/create，成功進世界；失敗顯示具體錯誤並恢復按鈕
@@ -25238,6 +25269,15 @@ window.__debugVerifyAllClasses = function() {
   });
   console.log('========== 5職業創建-結果 ==========', results);
   return results;
+};
+
+// ===== v2.4.0 角色選擇頁橋接：auth.js 點 + 創角時呼叫 =====
+window.showCharCreate = function() {
+  showCharCreate();
+};
+window.hideCharCreate = function() {
+  const screen = $('char-create-screen');
+  if (screen) screen.classList.add('hidden');
 };
 
 })();

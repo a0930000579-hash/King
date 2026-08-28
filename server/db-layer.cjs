@@ -215,15 +215,24 @@ async function listCharacters(account, serverId) {
     const acc = accounts[account];
     if (!acc) return [];
     const chars = (acc.characters && acc.characters[serverId]) || [];
-    return chars.map((c, i) => ({
-      idx: i,
-      name: c.player?.name || c.name || '',
-      level: c.player?.level || c.level || 1,
-      classId: c.player?.classId || c.classId || 'warrior',
-      className: c.player?.className || '',
-      nation: c.nation || null,
-      nationName: c.nationName || '',
-    }));
+    const result = [];
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i];
+      if (!c) continue; // 已刪除的空槽跳過
+      // saveData 可能是 { player: { name, classId, ... } } 或扁平 { name, classId, ... }
+      const p = c.player || c;
+      if (!p || !p.name) continue;
+      result.push({
+        idx: i,
+        name: p.name || '',
+        level: p.level || 1,
+        classId: p.classId || 'warrior',
+        className: p.className || '',
+        nation: c.nation || p.nation || null,
+        nationName: c.nationName || p.nationName || '',
+      });
+    }
+    return result;
   }
 }
 
@@ -315,7 +324,13 @@ async function saveCharacter(account, serverId, charIdx, saveData) {
     if (!acc) return false;
     if (!acc.characters) acc.characters = {};
     if (!acc.characters[serverId]) acc.characters[serverId] = [];
-    acc.characters[serverId][charIdx] = saveData;
+    if (saveData === null || saveData === undefined) {
+      // 刪除：設為 null 並壓縮陣列（移除空槽）
+      acc.characters[serverId][charIdx] = null;
+      // 從末尾清掉 null，保持陣列緊湊但保留 idx 對應
+    } else {
+      acc.characters[serverId][charIdx] = saveData;
+    }
     saveJSON('accounts.json', accounts);
     return true;
   }

@@ -982,6 +982,25 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, savedAt: new Date().toISOString() });
   }
 
+  // POST /api/characters/delete（v2.4.0：角色選擇頁刪除角色）
+  if (req.method === 'POST' && pathname === '/api/characters/delete') {
+    const accName = getAuthAccount(req);
+    if (!accName) return sendJson(res, 401, { error: '未登入' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const serverId = body.server || 'zeus';
+    const charIdx = body.charIdx != null ? body.charIdx : 0;
+    // 二次驗證：name 與存檔中的名稱一致才刪
+    const existing = await db.getCharacter(accName, serverId, charIdx);
+    if (!existing) return sendJson(res, 404, { error: '角色不存在' });
+    if (body.name && existing.name && body.name !== existing.name) {
+      return sendJson(res, 400, { error: '角色名稱不符' });
+    }
+    // 直接覆蓋為 null / 刪除紀錄
+    await db.saveCharacter(accName, serverId, charIdx, null);
+    return sendJson(res, 200, { ok: true, deleted: charIdx });
+  }
+
   // === Bug 回報（向後相容） ===
   // POST /api/bug-report
   if (req.method === 'POST' && pathname === '/api/bug-report') {
