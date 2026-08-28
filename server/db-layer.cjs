@@ -21,11 +21,31 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 // ==================== 後端選擇 ====================
 let backend = 'json';
 let pgPool = null;
+let lastError = null; // 最近一次連線錯誤（供 /api/health / /api/diag 顯示）
 
 async function init() {
+  lastError = null;
   if (process.env.DATABASE_URL) {
+    console.log('[DB] 偵測到 DATABASE_URL，嘗試連接 PostgreSQL...');
+    // 嘗試載入 pg 模組（若未安裝，明確報錯並退回 JSON）
+    let Pool;
     try {
-      const { Pool } = require('pg');
+      const pg = require('pg');
+      Pool = pg.Pool;
+    } catch (e) {
+      lastError = 'pg 模組未安裝：' + e.message + '。請確認 package.json 已包含 pg 依賴並執行 npm install。';
+      console.error('========================================');
+      console.error('[DB][嚴重] 無法載入 pg 模組（PostgreSQL 驅動）');
+      console.error('[DB] 錯誤：', e.message);
+      console.error('[DB] 原因：package.json 缺少 pg 依賴，或 npm install 未執行');
+      console.error('[DB] 處理：已自動退回 JSON 檔案模式');
+      console.error('[DB] 修復：在專案根目錄執行 → npm install pg@^8.12.0');
+      console.error('========================================');
+      backend = 'json';
+      return 'json';
+    }
+
+    try {
       pgPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
@@ -33,25 +53,37 @@ async function init() {
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 5000,
       });
+      console.log('[DB] 建立連線池，執行 SELECT 1 連通測試...');
       await pgPool.query('SELECT 1'); // 測試連線
+      console.log('[DB] SELECT 1 通過');
       await initPgSchema();
       backend = 'postgres';
       console.log('[DB] 使用 PostgreSQL 後端：', process.env.DATABASE_URL.replace(/:.*@/, ':***@'));
       return 'postgres';
     } catch (e) {
-      console.error('[DB] PostgreSQL 連線失敗，退回 JSON 檔案模式：', e.message);
+      const msg = e.message || String(e) || '未知錯誤';
+      const code = e.code || '';
+      lastError = msg + (code ? ' (code=' + code + ')' : '');
+      console.error('========================================');
+      console.error('[DB][嚴重] PostgreSQL 連線失敗，退回 JSON 檔案模式');
+      console.error('[DB] 錯誤訊息：', msg);
+      if (code) console.error('[DB] 錯誤代碼：', code);
+      if (e.detail) console.error('[DB] 細節：', e.detail);
+      console.error('[DB] 已自動退回 JSON 檔案模式');
+      console.error('========================================');
       if (pgPool) { try { pgPool.end(); } catch (_) {} pgPool = null; }
       backend = 'json';
       return 'json';
     }
   } else {
-    console.log('[DB] 使用 JSON 檔案模式（離線）');
+    console.log('[DB] 未設 DATABASE_URL，使用 JSON 檔案模式（離線）');
     backend = 'json';
     return 'json';
   }
 }
 
 function getBackend() { return backend; }
+function getLastError() { return lastError; }
 
 // ==================== JSON 後端（舊有實作包裝） ====================
 function jsonPath(name) { return path.join(DATA_DIR, name); }
@@ -373,6 +405,7 @@ async function addBugReport(report) {
 module.exports = {
   init,
   getBackend,
+  getLastError,
   // 帳號
   getAccount,
   createAccount,

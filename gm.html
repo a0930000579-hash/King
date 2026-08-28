@@ -650,7 +650,7 @@
         <div style="font-size: 13px; color: #c8a868; line-height: 2;">
           <div>資料庫後端：<span id="dbBackend">--</span></div>
           <div>資產數量：<span id="assetCount">--</span></div>
-          <div>Socket.IO：<span id="socketIo">--</span></div>
+          <div>即時同步：<span id="syncMode">--</span></div>
           <div>最後更新：<span id="lastUpdate">--</span></div>
         </div>
         <div class="mt-16">
@@ -946,9 +946,29 @@ async function loadDashboard() {
   if (health && health.status) {
     document.getElementById('statStatus').textContent = health.status === 'online' ? '運行中' : health.status;
     document.getElementById('statVersion').textContent = health.version || '--';
-    document.getElementById('dbBackend').textContent = health.dbBackend || '--';
+    const dbBackend = health.dbBackend || '--';
+    const dbErr = health.dbError;
+    const dbEl = document.getElementById('dbBackend');
+    if (dbErr) {
+      dbEl.textContent = dbBackend + '（錯誤：' + dbErr + '）';
+      dbEl.style.color = '#e06060';
+    } else {
+      dbEl.textContent = dbBackend;
+      dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
+    }
     document.getElementById('assetCount').textContent = health.assetCount || '--';
-    document.getElementById('socketIo').textContent = health.socketIo ? '已啟用' : '未啟用';
+    // 同步模式：優先 long-poll（v2.4.1 預設），其次 Socket.IO
+    const syncEl = document.getElementById('syncMode');
+    if (health.longPoll) {
+      syncEl.textContent = '長輪詢（已啟用）';
+      syncEl.style.color = '#60c080';
+    } else if (health.socketIo) {
+      syncEl.textContent = 'Socket.IO（已啟用）';
+      syncEl.style.color = '#60c080';
+    } else {
+      syncEl.textContent = '未啟用';
+      syncEl.style.color = '#e06060';
+    }
   }
   if (online && online.players) {
     document.getElementById('statOnline').textContent = online.count;

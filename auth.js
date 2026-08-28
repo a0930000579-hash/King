@@ -758,19 +758,29 @@
         $('btn-server-back').addEventListener('click', () => switchView('home'));
         break;
       case 'char':
-        // 點擊角色槽 → 進入遊戲
-        document.querySelectorAll('.char-slot').forEach(slot => {
-          slot.addEventListener('click', (e) => {
-            // 如果點的是刪除按鈕，不進入遊戲
-            if (e.target && e.target.dataset && e.target.dataset.deleteIdx !== undefined) return;
+        // v2.4.0：改用事件委派，避免 DOM 重建時遺失繫結；三槽都能點
+        const charContainer = document.querySelector('.char-select-panel');
+        if (charContainer) {
+          charContainer.addEventListener('click', (e) => {
+            // 找到被點的 .char-slot（冒泡向上找）
+            const slot = e.target.closest('.char-slot');
+            if (!slot) return;
+            // 刪除按鈕：不進入遊戲也不創角
+            if (e.target.closest('.char-delete-btn')) return;
+
             if (slot.dataset.create === '1') {
-              // v2.4.0 修復：確實開啟創角頁（game.js 暴露的全域方法）
-              if (window.showCharCreate) {
-                // 記住當前點的是哪個 slot，建立完成後回來寫入
+              // 創建新角色
+              if (typeof window.showCharCreate === 'function') {
                 _pendingCreateSlot = parseInt(slot.dataset.charIdx);
                 _hookCharCreateDone();
-                window.showCharCreate();
+                try {
+                  window.showCharCreate();
+                } catch (err) {
+                  console.error('[Auth] showCharCreate 執行失敗：', err);
+                  showToast('創角介面啟動失敗，請重新整理');
+                }
               } else {
+                console.error('[Auth] window.showCharCreate 不存在 — game.js 可能未正確載入或版本過舊。請檢查 game.js 是否正常載入。');
                 showToast('遊戲載入中，請稍後再試');
               }
             } else {
@@ -778,7 +788,7 @@
               startGameWithChar(parseInt(slot.dataset.charIdx));
             }
           });
-        });
+        }
         // 刪除按鈕
         document.querySelectorAll('.char-delete-btn').forEach(btn => {
           btn.addEventListener('click', (e) => {
@@ -935,29 +945,52 @@
     startGameCommon();
   }
 
-  // v2.4.0：創角完成鉤子——建立成功後關閉創角頁、刷新角色選擇列表
+  // v2.4.0：創角完成鉤子——建立成功後直接進入遊戲世界（不再跳回角色選擇頁）
   function _hookCharCreateDone() {
     // 設定一次性回調：game.js 建立角色完成後呼叫
     window.__onCharCreated = function(charInfo) {
-      // 隱藏遊戲畫面（回到角色選擇頁）
+      // v2.4.0 修復：創角成功後直接留在遊戲世界，不要跳回角色選擇頁
+      // 確保遊戲畫面可見、auth-overlay 隱藏
+      const overlay = $('auth-overlay');
+      if (overlay) overlay.classList.add('hidden');
       const gameRoot = document.getElementById('game-root');
-      if (gameRoot) gameRoot.classList.add('game-hidden');
-      // 重新載入角色列表並切換回角色選擇頁
+      if (gameRoot) gameRoot.classList.remove('game-hidden');
+
+      // 背景刷新角色列表到 localStorage（不影響當前遊戲）
       api('/characters?server=' + encodeURIComponent(currentServer?.id || ''))
         .then(data => {
           const chars = data.characters || [];
           try {
             localStorage.setItem('mmo_characters', JSON.stringify(chars));
+            // 記住當前使用的角色槽（第一個非空槽即剛創的）
+            const createdIdx = chars.findIndex(c => c && c.name === charInfo?.name);
+            if (createdIdx >= 0) {
+              localStorage.setItem('mmo_char_idx', String(createdIdx));
+            }
           } catch (e) {}
-          switchView('char');
         })
-        .catch(() => {
-          switchView('char');
-        });
+        .catch(() => { /* 忽略，不影響遊戲體驗 */ });
+
+      // 通知 game.js 已登入（連線多人模式）
+      if (window.onAuthReady && currentServer) {
+        try { window.onAuthReady(currentServer); } catch (e) {}
+      }
+      if (window.MultiplayerClient && currentServer) {
+        const serverUrl = window.location.origin;
+        window.MultiplayerClient.connect(serverUrl, AuthSystem.getToken()).catch(() => {});
+      }
+
+      checkGMStatus();
     };
-    // 返回按鈕回調：從創角頁返回角色選擇
+
+    // 返回按鈕回調：從創角頁返回角色選擇（玩家主動取消時）
     window.__onCharCreateBack = function() {
-      // 重新載入角色列表（保險起見）
+      // 隱藏遊戲畫面
+      const gameRoot = document.getElementById('game-root');
+      if (gameRoot) gameRoot.classList.add('game-hidden');
+      const overlay = $('auth-overlay');
+      if (overlay) overlay.classList.remove('hidden');
+      // 重新載入角色列表
       api('/characters?server=' + encodeURIComponent(currentServer?.id || ''))
         .then(data => {
           const chars = data.characters || [];
