@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.4.1 · 正式營運後端伺服器
+  君主之刃 v2.4.2 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -472,10 +472,10 @@ function serveStatic(req, res, pathname) {
     }
     // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.4.1-code.zip',
-      '/game-code-2.4.1.zip': 'monarch-blade-v2.4.1-code.zip',
-      '/assets-part1.zip': 'monarch-blade-v2.4.1-assets-part1.zip',
-      '/assets-part2.zip': 'monarch-blade-v2.4.1-assets-part2.zip',
+      '/game-code.zip': 'monarch-blade-v2.4.2-code.zip',
+      '/game-code-2.4.2.zip': 'monarch-blade-v2.4.2-code.zip',
+      '/assets-part1.zip': 'monarch-blade-v2.4.2-assets-part1.zip',
+      '/assets-part2.zip': 'monarch-blade-v2.4.2-assets-part2.zip',
     };
     if (dlFiles[pathname]) {
       headers['Content-Disposition'] = 'attachment; filename="' + dlFiles[pathname] + '"';
@@ -483,7 +483,7 @@ function serveStatic(req, res, pathname) {
       headers['X-Accel-Buffering'] = 'yes';
     }
     if (pathname === '/PARTS-MANIFEST.txt') {
-      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.4.1.txt"';
+      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.4.2.txt"';
     }
     res.writeHead(200, headers);
     const stream = fs.createReadStream(filePath);
@@ -524,9 +524,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.4.1',
-      build: '2.4.1-2608281440',
-      buildId: '2.4.1-2608281440',
+      version: '2.4.2',
+      build: '2.4.2-2608281530',
+      buildId: '2.4.2-2608281530',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -587,9 +587,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.4.1',
-      build: '2.4.1-2608281440',
-      buildId: '2.4.1-2608281440',
+      version: '2.4.2',
+      build: '2.4.2-2608281530',
+      buildId: '2.4.2-2608281530',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -632,7 +632,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.4.1', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.4.2', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -836,9 +836,9 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, {
       ok: allPass,
-      version: '2.4.1',
-      build: '2.4.1-2608281440',
-      buildId: '2.4.1-2608281440',
+      version: '2.4.2',
+      build: '2.4.2-2608281530',
+      buildId: '2.4.2-2608281530',
       timestamp: new Date().toISOString(),
       totalMs,
       summary: { total: checks.length, passed, failed },
@@ -1583,7 +1583,7 @@ const server = http.createServer(async (req, res) => {
 <head>
 <meta charset=\"UTF-8\" />
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-<title>伺服器自體檢查 · 君主之刃 v2.4.1</title>
+<title>伺服器自體檢查 · 君主之刃 v2.4.2</title>
 <meta name=\"creative-medium\" content=\"other\" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1625,7 +1625,7 @@ const server = http.createServer(async (req, res) => {
 <div class=\"wrap\">
   <div class=\"header\">
     <div class=\"title\">&#9876; 君主之刃 · 伺服器自體檢查</div>
-    <div class=\"subtitle\">v2.4.1 · 即時驗證伺服器與遊戲功能</div>
+    <div class=\"subtitle\">v2.4.2 · 即時驗證伺服器與遊戲功能</div>
   </div>
   <div class=\"card overall\" id=\"overall\">
     <div class=\"status\"><span class=\"loading\"></span></div>
@@ -1635,7 +1635,7 @@ const server = http.createServer(async (req, res) => {
     <div style=\"text-align:center;color:#6666aa;font-size:13px;\">載入中…</div>
   </div>
   <button class=\"btn\" id=\"retryBtn\" onclick=\"runTest()\">重新檢查</button>
-  <div class=\"footer\">君主之刃 v2.4.1 · 伺服器自體檢查</div>
+  <div class=\"footer\">君主之刃 v2.4.2 · 伺服器自體檢查</div>
 </div>
 <script>
 async function runTest() {
@@ -1888,24 +1888,40 @@ async function initGM() {
     console.log('[Auth] 已建立 GM 帳號:', GM_ACCOUNT);
   }
 }
-// 啟動：先初始化 DB，再建立 GM 帳號，最後監聽
-(async function bootstrap() {
-  await db.init();
-  await initGM();
-  // 重掃資產索引（init 前後若有變動）
+// 啟動：立即 listen，DB 與 GM 帳號初始化在背景非同步進行（絕不阻塞服務）
+// 理由：DigitalOcean / Render 等平台 readiness probe 要先 8080 通，DB 連線失敗不能害死網頁伺服器
+(function bootstrap() {
+  // 先建立資產索引（同步、不會失敗）
   assetIndex = buildAssetIndex(ASSETS_DIR);
   const assetCount = assetIndex.size;
 
+  // 全局防崩：任何未捕獲異步錯誤都記 log 但不讓 process 死掉
+  process.on('uncaughtException', (err) => {
+    console.error('========================================');
+    console.error('[FATAL][uncaughtException]', err.message || err);
+    console.error(err.stack || String(err));
+    console.error('[Server] 已攔截，程序繼續運行');
+    console.error('========================================');
+  });
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('========================================');
+    console.error('[FATAL][unhandledRejection]', reason && reason.message ? reason.message : String(reason));
+    if (reason && reason.stack) console.error(reason.stack);
+    console.error('[Server] 已攔截，程序繼續運行');
+    console.error('========================================');
+  });
+
+  // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.4.1 · 正式營運伺服器');
+    console.log('  君主之刃 v2.4.2 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());
     console.log('  專案根:   ' + ROOT_DIR);
     console.log('  資產目錄: ' + ASSETS_DIR);
     console.log('  資產檔數: ' + assetCount + (assetCount < 100 ? '  [警告] 資產數過少，可能 assets 未正確部署' : ''));
-    console.log('  資料後端: ' + db.getBackend());
+    console.log('  資料後端: ' + db.getBackend() + ' (DB 初始化進行中，稍後會更新)');
     console.log('  多人連線: ' + (socketIoInstalled ? '已啟用 (Socket.IO)' : '未啟用 (單機模式)'));
     console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
     if (GM_PASSWORD === '19811013') {
@@ -1928,6 +1944,23 @@ async function initGM() {
     console.log('    GET  /api/diag                部署診斷 (資產路徑/檔數/樣本)');
     console.log('========================================');
   });
+
+  // 背景非同步初始化 DB + GM 帳號（失敗也不影響服務）
+  (async function bgInit() {
+    try {
+      await db.init();
+    } catch (e) {
+      console.error('[Bootstrap] db.init 拋出未預期錯誤（已攔截，不影響服務）:', e.message);
+    }
+    try {
+      await initGM();
+    } catch (e) {
+      console.error('[Bootstrap] initGM 拋出未預期錯誤（已攔截，不影響服務）:', e.message);
+    }
+    // 重掃資產索引（init 前後若有變動）
+    try { assetIndex = buildAssetIndex(ASSETS_DIR); } catch (_) {}
+    console.log('[Bootstrap] 背景初始化完成，目前後端:', db.getBackend());
+  })();
 })();
 
 // 優雅關閉
