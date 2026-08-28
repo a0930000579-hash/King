@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.4.3 · 正式營運後端伺服器
+  君主之刃 v2.5.0 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -402,10 +402,15 @@ function sendJson(res, status, data) {
 }
 
 // ========== 身分驗證 ==========
-function getAuthAccount(req) {
+async function getAuthAccount(req) {
   const auth = req.headers['authorization'] || '';
   if (!auth.startsWith('Bearer ')) return null;
-  return verifyToken(auth.slice(7));
+  const acc = verifyToken(auth.slice(7));
+  if (!acc) return null;
+  // 封禁檢查：被 ban 帳號直接失效
+  const accData = await db.getAccount(acc);
+  if (!accData || accData.banned || (accData.meta && accData.meta.banned)) return null;
+  return acc;
 }
 
 // ========== 靜態檔案 ==========
@@ -472,10 +477,10 @@ function serveStatic(req, res, pathname) {
     }
     // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.4.3-code.zip',
-      '/game-code-2.4.3.zip': 'monarch-blade-v2.4.3-code.zip',
-      '/assets-part1.zip': 'monarch-blade-v2.4.3-assets-part1.zip',
-      '/assets-part2.zip': 'monarch-blade-v2.4.3-assets-part2.zip',
+      '/game-code.zip': 'monarch-blade-v2.5.0-code.zip',
+      '/game-code-2.5.0.zip': 'monarch-blade-v2.5.0-code.zip',
+      '/assets-part1.zip': 'monarch-blade-v2.5.0-assets-part1.zip',
+      '/assets-part2.zip': 'monarch-blade-v2.5.0-assets-part2.zip',
     };
     if (dlFiles[pathname]) {
       headers['Content-Disposition'] = 'attachment; filename="' + dlFiles[pathname] + '"';
@@ -483,7 +488,7 @@ function serveStatic(req, res, pathname) {
       headers['X-Accel-Buffering'] = 'yes';
     }
     if (pathname === '/PARTS-MANIFEST.txt') {
-      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.4.3.txt"';
+      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.5.0.txt"';
     }
     res.writeHead(200, headers);
     const stream = fs.createReadStream(filePath);
@@ -524,9 +529,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.4.3',
-      build: '2.4.3-2608281550',
-      buildId: '2.4.3-2608281550',
+      version: '2.5.0',
+      build: '2.5.0-2608281643',
+      buildId: '2.5.0-2608281643',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -539,7 +544,7 @@ async function handleApi(req, res, pathname, query) {
 
   // === 多人連線 API（long-poll，v2.4.0）===
   if (pathname.startsWith('/api/mp/')) {
-    const account = getAuthAccount(req);
+    const account = await getAuthAccount(req);
     await handleMpApi(req, res, pathname, query, account);
     return;
   }
@@ -587,9 +592,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.4.3',
-      build: '2.4.3-2608281550',
-      buildId: '2.4.3-2608281550',
+      version: '2.5.0',
+      build: '2.5.0-2608281643',
+      buildId: '2.5.0-2608281643',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -632,7 +637,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.4.3', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.5.0', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -836,9 +841,9 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, {
       ok: allPass,
-      version: '2.4.3',
-      build: '2.4.3-2608281550',
-      buildId: '2.4.3-2608281550',
+      version: '2.5.0',
+      build: '2.5.0-2608281643',
+      buildId: '2.5.0-2608281643',
       timestamp: new Date().toISOString(),
       totalMs,
       summary: { total: checks.length, passed, failed },
@@ -880,6 +885,9 @@ async function handleApi(req, res, pathname, query) {
 
     const acc = await db.getAccount(account);
     if (!acc) return sendJson(res, 401, { error: '帳號或密碼錯誤' });
+    if (acc.banned || (acc.meta && acc.meta.banned)) {
+      return sendJson(res, 403, { error: '帳號已被封鎖，請聯繫客服' });
+    }
     const expectedHash = acc.passwordHash;
     const inputHash = hashPassword(password);
     if (expectedHash !== inputHash) {
@@ -903,7 +911,7 @@ async function handleApi(req, res, pathname, query) {
 
   // GET /api/auth/me
   if (req.method === 'GET' && pathname === '/api/auth/me') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     const acc = await db.getAccount(accName);
     if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
@@ -929,7 +937,7 @@ async function handleApi(req, res, pathname, query) {
   // === 角色存檔 ===
   // GET /api/characters?server=xxx
   if (req.method === 'GET' && pathname === '/api/characters') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     const serverId = query.server || 'zeus';
     const chars = await db.listCharacters(accName, serverId);
@@ -938,16 +946,28 @@ async function handleApi(req, res, pathname, query) {
 
   // GET /api/characters/list?server=xxx（明確 list 路由，避免與 idx 衝突）
   if (req.method === 'GET' && pathname === '/api/characters/list') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     const serverId = query.server || 'zeus';
     const chars = await db.listCharacters(accName, serverId);
     return sendJson(res, 200, { ok: true, characters: chars });
   }
 
+  // GET /api/characters/:idx?server=xxx（讀取單一角色完整存檔）
+  // v2.5.0：前端創角後 / 選角時必須靠這支載入 saveData 進遊戲
+  if (req.method === 'GET' && /^\/api\/characters\/\d+$/.test(pathname)) {
+    const accName = await getAuthAccount(req);
+    if (!accName) return sendJson(res, 401, { error: '未登入' });
+    const charIdx = parseInt(pathname.split('/').pop(), 10);
+    const serverId = query.server || 'zeus';
+    const saveData = await db.getCharacter(accName, serverId, charIdx);
+    if (!saveData) return sendJson(res, 404, { error: '角色不存在' });
+    return sendJson(res, 200, { ok: true, saveData, charIdx, serverId });
+  }
+
   // GET /api/characters/check-name?name=xxx&server=xxx
   if (req.method === 'GET' && pathname === '/api/characters/check-name') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     const name = query.name || '';
     const serverId = query.server || 'zeus';
@@ -958,7 +978,7 @@ async function handleApi(req, res, pathname, query) {
 
   // POST /api/characters/create
   if (req.method === 'POST' && pathname === '/api/characters/create') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     let body;
     try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
@@ -984,7 +1004,7 @@ async function handleApi(req, res, pathname, query) {
 
   // POST /api/characters/save
   if (req.method === 'POST' && pathname === '/api/characters/save') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     let body;
     try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
@@ -997,7 +1017,7 @@ async function handleApi(req, res, pathname, query) {
 
   // POST /api/characters/delete（v2.4.0：角色選擇頁刪除角色）
   if (req.method === 'POST' && pathname === '/api/characters/delete') {
-    const accName = getAuthAccount(req);
+    const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
     let body;
     try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
@@ -1028,7 +1048,7 @@ async function handleApi(req, res, pathname, query) {
       device: body.device || {},
       pageUrl: body.pageUrl || '',
       errors: Array.isArray(body.errors) ? body.errors.slice(0, 20) : [],
-      account: getAuthAccount(req) || null,
+      account: (await getAuthAccount(req)) || null,
     };
     await db.addBugReport(report);
     return sendJson(res, 201, { ok: true, id: report.id });
@@ -1040,7 +1060,7 @@ async function handleApi(req, res, pathname, query) {
 
   // === GM API 驗證 ===
   async function verifyGM(req) {
-    const acc = getAuthAccount(req);
+    const acc = await getAuthAccount(req);
     if (!acc) return false;
     const a = await db.getAccount(acc);
     return !!(a && a.isGM);
@@ -1542,18 +1562,280 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, broadcast });
   }
 
-  // GET /api/gm/broadcasts — 廣播歷史
-  if (req.method === 'GET' && pathname === '/api/gm/broadcasts') {
+  // ==================== v2.5.0 新增 GM API ====================
+
+  // GET /api/gm/logs — GM 操作日誌
+  if (req.method === 'GET' && pathname === '/api/gm/logs') {
     if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    let history = [];
+    const limit = Math.min(200, parseInt(query.limit) || 50);
+    const list = await db.listGMLogs(limit);
+    return sendJson(res, 200, { ok: true, list });
+  }
+
+  // GET /api/gm/announcements — 公告列表
+  if (req.method === 'GET' && pathname === '/api/gm/announcements') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const list = await db.listAnnouncements();
+    return sendJson(res, 200, { ok: true, list });
+  }
+
+  // POST /api/gm/announcements — 新增公告
+  if (req.method === 'POST' && pathname === '/api/gm/announcements') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const gmAcc = await getAuthAccount(req);
+    const item = await db.createAnnouncement(body, gmAcc);
+    await db.logGMAction(gmAcc, null, 'announcement_create', { type: body.type, title: body.title });
+    return sendJson(res, 200, { ok: true, item });
+  }
+
+  // PUT /api/gm/announcements/:id — 更新公告
+  if (req.method === 'PUT' && pathname.startsWith('/api/gm/announcements/')) {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const id = pathname.slice('/api/gm/announcements/'.length);
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const gmAcc = await getAuthAccount(req);
+    await db.updateAnnouncement(id, body, gmAcc);
+    await db.logGMAction(gmAcc, null, 'announcement_update', { id });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // DELETE /api/gm/announcements/:id — 下架/刪除公告
+  if (req.method === 'DELETE' && pathname.startsWith('/api/gm/announcements/')) {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const id = pathname.slice('/api/gm/announcements/'.length);
+    const gmAcc = await getAuthAccount(req);
+    await db.deleteAnnouncement(id);
+    await db.logGMAction(gmAcc, null, 'announcement_delete', { id });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // GET /api/announcements/active — 玩家端讀取有效公告（不需GM）
+  if (req.method === 'GET' && pathname === '/api/announcements/active') {
+    const type = query.type || 'marquee';
+    const list = await db.listAnnouncements(type);
+    return sendJson(res, 200, { ok: true, list });
+  }
+
+  // GET /api/gm/config — 遊戲參數
+  if (req.method === 'GET' && pathname === '/api/gm/config') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const cfg = await db.getGameConfig();
+    return sendJson(res, 200, { ok: true, config: cfg });
+  }
+
+  // POST /api/gm/config — 設定遊戲參數
+  if (req.method === 'POST' && pathname === '/api/gm/config') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const gmAcc = await getAuthAccount(req);
+    const { key, value } = body;
+    if (!key) return sendJson(res, 400, { error: '缺少 key' });
+    await db.setGameConfig(key, value, gmAcc);
+    await db.logGMAction(gmAcc, null, 'config_update', { key, value });
+    return sendJson(res, 200, { ok: true, key, value });
+  }
+
+  // GET /api/gm/castles — 攻城戰設定列表
+  if (req.method === 'GET' && pathname === '/api/gm/castles') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const list = await db.getCastleStates();
+    return sendJson(res, 200, { ok: true, list });
+  }
+
+  // POST /api/gm/castles/:id — 更新攻城戰設定
+  if (req.method === 'POST' && pathname.startsWith('/api/gm/castles/')) {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const castleId = decodeURIComponent(pathname.slice('/api/gm/castles/'.length));
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const gmAcc = await getAuthAccount(req);
+    await db.updateCastleState(castleId, body, gmAcc);
+    await db.logGMAction(gmAcc, null, 'castle_update', { castleId, ...body });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // GET /api/gm/items — 自定義道具/裝備列表
+  if (req.method === 'GET' && pathname === '/api/gm/items') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const list = await db.listCustomItems(query.type);
+    return sendJson(res, 200, { ok: true, list });
+  }
+
+  // POST /api/gm/items — 新增/更新道具
+  if (req.method === 'POST' && pathname === '/api/gm/items') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    if (!body.id || !body.name || !body.type) return sendJson(res, 400, { error: '缺少 id/name/type' });
+    const gmAcc = await getAuthAccount(req);
+    await db.upsertCustomItem(body, gmAcc);
+    await db.logGMAction(gmAcc, null, 'item_upsert', { id: body.id, name: body.name });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // DELETE /api/gm/items/:id — 刪除(停用)道具
+  if (req.method === 'DELETE' && pathname.startsWith('/api/gm/items/')) {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const id = decodeURIComponent(pathname.slice('/api/gm/items/'.length));
+    const gmAcc = await getAuthAccount(req);
+    await db.deleteCustomItem(id);
+    await db.logGMAction(gmAcc, null, 'item_delete', { id });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // POST /api/gm/kick/ban — 封鎖/解封帳號
+  if (req.method === 'POST' && pathname === '/api/gm/ban') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const target = body.account;
+    if (!target) return sendJson(res, 400, { error: '缺少 account' });
+    const acc = await db.getAccount(target);
+    if (!acc) return sendJson(res, 404, { error: '帳號不存在' });
+    const isUnban = body.unban === true || body.unban === 'true' || body.action === 'unban';
+    const newMeta = { ...(acc.meta || {}) };
+    if (isUnban) {
+      delete newMeta.banned;
+      delete newMeta.banReason;
+      delete newMeta.bannedAt;
+    } else {
+      newMeta.banned = true;
+      newMeta.banReason = body.reason || '';
+      newMeta.bannedAt = new Date().toISOString();
+    }
+    if (db.getBackend() === 'postgres') {
+      const pool = await getPgPool();
+      await pool.query('UPDATE accounts SET meta = $1 WHERE account = $2', [newMeta, target]);
+    } else {
+      const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'accounts.json'), 'utf-8') || '{}');
+      if (data[target]) { data[target].meta = newMeta; fs.writeFileSync(path.join(DATA_DIR, 'accounts.json'), JSON.stringify(data, null, 2)); }
+    }
+    const gmAcc = await getAuthAccount(req);
+    await db.logGMAction(gmAcc, target, isUnban ? 'unban' : 'ban', { reason: body.reason });
+    return sendJson(res, 200, { ok: true, banned: !isUnban });
+  }
+
+  // ==================== 玩家端倉庫 API ====================
+
+  // GET /api/warehouse — 讀取帳號級共享倉庫
+  if (req.method === 'GET' && pathname === '/api/warehouse') {
+    const acc = await getAuthAccount(req);
+    if (!acc) return sendJson(res, 401, { error: '未登入' });
+    const shared = await db.getAccountShared(acc);
+    return sendJson(res, 200, { ok: true, warehouse: shared.warehouse || [] });
+  }
+
+  // POST /api/warehouse/deposit — 存入倉庫
+  if (req.method === 'POST' && pathname === '/api/warehouse/deposit') {
+    const acc = await getAuthAccount(req);
+    if (!acc) return sendJson(res, 401, { error: '未登入' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const { serverId, charIdx, item } = body;
+    if (!item || !item.id) return sendJson(res, 400, { error: '缺少 item' });
     try {
-      const bfile = path.join(DATA_DIR, 'broadcasts.json');
-      if (fs.existsSync(bfile)) {
-        history = JSON.parse(fs.readFileSync(bfile, 'utf-8'));
-      }
-    } catch(e) { history = []; }
-    history = history.slice().reverse();
-    return sendJson(res, 200, { ok: true, list: history });
+      await db.warehouseDeposit(acc, serverId || 'zeus', charIdx || 0, item);
+      // 同時從角色背包扣除（客戶端同步負責）
+      const shared = await db.getAccountShared(acc);
+      return sendJson(res, 200, { ok: true, warehouse: shared.warehouse || [] });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/warehouse/withdraw — 取出倉庫
+  if (req.method === 'POST' && pathname === '/api/warehouse/withdraw') {
+    const acc = await getAuthAccount(req);
+    if (!acc) return sendJson(res, 401, { error: '未登入' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const { serverId, charIdx, itemId, count } = body;
+    if (!itemId) return sendJson(res, 400, { error: '缺少 itemId' });
+    try {
+      const result = await db.warehouseWithdraw(acc, serverId || 'zeus', charIdx || 0, itemId, count || 1);
+      const shared = await db.getAccountShared(acc);
+      return sendJson(res, 200, { ok: true, warehouse: shared.warehouse || [], item: result.item, count: result.count });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // GET /api/account/shared — 帳號級共享數據（變身/英雄/守護/倉庫）
+  if (req.method === 'GET' && pathname === '/api/account/shared') {
+    const acc = await getAuthAccount(req);
+    if (!acc) return sendJson(res, 401, { error: '未登入' });
+    const shared = await db.getAccountShared(acc);
+    return sendJson(res, 200, { ok: true, shared });
+  }
+
+  // POST /api/account/shared — 同步帳號級共享數據（保存時）
+  if (req.method === 'POST' && pathname === '/api/account/shared') {
+    const acc = await getAuthAccount(req);
+    if (!acc) return sendJson(res, 401, { error: '未登入' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const patch = {};
+    if ('ownedTransforms' in body) patch.ownedTransforms = body.ownedTransforms;
+    if ('ownedHeroes' in body) patch.ownedHeroes = body.ownedHeroes;
+    if ('ownedPets' in body) patch.ownedPets = body.ownedPets;
+    if (Object.keys(patch).length > 0) {
+      await db.saveAccountShared(acc, patch);
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // GET /api/game-config — 玩家端讀取遊戲參數（倍率、轉職費等）
+  if (req.method === 'GET' && pathname === '/api/game-config') {
+    const cfg = await db.getGameConfig();
+    return sendJson(res, 200, { ok: true, config: cfg });
+  }
+
+  // POST /api/gm/class-change — GM 協助轉職(免費) 或 玩家付費轉職
+  // 玩家付費轉職：自己呼叫，扣除鑽石 3600 後切換職業
+  if (req.method === 'POST' && pathname === '/api/characters/change-class') {
+    const acc = await getAuthAccount(req);
+    if (!acc) return sendJson(res, 401, { error: '未登入' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const { serverId, charIdx, newClassId, isGM } = body;
+    if (!newClassId) return sendJson(res, 400, { error: '缺少 newClassId' });
+    const validClasses = ['warrior', 'paladin', 'rogue', 'archer', 'mage', 'warlock'];
+    if (!validClasses.includes(newClassId)) return sendJson(res, 400, { error: '無效職業' });
+
+    // 讀角色存檔
+    const saveData = await db.getCharacter(acc, serverId || 'zeus', charIdx || 0);
+    if (!saveData) return sendJson(res, 404, { error: '角色不存在' });
+
+    // 付費驗證：非GM需扣鑽石
+    if (!isGM) {
+      const gem = (saveData.resources && saveData.resources.gem) || 0;
+      // 從 game_config 取價格，預設 3600
+      let cost = 3600;
+      try {
+        const cfgCost = await db.getGameConfig('class_change_cost');
+        if (cfgCost != null) cost = Number(cfgCost) || 3600;
+      } catch (_) {}
+      if (gem < cost) return sendJson(res, 400, { error: '鑽石不足，轉職需要 ' + cost + ' 鑽石', cost });
+      if (!saveData.resources) saveData.resources = { gold: 0, gem: 0 };
+      saveData.resources.gem = gem - cost;
+    }
+
+    // 更新職業
+    if (!saveData.player) saveData.player = {};
+    saveData.player.classId = newClassId;
+    // 同步刷新基礎屬性（按新職業重新計算）
+    await db.saveCharacter(acc, serverId || 'zeus', charIdx || 0, saveData);
+
+    return sendJson(res, 200, {
+      ok: true,
+      newClassId,
+      gem: saveData.resources?.gem || 0,
+      saveData,
+    });
   }
 
 
@@ -1583,7 +1865,7 @@ const server = http.createServer(async (req, res) => {
 <head>
 <meta charset=\"UTF-8\" />
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-<title>伺服器自體檢查 · 君主之刃 v2.4.3</title>
+<title>伺服器自體檢查 · 君主之刃 v2.5.0</title>
 <meta name=\"creative-medium\" content=\"other\" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1625,7 +1907,7 @@ const server = http.createServer(async (req, res) => {
 <div class=\"wrap\">
   <div class=\"header\">
     <div class=\"title\">&#9876; 君主之刃 · 伺服器自體檢查</div>
-    <div class=\"subtitle\">v2.4.3 · 即時驗證伺服器與遊戲功能</div>
+    <div class=\"subtitle\">v2.5.0 · 即時驗證伺服器與遊戲功能</div>
   </div>
   <div class=\"card overall\" id=\"overall\">
     <div class=\"status\"><span class=\"loading\"></span></div>
@@ -1635,7 +1917,7 @@ const server = http.createServer(async (req, res) => {
     <div style=\"text-align:center;color:#6666aa;font-size:13px;\">載入中…</div>
   </div>
   <button class=\"btn\" id=\"retryBtn\" onclick=\"runTest()\">重新檢查</button>
-  <div class=\"footer\">君主之刃 v2.4.3 · 伺服器自體檢查</div>
+  <div class=\"footer\">君主之刃 v2.5.0 · 伺服器自體檢查</div>
 </div>
 <script>
 async function runTest() {
@@ -1922,7 +2204,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.4.3 · 正式營運伺服器');
+    console.log('  君主之刃 v2.5.0 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());

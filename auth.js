@@ -1005,20 +1005,22 @@
     };
   }
   function startGameWithChar(idx) {
-    // 從後端載入角色存檔
+    // v2.5.0：從後端載入角色存檔；失敗彈錯並留在角色選擇頁，不得靜默進遊戲
     api('/characters/' + idx + '?server=' + encodeURIComponent(currentServer?.id || ''))
       .then(data => {
         if (data && data.saveData) {
-          // 把存檔塞進 localStorage 讓 game.js 讀
           try {
             localStorage.setItem('mmo_save_' + idx, JSON.stringify(data.saveData));
             localStorage.setItem('mmo_char_idx', String(idx));
           } catch (e) {}
+          startGameCommon();
+        } else {
+          showToast('讀取角色存檔失敗，請重試', 'error');
         }
-        startGameCommon();
       })
-      .catch(() => {
-        startGameCommon();
+      .catch(err => {
+        const msg = err?.message || '讀取角色存檔失敗，請重試';
+        showToast(msg, 'error');
       });
   }
 

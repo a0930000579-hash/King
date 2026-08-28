@@ -6320,12 +6320,17 @@ function saveGame() {
     data.saveVersion = 2;
     data.savedAt = Date.now();
     localStorage.setItem(GAME_SAVE_KEY, JSON.stringify(data));
+    // v2.5.0：同時寫入角色槽存檔，供選角頁切換使用
+    try {
+      const idx = GS.currentCharIdx != null ? GS.currentCharIdx : 0;
+      localStorage.setItem('mmo_save_' + idx, JSON.stringify(data));
+    } catch(e) {}
     // v2.0：同步到後端（若已登入）
     if (window.AuthSystem && AuthSystem.getToken()) {
       try {
         const server = AuthSystem.getCurrentServer();
         const srvId = server?.id || 'zeus';
-        const charIdx = 0;
+        const charIdx = window.GS?.currentCharIdx != null ? GS.currentCharIdx : 0;
         fetch('/api/characters/save', {
           method: 'POST',
           headers: {
@@ -6698,6 +6703,13 @@ function _initCore() {
 
   // 先載入存檔（會覆蓋 GS 中的進度欄位）
   loadGame();
+
+  // v2.5.0：載入帳號級共享數據（變身/英雄/守護）
+  loadAccountSharedData();
+  // v2.5.0：載入跑馬燈公告
+  loadMarqueeAnnouncements();
+  // v2.5.0：預讀轉職費用
+  loadClassChangeCost();
 
   if (!GS.ownedTransforms) GS.ownedTransforms = [];
   // 存檔兼容：過濾掉不在新卡池裡的舊變身ID（卡池大換血時避免殘留舊卡報錯）
@@ -11790,6 +11802,9 @@ function confirmCC2CharCreate() {
       server: serverId,
     }).then(result => {
       if (result && result.ok) {
+        // v2.5.0：記錄當前角色索引，確保存檔寫對槽位
+        GS.currentCharIdx = result.idx != null ? result.idx : 0;
+        try { localStorage.setItem('mmo_char_idx', String(GS.currentCharIdx)); } catch(e) {}
         enterWorld();
       } else {
         // server 回 ok:false 或非預期格式，顯示具體錯誤
@@ -21725,7 +21740,7 @@ function openMenuPage(page) {
 }
 
 function getMenuPageTitle(page) {
-  return { nation: '國家', class: '職業', ranking: '排行榜', guild: '軍團' }[page] || page;
+  return { nation: '國家', class: '職業', ranking: '排行榜', guild: '軍團', warehouse: '倉庫' }[page] || page;
 }
 
 function renderMenuPage(page) {
@@ -21734,8 +21749,133 @@ function renderMenuPage(page) {
     case 'guild': return renderGuildPageEnhanced();
     case 'class': return renderClassSelectPage();
     case 'ranking': return renderRankingPage();
+    case 'warehouse': return renderWarehousePage();
     default: return '';
   }
+}
+
+// ==================== 倉庫系統 (v2.5.0) ====================
+let _warehouseCache = [];
+let _warehouseLoading = false;
+
+async function loadWarehouse(refresh) {
+  if (_warehouseCache.length > 0 && !refresh) return _warehouseCache;
+  if (_warehouseLoading) return _warehouseCache;
+  _warehouseLoading = true;
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    if (apiFn) {
+      const data = await apiFn('/warehouse');
+      if (data && data.ok && Array.isArray(data.warehouse)) {
+        _warehouseCache = data.warehouse;
+      }
+    }
+  } catch(e) { console.warn('[倉庫] 讀取失敗:', e); }
+  _warehouseLoading = false;
+  return _warehouseCache;
+}
+
+async function refreshWarehouseUI() {
+  await loadWarehouse(true);
+  if (GS.menuPage === 'warehouse') {
+    el.pageContent.innerHTML = renderWarehousePage();
+    bindMenuPageEvents('warehouse');
+  }
+}
+
+function renderWarehousePage() {
+  const items = _warehouseCache || [];
+  const maxSlots = 200;
+  return `
+    <div class="bag-section-title">帳號共享倉庫</div>
+    <div style="font-size:11px;color:var(--parchment-dark);margin-bottom:8px;">
+      同帳號所有角色共用 · ${items.length} / ${maxSlots} 格
+    </div>
+    <div class="warehouse-grid" id="warehouse-grid">
+      ${items.length === 0 ? '<div style="grid-column:1/-1;color:var(--parchment-dark);text-align:center;padding:30px;font-size:12px;">倉庫是空的，把背包道具存入吧</div>' : ''}
+      ${items.map((it, i) => `
+        <div class="warehouse-item" data-wh-idx="${i}" title="${escapeHtml(it.name || it.id)}">
+          <div class="wh-icon">${it.iconPath ? '<img src="' + it.iconPath + '" style="width:36px;height:36px;">' : '📦'}</div>
+          <div class="wh-name">${escapeHtml(it.name || it.id)}</div>
+          <div class="wh-count">×${it.count || 1}</div>
+          <button class="wh-withdraw-btn" data-wh-id="${it.id}">取出</button>
+        </div>
+      `).join('')}
+    </div>
+    <div class="bag-section-title" style="margin-top:16px;">存入背包道具</div>
+    <div style="font-size:11px;color:var(--parchment-dark);margin-bottom:8px;">點擊下方道具存入倉庫</div>
+    <div class="warehouse-grid" id="bag-to-wh-grid">
+      ${(GS.inventory || []).filter(i => i && i.count > 0).map((it, i) => `
+        <div class="warehouse-item" style="cursor:pointer;" title="點擊存入 1 個：${escapeHtml(it.name || it.id)}" data-deposit-id="${it.id}" data-deposit-name="${escapeHtml(it.name || it.id)}">
+          <div class="wh-icon">📦</div>
+          <div class="wh-name">${escapeHtml(it.name || it.id)}</div>
+          <div class="wh-count">×${it.count || 1}</div>
+          <button class="wh-deposit-btn">存入</button>
+        </div>
+      `).join('') || '<div style="grid-column:1/-1;color:var(--parchment-dark);text-align:center;padding:20px;font-size:12px;">背包是空的</div>'}
+    </div>
+  `;
+}
+
+async function depositToWarehouse(itemId, itemName, count) {
+  // 先從背包扣
+  const inv = GS.inventory || [];
+  const idx = inv.findIndex(i => i.id === itemId);
+  if (idx < 0) { addLog('system', '背包沒有此道具'); return false; }
+  const it = inv[idx];
+  const take = Math.min(count || 1, it.count || 0);
+  if (take <= 0) return false;
+  
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    const serverId = (window.AuthSystem?.getCurrentServer?.() || {})?.id || 'zeus';
+    const charIdx = window.GS?.currentCharIdx != null ? GS.currentCharIdx : 0;
+    if (apiFn) {
+      const r = await apiFn('/warehouse/deposit', {
+        serverId, charIdx,
+        item: { id: itemId, name: itemName || it.name || itemId, count: take, type: it.type, rarity: it.rarity },
+      });
+      if (!r || !r.ok) throw new Error(r?.error || '存入失敗');
+      _warehouseCache = r.warehouse || [];
+    }
+  } catch(e) {
+    addLog('system', '存入失敗: ' + e.message);
+    return false;
+  }
+  
+  // 扣背包
+  it.count -= take;
+  if (it.count <= 0) inv.splice(idx, 1);
+  addLog('system', `已存入 ${itemName || itemId} ×${take}`);
+  return true;
+}
+
+async function withdrawFromWarehouse(itemId, count) {
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    const serverId = (window.AuthSystem?.getCurrentServer?.() || {})?.id || 'zeus';
+    const charIdx = window.GS?.currentCharIdx != null ? GS.currentCharIdx : 0;
+    if (apiFn) {
+      const r = await apiFn('/warehouse/withdraw', { serverId, charIdx, itemId, count });
+      if (!r || !r.ok) throw new Error(r?.error || '取出失敗');
+      _warehouseCache = r.warehouse || [];
+      // 加到背包
+      const whItem = r.item || {};
+      addToInventory({
+        id: whItem.id || itemId,
+        name: whItem.name || itemId,
+        type: whItem.type || 'consumable',
+        itemType: whItem.itemType || whItem.type || 'consumable',
+        rarity: whItem.rarity || 'common',
+      }, r.count || count || 1);
+      addLog('system', `已取出 ${whItem.name || itemId} ×${r.count || 1}`);
+      return true;
+    }
+  } catch(e) {
+    addLog('system', '取出失敗: ' + e.message);
+    return false;
+  }
+  return false;
 }
 
 function renderNationPage() {
@@ -22627,13 +22767,197 @@ function bindMenuPageEvents(page) {
   if (page === 'class') {
     el.pageContent.querySelectorAll('[data-class]').forEach(card => {
       card.addEventListener('click', () => {
-        if (confirm(`确定切换职业為 ${CLASSES[card.dataset.class].name}？`)) {
-          selectClass(card.dataset.class);
+        const cid = card.dataset.class;
+        if (GS.player.classId === cid) {
+          addLog('system', '當前已是這個職業');
+          return;
+        }
+        tryPayChangeClass(cid, () => {
           el.pageContent.innerHTML = renderMenuPage('class');
           bindMenuPageEvents('class');
+        });
+      });
+    });
+  }
+  if (page === 'warehouse') {
+    // 取出按鈕
+    el.pageContent.querySelectorAll('.wh-withdraw-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.whId;
+        const cnt = parseInt(prompt('取出數量：', '1')) || 1;
+        if (cnt < 1) return;
+        if (await withdrawFromWarehouse(id, cnt)) {
+          el.pageContent.innerHTML = renderWarehousePage();
+          bindMenuPageEvents('warehouse');
         }
       });
     });
+    // 存入按鈕
+    el.pageContent.querySelectorAll('.wh-deposit-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const wrap = btn.closest('[data-deposit-id]');
+        const id = wrap?.dataset.depositId;
+        const name = wrap?.dataset.depositName || id;
+        if (!id) return;
+        const cnt = parseInt(prompt('存入數量：', '1')) || 1;
+        if (cnt < 1) return;
+        if (await depositToWarehouse(id, name, cnt)) {
+          el.pageContent.innerHTML = renderWarehousePage();
+          bindMenuPageEvents('warehouse');
+        }
+      });
+    });
+  }
+}
+
+// ==================== 帳號級共享 (v2.5.0) ====================
+// 變身、英雄、守護：同帳號多角色互通；從 /api/account/shared 讀
+async function loadAccountSharedData() {
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    if (!apiFn) return;
+    const data = await apiFn('/account/shared');
+    if (data?.ok && data.shared) {
+      if (Array.isArray(data.shared.ownedTransforms)) {
+        // 合併：把帳號級的變身補到角色級（不重複）
+        const existing = new Set((GS.ownedTransforms || []).map(t => t.id));
+        for (const t of data.shared.ownedTransforms) {
+          if (t.id && !existing.has(t.id)) {
+            GS.ownedTransforms.push(t);
+            existing.add(t.id);
+          }
+        }
+      }
+      if (Array.isArray(data.shared.ownedHeroes)) {
+        const existing = new Set((GS.ownedHeroes || []).map(t => t.id));
+        for (const t of data.shared.ownedHeroes) {
+          if (t.id && !existing.has(t.id)) {
+            GS.ownedHeroes.push(t);
+            existing.add(t.id);
+          }
+        }
+      }
+      if (Array.isArray(data.shared.ownedPets)) {
+        const existing = new Set((GS.ownedPets || []).map(t => t.id));
+        for (const t of data.shared.ownedPets) {
+          if (t.id && !existing.has(t.id)) {
+            GS.ownedPets.push(t);
+            existing.add(t.id);
+          }
+        }
+      }
+      console.log('[共享] 已從帳號級同步：變身', data.shared.ownedTransforms?.length || 0,
+                  '英雄', data.shared.ownedHeroes?.length || 0,
+                  '守護', data.shared.ownedPets?.length || 0);
+    }
+  } catch(e) { console.warn('[共享] 載入失敗:', e); }
+}
+
+// 保存時同步帳號級（變身/英雄/守護獲取時呼叫）
+async function syncAccountSharedFromLocal() {
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    if (!apiFn) return;
+    await apiFn('/account/shared', {
+      ownedTransforms: GS.ownedTransforms || [],
+      ownedHeroes: GS.ownedHeroes || [],
+      ownedPets: GS.ownedPets || [],
+    });
+  } catch(e) { console.warn('[共享] 同步失敗:', e); }
+}
+
+// ==================== 跑馬燈公告 (v2.5.0) ====================
+let _marqueeQueue = [];
+let _marqueeIndex = 0;
+
+async function loadMarqueeAnnouncements() {
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    if (!apiFn) return;
+    const data = await apiFn('/announcements/active?type=marquee');
+    if (data?.ok && Array.isArray(data.list) && data.list.length > 0) {
+      _marqueeQueue = data.list.map(a => a.content || a.title || '');
+      showNextMarquee();
+      setInterval(showNextMarquee, 18000);
+    }
+  } catch(e) { console.warn('[跑馬燈] 載入失敗:', e); }
+}
+
+function showNextMarquee() {
+  if (_marqueeQueue.length === 0) return;
+  const bar = document.getElementById('marquee-bar');
+  const textEl = document.getElementById('marquee-text');
+  if (!bar || !textEl) return;
+  const text = _marqueeQueue[_marqueeIndex % _marqueeQueue.length];
+  _marqueeIndex++;
+  textEl.textContent = text;
+  bar.classList.add('show');
+  // 重置動畫
+  textEl.style.animation = 'none';
+  textEl.offsetHeight; // reflow
+  textEl.style.animation = '';
+}
+let _classChangeCost = 3600;
+
+async function loadClassChangeCost() {
+  try {
+    const apiFn = window.AuthSystem?.api || null;
+    if (apiFn) {
+      const data = await apiFn('/game-config');
+      if (data?.config?.class_change_cost != null) {
+        _classChangeCost = Number(data.config.class_change_cost) || 3600;
+      }
+    }
+  } catch(e) { console.warn('[轉職] 無法取得費用配置:', e); }
+}
+
+function tryPayChangeClass(classId, onSuccess) {
+  const cls = CLASSES[classId];
+  if (!cls) return;
+  const gem = (GS.resources && GS.resources.gem) || 0;
+  const enough = gem >= _classChangeCost;
+  const msg = `確定要花費 ${_classChangeCost} 鑽石 轉職為【${cls.name}】嗎？\n\n當前鑽石：${gem}\n${enough ? '轉職後剩餘：' + (gem - _classChangeCost) : '鑽石不足，還差 ' + (_classChangeCost - gem) + ' 鑽石'}`;
+  if (!confirm(msg)) return;
+  if (!enough) {
+    addLog('system', '鑽石不足，轉職需要 ' + _classChangeCost + ' 鑽石');
+    return;
+  }
+
+  const doSwitch = (saveData) => {
+    GS.player.classId = classId;
+    if (saveData?.player) {
+      Object.assign(GS.player, saveData.player);
+    }
+    if (saveData?.resources) {
+      GS.resources = { ...GS.resources, ...saveData.resources };
+    }
+    updatePlayerSprite();
+    updatePlayerBadge();
+    updateUI();
+    saveGame();
+    addLog('system', `轉職成功！現在是【${cls.name}】`);
+    if (typeof onSuccess === 'function') onSuccess();
+  };
+
+  const apiFn = window.AuthSystem?.api || null;
+  const serverId = (window.AuthSystem?.getCurrentServer?.() || {})?.id || 'zeus';
+  const charIdx = window.GS?.currentCharIdx != null ? GS.currentCharIdx : 0;
+  if (apiFn) {
+    apiFn('/characters/change-class', { serverId, charIdx, newClassId: classId }).then(r => {
+      if (r && r.ok) {
+        doSwitch(r.saveData);
+      } else {
+        addLog('system', '轉職失敗: ' + (r?.error || '未知錯誤'));
+      }
+    }).catch(e => {
+      addLog('system', '轉職失敗: ' + e.message);
+    });
+  } else {
+    // 離線模式：直接扣（模擬）
+    GS.resources.gem = gem - _classChangeCost;
+    doSwitch();
   }
 }
 
@@ -25203,8 +25527,24 @@ window.addEventListener('load', function() {
         }
       } catch (e) { console.warn('[Auth] 讀取新創角色失敗:', e); }
       // 從後端載入角色存檔（如果有）
-      loadGame(); // 先讀 localStorage
-      init();
+    // v2.5.0：從角色槽位載入存檔（優先 mmo_save_x，後備 game_save_v2）
+    try {
+      const idxStr = localStorage.getItem('mmo_char_idx');
+      const idx = idxStr != null ? parseInt(idxStr, 10) : 0;
+      GS.currentCharIdx = isNaN(idx) ? 0 : idx;
+      const raw = localStorage.getItem('mmo_save_' + GS.currentCharIdx);
+      if (raw) {
+        const data = JSON.parse(raw);
+        SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
+        console.log('[存檔] 從角色槽 ' + GS.currentCharIdx + ' 載入成功');
+      } else {
+        loadGame(); // 後備：舊版單存檔 key
+      }
+    } catch(e) {
+      console.warn('[存檔] 角色槽載入失敗，嘗試舊版存檔:', e);
+      loadGame();
+    }
+    init();
     };
   } else {
     init();

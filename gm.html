@@ -608,6 +608,21 @@
     <div class="nav-item" data-page="reward" onclick="switchPage('reward')">
       <span class="icon">🎁</span><span>發放獎勵</span>
     </div>
+    <div class="nav-item" data-page="items" onclick="switchPage('items')">
+      <span class="icon">⚔</span><span>道具編輯器</span>
+    </div>
+    <div class="nav-item" data-page="castle" onclick="switchPage('castle')">
+      <span class="icon">🏰</span><span>攻城戰設定</span>
+    </div>
+    <div class="nav-item" data-page="announce" onclick="switchPage('announce')">
+      <span class="icon">📣</span><span>遊戲公告</span>
+    </div>
+    <div class="nav-item" data-page="config" onclick="switchPage('config')">
+      <span class="icon">⚙</span><span>遊戲參數</span>
+    </div>
+    <div class="nav-item" data-page="gmlog" onclick="switchPage('gmlog')">
+      <span class="icon">📋</span><span>GM 日誌</span>
+    </div>
     <div class="nav-item" data-page="bug" onclick="switchPage('bug')">
       <span class="icon">🐛</span><span>Bug 回報</span>
     </div>
@@ -794,11 +809,182 @@
             <input type="text" id="rewardSingleItemId" placeholder="選填，道具/變身/英雄ID">
           </div>
           <div class="text-right mt-10">
-            <button class="btn" onclick="giveSingleReward()">發放</button>
+      <button class="btn" onclick="giveSingleReward()">發放</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <!-- ===== 道具裝備編輯器 ===== -->
+      <div class="page hidden" id="page-items">
+        <div class="page-header">
+          <h2>道具裝備編輯器</h2>
+          <div class="desc">新增與編輯自訂義道具/裝備</div>
+        </div>
+        <div class="card">
+          <h3>新增/更新道具</h3>
+          <div class="form-row">
+            <label>道具ID</label>
+            <input type="text" id="itemId" placeholder="例: custom_sword_001">
+          </div>
+          <div class="form-row">
+            <label>名稱</label>
+            <input type="text" id="itemName" placeholder="道具名稱">
+          </div>
+          <div class="form-row">
+            <label>類型</label>
+            <select id="itemType">
+              <option value="consumable">消耗品</option>
+              <option value="weapon">武器</option>
+              <option value="armor">防具</option>
+              <option value="accessory">飾品</option>
+              <option value="boots">鞋子</option>
+              <option value="helmet">頭盔</option>
+              <option value="transform">變身卡</option>
+              <option value="hero">英雄</option>
+              <option value="pet">守護</option>
+            </select>
+            <label>品階</label>
+            <select id="itemRarity">
+              <option value="common">普通</option>
+              <option value="green">綠色</option>
+              <option value="blue">藍色</option>
+              <option value="purple">紫色</option>
+              <option value="orange">橙色</option>
+              <option value="legendary">傳說</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>等級需求</label>
+            <input type="number" id="itemLvlReq" value="1" min="1" style="flex:0 0 120px;">
+            <label>價格</label>
+            <input type="number" id="itemPrice" value="0" min="0" style="flex:0 0 120px;">
+            <label>職業限制</label>
+            <select id="itemClass" style="flex:0 0 140px;">
+              <option value="">無限制</option>
+              <option value="warrior">戰士</option>
+              <option value="paladin">聖騎士</option>
+              <option value="rogue">盜賊</option>
+              <option value="archer">弓箭手</option>
+              <option value="mage">法師</option>
+              <option value="warlock">術士</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>能力值 (JSON)</label>
+            <input type="text" id="itemStats" placeholder='例: {"atk":100,"def":50}'>
+          </div>
+          <div class="form-row">
+            <label>描述</label>
+            <textarea id="itemDesc" placeholder="道具描述" rows="2"></textarea>
+          </div>
+          <div class="form-row">
+            <label>圖示路徑</label>
+            <input type="text" id="itemIcon" placeholder="assets/item/icon_sword.jpg">
+          </div>
+          <div class="text-right mt-10">
+            <button class="btn btn-ghost" onclick="clearItemForm()">清空</button>
+            <button class="btn" onclick="saveItem()">儲存道具</button>
+          </div>
+        </div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3>道具列表</h3>
+            <select id="itemFilterType" onchange="loadItems()" style="width:140px;">
+              <option value="">全部</option>
+              <option value="consumable">消耗品</option>
+              <option value="weapon">武器</option>
+              <option value="armor">防具</option>
+              <option value="transform">變身</option>
+              <option value="hero">英雄</option>
+              <option value="pet">守護</option>
+            </select>
+          </div>
+          <div id="itemList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 攻城戰設定 ===== -->
+      <div class="page hidden" id="page-castle">
+        <div class="page-header">
+          <h2>攻城戰設定</h2>
+          <div class="desc">調整攻城時間、指定城堡歸屬</div>
+        </div>
+        <div class="card">
+          <div id="castleList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 遊戲公告 ===== -->
+      <div class="page hidden" id="page-announce">
+        <div class="page-header">
+          <h2>遊戲公告</h2>
+          <div class="desc">跑馬燈、登入公告、即時廣播</div>
+        </div>
+        <div class="card">
+          <h3>新增公告</h3>
+          <div class="form-row">
+            <label>類型</label>
+            <select id="annType" style="flex:0 0 160px;">
+              <option value="marquee">跑馬燈</option>
+              <option value="login">登入公告</option>
+              <option value="broadcast">即時廣播</option>
+            </select>
+            <label>優先級</label>
+            <input type="number" id="annPriority" value="0" min="0" style="flex:0 0 80px;">
+          </div>
+          <div class="form-row">
+            <label>標題</label>
+            <input type="text" id="annTitle" placeholder="選填">
+          </div>
+          <div class="form-row">
+            <label>內容</label>
+            <textarea id="annContent" placeholder="公告內容..." rows="3"></textarea>
+          </div>
+          <div class="text-right mt-10">
+            <button class="btn" onclick="createAnnouncement()">發布公告</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>公告列表</h3>
+          <div id="annList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 遊戲參數 ===== -->
+      <div class="page hidden" id="page-config">
+        <div class="page-header">
+          <h2>遊戲參數</h2>
+          <div class="desc">全域倍率與平衡設定</div>
+        </div>
+        <div class="card">
+          <div id="configList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== GM 操作日誌 ===== -->
+      <div class="page hidden" id="page-gmlog">
+        <div class="page-header">
+          <h2>GM 操作日誌</h2>
+          <div class="desc">所有 GM 操作留痕</div>
+        </div>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:180px;">時間</th>
+                <th style="width:120px;">GM</th>
+                <th style="width:120px;">對象</th>
+                <th style="width:120px;">動作</th>
+                <th>細節</th>
+              </tr>
+            </thead>
+            <tbody id="gmLogBody">
+              <tr><td colspan="5" style="text-align:center;color:#8a6a2a;padding:24px;">載入中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
     <!-- ===== Bug 回報 ===== -->
     <div class="page hidden" id="page-bug">
@@ -932,6 +1118,11 @@ function switchPage(page) {
   if (page === 'dashboard') loadDashboard();
   else if (page === 'players') searchPlayers();
   else if (page === 'broadcast') loadBroadcasts();
+  else if (page === 'announce') loadAnnouncements();
+  else if (page === 'items') loadItems();
+  else if (page === 'castle') loadCastles();
+  else if (page === 'config') loadConfig();
+  else if (page === 'gmlog') loadGMLogs();
   else if (page === 'bug') loadBugs();
 }
 
@@ -957,7 +1148,7 @@ async function loadDashboard() {
       dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
     }
     document.getElementById('assetCount').textContent = health.assetCount || '--';
-    // 同步模式：優先 long-poll（v2.4.3 預設），其次 Socket.IO
+    // 同步模式：優先 long-poll（v2.5.0 預設），其次 Socket.IO
     const syncEl = document.getElementById('syncMode');
     if (health.longPoll) {
       syncEl.textContent = '長輪詢（已啟用）';
@@ -1326,6 +1517,258 @@ async function clearAllBugs() {
   } else {
     showToast('失敗: ' + (data.error || ''), 'error');
   }
+}
+
+// ===== 道具編輯器 =====
+async function loadItems() {
+  const type = document.getElementById('itemFilterType').value;
+  const url = '/api/gm/items' + (type ? '?type=' + encodeURIComponent(type) : '');
+  const data = await apiCall(url);
+  const el = document.getElementById('itemList');
+  if (!data.ok || !data.list) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  if (data.list.length === 0) {
+    el.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">尚無自定義道具</div>';
+    return;
+  }
+  el.innerHTML = data.list.map(it => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #3a2a15;">
+      <div style="flex:1;">
+        <span style="color:#f0c040;">${escapeHtml(it.name || it.id)}</span>
+        <span style="color:#8a6a2a;font-size:12px;margin-left:8px;">[${escapeHtml(it.type)}] [${escapeHtml(it.rarity)}] Lv.${it.levelRequire}</span>
+        <div style="color:#8a6a2a;font-size:11px;margin-top:2px;">${escapeHtml(it.id)} · ${escapeHtml(it.description || '無描述')}</div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick='editItem(${JSON.stringify(it).replace(/'/g, "&#39;")})'>編輯</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteItem('${escapeHtml(it.id)}')">刪除</button>
+    </div>
+  `).join('');
+}
+
+async function saveItem() {
+  const id = document.getElementById('itemId').value.trim();
+  const name = document.getElementById('itemName').value.trim();
+  const type = document.getElementById('itemType').value;
+  const rarity = document.getElementById('itemRarity').value;
+  const levelRequire = parseInt(document.getElementById('itemLvlReq').value) || 1;
+  const price = parseInt(document.getElementById('itemPrice').value) || 0;
+  const classRestriction = document.getElementById('itemClass').value || null;
+  const description = document.getElementById('itemDesc').value.trim();
+  const iconPath = document.getElementById('itemIcon').value.trim();
+  let stats = {};
+  const statsRaw = document.getElementById('itemStats').value.trim();
+  if (statsRaw) {
+    try { stats = JSON.parse(statsRaw); } catch (e) { showToast('能力值 JSON 格式錯誤', 'error'); return; }
+  }
+  if (!id || !name) { showToast('請填寫 ID 與名稱', 'error'); return; }
+
+  const body = { id, name, type, rarity, levelRequire, price, classRestriction, description, iconPath, stats };
+  const data = await apiCall('/api/gm/items', { method: 'POST', body: JSON.stringify(body) });
+  if (data.ok) {
+    showToast('儲存成功', 'success');
+    clearItemForm();
+    loadItems();
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+function editItem(it) {
+  document.getElementById('itemId').value = it.id || '';
+  document.getElementById('itemName').value = it.name || '';
+  document.getElementById('itemType').value = it.type || 'consumable';
+  document.getElementById('itemRarity').value = it.rarity || 'common';
+  document.getElementById('itemLvlReq').value = it.levelRequire || 1;
+  document.getElementById('itemPrice').value = it.price || 0;
+  document.getElementById('itemClass').value = it.classRestriction || '';
+  document.getElementById('itemDesc').value = it.description || '';
+  document.getElementById('itemIcon').value = it.iconPath || '';
+  document.getElementById('itemStats').value = it.stats ? JSON.stringify(it.stats) : '';
+  document.getElementById('itemId').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function clearItemForm() {
+  ['itemId','itemName','itemDesc','itemIcon','itemStats'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('itemType').value = 'consumable';
+  document.getElementById('itemRarity').value = 'common';
+  document.getElementById('itemLvlReq').value = 1;
+  document.getElementById('itemPrice').value = 0;
+  document.getElementById('itemClass').value = '';
+}
+
+async function deleteItem(id) {
+  if (!confirm('確定要刪除道具 ' + id + ' 嗎？')) return;
+  const data = await apiCall('/api/gm/items/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (data.ok) { showToast('已刪除', 'success'); loadItems(); }
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== 攻城戰設定 =====
+async function loadCastles() {
+  const data = await apiCall('/api/gm/castles');
+  const el = document.getElementById('castleList');
+  if (!data.ok || !data.list) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  const nations = ['kent', 'oren', 'dion', 'aden'];
+  el.innerHTML = data.list.map(c => `
+    <div style="border:1px solid #3a2a15;border-radius:4px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:#f0c040;font-size:15px;">${escapeHtml(c.castleId)} 城堡</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          <input type="checkbox" ${c.siegeEnabled ? 'checked' : ''} onchange="updateCastle('${escapeHtml(c.castleId)}', 'siegeEnabled', this.checked)">
+          攻城戰開啟
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:13px;">
+        <div>
+          <span style="color:#8a6a2a;">所屬國家：</span>
+          <select onchange="updateCastle('${escapeHtml(c.castleId)}', 'ownerNation', this.value)">
+            ${nations.map(n => `<option value="${n}" ${c.ownerNation === n ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <span style="color:#8a6a2a;">開始時間(時)：</span>
+          <input type="number" value="${c.siegeStartHour}" min="0" max="23" style="width:60px;" onchange="updateCastle('${escapeHtml(c.castleId)}', 'siegeStartHour', parseInt(this.value)||20)">
+        </div>
+        <div>
+          <span style="color:#8a6a2a;">持續(分鐘)：</span>
+          <input type="number" value="${c.siegeDurationMin}" min="5" max="480" style="width:60px;" onchange="updateCastle('${escapeHtml(c.castleId)}', 'siegeDurationMin', parseInt(this.value)||60)">
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function updateCastle(castleId, key, value) {
+  const body = {}; body[key] = value;
+  const data = await apiCall('/api/gm/castles/' + encodeURIComponent(castleId), { method: 'POST', body: JSON.stringify(body) });
+  if (data.ok) showToast('已更新', 'success');
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== 遊戲公告 =====
+async function loadAnnouncements() {
+  const data = await apiCall('/api/gm/announcements');
+  const el = document.getElementById('annList');
+  if (!data.ok || !data.list) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  if (data.list.length === 0) {
+    el.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">尚無公告</div>';
+    return;
+  }
+  el.innerHTML = data.list.map(a => `
+    <div style="border:1px solid #3a2a15;border-radius:4px;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="color:#f0c040;font-weight:600;">${escapeHtml(a.title || '無標題')}</span>
+          <span style="color:#8a6a2a;font-size:11px;margin-left:8px;">[${escapeHtml(a.type)}] 優先級: ${a.priority || 0}</span>
+          <span style="color:#8a6a2a;font-size:11px;margin-left:8px;">${formatDate(a.createdAt)}</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-ghost" onclick="toggleAnn('${a.id}', ${!a.active})">${a.active ? '下架' : '上架'}</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteAnn('${a.id}')">刪除</button>
+        </div>
+      </div>
+      <div style="color:#e8d090;font-size:13px;margin-top:6px;">${escapeHtml(a.content || '')}</div>
+    </div>
+  `).join('');
+}
+
+async function createAnnouncement() {
+  const type = document.getElementById('annType').value;
+  const title = document.getElementById('annTitle').value.trim();
+  const content = document.getElementById('annContent').value.trim();
+  const priority = parseInt(document.getElementById('annPriority').value) || 0;
+  if (!content) { showToast('請輸入公告內容', 'error'); return; }
+  const data = await apiCall('/api/gm/announcements', {
+    method: 'POST',
+    body: JSON.stringify({ type, title, content, priority }),
+  });
+  if (data.ok) {
+    showToast('發布成功', 'success');
+    document.getElementById('annTitle').value = '';
+    document.getElementById('annContent').value = '';
+    loadAnnouncements();
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function toggleAnn(id, active) {
+  const data = await apiCall('/api/gm/announcements/' + id, {
+    method: 'PUT',
+    body: JSON.stringify({ active }),
+  });
+  if (data.ok) { showToast('已更新', 'success'); loadAnnouncements(); }
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+async function deleteAnn(id) {
+  if (!confirm('確定要刪除此公告嗎？')) return;
+  const data = await apiCall('/api/gm/announcements/' + id, { method: 'DELETE' });
+  if (data.ok) { showToast('已刪除', 'success'); loadAnnouncements(); }
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== 遊戲參數 =====
+async function loadConfig() {
+  const data = await apiCall('/api/gm/config');
+  const el = document.getElementById('configList');
+  if (!data.ok || !data.config) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  const cfg = data.config;
+  const items = [
+    { key: 'exp_rate', name: '經驗倍率', step: '0.1' },
+    { key: 'gold_rate', name: '金幣倍率', step: '0.1' },
+    { key: 'drop_rate', name: '掉寶倍率', step: '0.1' },
+    { key: 'class_change_cost', name: '轉職費用(鑽石)', step: '100' },
+    { key: 'warehouse_max_slots', name: '倉庫最大格數', step: '10' },
+  ];
+  el.innerHTML = items.map(it => `
+    <div class="form-row">
+      <label style="width:160px;">${it.name}</label>
+      <input type="number" value="${cfg[it.key] ?? 0}" step="${it.step}" style="flex:0 0 200px;" data-key="${it.key}" onchange="saveConfig('${it.key}', parseFloat(this.value))">
+    </div>
+  `).join('');
+}
+
+async function saveConfig(key, value) {
+  const data = await apiCall('/api/gm/config', {
+    method: 'POST',
+    body: JSON.stringify({ key, value }),
+  });
+  if (data.ok) showToast(key + ' 已更新為 ' + value, 'success');
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== GM 日誌 =====
+async function loadGMLogs() {
+  const data = await apiCall('/api/gm/logs?limit=50');
+  const tbody = document.getElementById('gmLogBody');
+  if (!data.ok || !data.list) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f06060;">載入失敗</td></tr>';
+    return;
+  }
+  if (data.list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8a6a2a;padding:24px;">尚無記錄</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.list.map(log => `
+    <tr>
+      <td style="font-size:11px;color:#8a6a2a;">${formatDate(log.createdAt || log.time)}</td>
+      <td style="color:#f0c040;">${escapeHtml(log.gmAccount || '')}</td>
+      <td>${escapeHtml(log.targetAccount || '--')}</td>
+      <td style="color:#60c0a0;">${escapeHtml(log.action || '')}</td>
+      <td style="font-size:11px;color:#c8a868;">${escapeHtml(log.detail ? JSON.stringify(log.detail) : '')}</td>
+    </tr>
+  `).join('');
 }
 
 // ===== 工具 =====

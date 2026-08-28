@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v2.4.3</title>
+  <title>君主之刃 v2.5.0</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1a0f05" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,14 +12,14 @@
   <meta name="apple-mobile-web-app-title" content="君主之刃" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="apple-touch-icon" href="assets/11_ui/apple-touch-icon.jpg" />
-  <link rel="stylesheet" href="styles.css?v=2.4.3" />
-  <link rel="stylesheet" href="auth.css?v=2.4.3" />
-  <!-- v2.4.3：移除外部字體CDN，使用系統字型確保離線可用 -->
-  <script src="lang.js?v=2.4.3"></script>
+  <link rel="stylesheet" href="styles.css?v=2.5.0" />
+  <link rel="stylesheet" href="auth.css?v=2.5.0" />
+  <!-- v2.5.0：移除外部字體CDN，使用系統字型確保離線可用 -->
+  <script src="lang.js?v=2.5.0"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
-  <script src="multiplayer.js?v=2.4.3" defer></script>
-  <script src="bug-report.js?v=2.4.3" defer></script>
-  <script src="auth.js?v=2.4.3" defer></script>
+  <script src="multiplayer.js?v=2.5.0" defer></script>
+  <script src="bug-report.js?v=2.5.0" defer></script>
+  <script src="auth.js?v=2.5.0" defer></script>
   <style>
     /* ========== 首屏骨架（JS 載入前就顯示，杜絕空白） ========== */
     .splash-screen {
@@ -103,6 +103,86 @@
       letter-spacing: 3px;
       color: #5a4a2a;
     }
+    /* 倉庫 */
+    .warehouse-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+      gap: 8px;
+    }
+    .warehouse-item {
+      background: rgba(30, 20, 10, 0.7);
+      border: 1px solid var(--gold-dark);
+      border-radius: 6px;
+      padding: 6px;
+      text-align: center;
+      position: relative;
+    }
+    .wh-icon {
+      width: 36px;
+      height: 36px;
+      margin: 0 auto 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    .wh-name {
+      font-size: 10px;
+      color: var(--parchment-light);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .wh-count {
+      font-size: 10px;
+      color: var(--gold-bright);
+      font-weight: 700;
+      margin: 2px 0;
+    }
+    .wh-withdraw-btn, .wh-deposit-btn {
+      width: 100%;
+      padding: 3px 4px;
+      font-size: 10px;
+      background: linear-gradient(to bottom, #8b6914, #5a4208);
+      color: var(--parchment-light);
+      border: 1px solid var(--gold-dark);
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .wh-withdraw-btn:hover, .wh-deposit-btn:hover {
+      background: linear-gradient(to bottom, #b08820, #7a5a10);
+    }
+    /* 跑馬燈 */
+    .marquee-bar {
+      position: absolute;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60%;
+      max-width: 600px;
+      background: rgba(20, 12, 4, 0.85);
+      border: 1px solid var(--gold-dark);
+      border-radius: 4px;
+      padding: 4px 12px;
+      color: var(--gold-bright);
+      font-size: 12px;
+      overflow: hidden;
+      z-index: 60;
+      pointer-events: none;
+      display: none;
+    }
+    .marquee-bar.show { display: block; }
+    .marquee-bar .marquee-text {
+      display: inline-block;
+      white-space: nowrap;
+      padding-left: 100%;
+      animation: marquee-scroll 15s linear infinite;
+    }
+    @keyframes marquee-scroll {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-100%); }
+    }
   </style>
 </head>
 <body>
@@ -112,11 +192,13 @@
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v2.4.3</div>
+    <div class="splash-version">v2.5.0</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->
   <div id="game-root" class="game-hidden">
+    <!-- 跑馬燈 -->
+    <div class="marquee-bar" id="marquee-bar"><span class="marquee-text" id="marquee-text"></span></div>
     <!-- 顶部状态栏：Lv徽章 + HP/MP + 攻防 + 鑽石 + 地圖 -->
     <header class="top-bar">
       <div class="top-left">
@@ -410,6 +492,11 @@
           <span class="menu-text">職業</span>
           <span class="menu-arrow">›</span>
         </button>
+        <button class="side-menu-item" data-menu="warehouse">
+          <span class="menu-icon menu-icon-text" data-label="倉"></span>
+          <span class="menu-text">倉庫</span>
+          <span class="menu-arrow">›</span>
+        </button>
         <button class="side-menu-item" data-menu="ranking">
           <span class="menu-icon menu-icon-text" data-label="榜"></span>
           <span class="menu-text">排行榜</span>
@@ -437,7 +524,7 @@
         </button>
       </div>
       <div class="side-menu-footer">
-        <div class="export-tip">君主之刃 v2.4.3</div>
+        <div class="export-tip">君主之刃 v2.5.0</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -757,7 +844,7 @@
     </div>
 
     <!-- 职业選擇初始弹窗 -->
-    <!-- 角色創建介面（天堂經典樣式 / v2.4.3 唯一創角頁） -->
+    <!-- 角色創建介面（天堂經典樣式 / v2.5.0 唯一創角頁） -->
     <div class="char-create-screen hidden" id="char-create-screen">
       <div class="cc2-bg"></div>
       <div class="cc2-panel">
@@ -849,11 +936,11 @@
     </div>
   </div>
 
-  <script src="transform.js?v=2.4.3"></script>
-  <script src="audio.js?v=2.4.3"></script>
-  <script src="audio-manager.js?v=2.4.3"></script>
-  <script src="iso-map.js?v=2.4.3"></script>
-  <script src="game.js?v=2.4.3"></script>
+  <script src="transform.js?v=2.5.0"></script>
+  <script src="audio.js?v=2.5.0"></script>
+  <script src="audio-manager.js?v=2.5.0"></script>
+  <script src="iso-map.js?v=2.5.0"></script>
+  <script src="game.js?v=2.5.0"></script>
   <script>
     // 骨架屏淡出：DOM 就緒後立即隱藏，避免玩家看到空白或容器骨架
     (function() {
