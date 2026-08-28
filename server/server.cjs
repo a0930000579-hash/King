@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.5.4 · 正式營運後端伺服器
+  君主之刃 v2.5.5 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -34,7 +34,7 @@ try {
 }
 
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.resolve(__dirname, '..', 'data');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '..', 'data');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const ASSETS_DIR = path.resolve(ROOT_DIR, 'assets');
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2MB
@@ -477,10 +477,10 @@ function serveStatic(req, res, pathname) {
     }
     // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.5.4-code.zip',
-      '/game-code-2.5.4.zip': 'monarch-blade-v2.5.4-code.zip',
-      '/assets-part1.zip': 'monarch-blade-v2.5.4-assets-part1.zip',
-      '/assets-part2.zip': 'monarch-blade-v2.5.4-assets-part2.zip',
+      '/game-code.zip': 'monarch-blade-v2.5.5-code.zip',
+      '/game-code-2.5.5.zip': 'monarch-blade-v2.5.5-code.zip',
+      '/assets-part1.zip': 'monarch-blade-v2.5.5-assets-part1.zip',
+      '/assets-part2.zip': 'monarch-blade-v2.5.5-assets-part2.zip',
     };
     if (dlFiles[pathname]) {
       headers['Content-Disposition'] = 'attachment; filename="' + dlFiles[pathname] + '"';
@@ -488,7 +488,7 @@ function serveStatic(req, res, pathname) {
       headers['X-Accel-Buffering'] = 'yes';
     }
     if (pathname === '/PARTS-MANIFEST.txt') {
-      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.5.4.txt"';
+      headers['Content-Disposition'] = 'attachment; filename="PARTS-MANIFEST-v2.5.5.txt"';
     }
     res.writeHead(200, headers);
     const stream = fs.createReadStream(filePath);
@@ -529,9 +529,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.5.4',
-      build: '2.5.4-2608281846',
-      buildId: '2.5.4-2608281846',
+      version: '2.5.5',
+      build: '2.5.5-2608281846',
+      buildId: '2.5.5-2608281846',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -592,9 +592,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.5.4',
-      build: '2.5.4-2608281846',
-      buildId: '2.5.4-2608281846',
+      version: '2.5.5',
+      build: '2.5.5-2608281846',
+      buildId: '2.5.5-2608281846',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -637,7 +637,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.5.4', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.5.5', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -841,9 +841,9 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, {
       ok: allPass,
-      version: '2.5.4',
-      build: '2.5.4-2608281846',
-      buildId: '2.5.4-2608281846',
+      version: '2.5.5',
+      build: '2.5.5-2608281846',
+      buildId: '2.5.5-2608281846',
       timestamp: new Date().toISOString(),
       totalMs,
       summary: { total: checks.length, passed, failed },
@@ -954,7 +954,7 @@ async function handleApi(req, res, pathname, query) {
   }
 
   // GET /api/characters/:idx?server=xxx（讀取單一角色完整存檔）
-  // v2.5.4：前端創角後 / 選角時必須靠這支載入 saveData 進遊戲
+  // v2.5.5：前端創角後 / 選角時必須靠這支載入 saveData 進遊戲
   if (req.method === 'GET' && /^\/api\/characters\/\d+$/.test(pathname)) {
     const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
@@ -1562,7 +1562,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, broadcast });
   }
 
-  // ==================== v2.5.4 新增 GM API ====================
+  // ==================== v2.5.5 新增 GM API ====================
 
   // GET /api/gm/logs — GM 操作日誌
   if (req.method === 'GET' && pathname === '/api/gm/logs') {
@@ -1865,7 +1865,7 @@ const server = http.createServer(async (req, res) => {
 <head>
 <meta charset=\"UTF-8\" />
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-<title>伺服器自體檢查 · 君主之刃 v2.5.4</title>
+<title>伺服器自體檢查 · 君主之刃 v2.5.5</title>
 <meta name=\"creative-medium\" content=\"other\" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1907,7 +1907,7 @@ const server = http.createServer(async (req, res) => {
 <div class=\"wrap\">
   <div class=\"header\">
     <div class=\"title\">&#9876; 君主之刃 · 伺服器自體檢查</div>
-    <div class=\"subtitle\">v2.5.4 · 即時驗證伺服器與遊戲功能</div>
+    <div class=\"subtitle\">v2.5.5 · 即時驗證伺服器與遊戲功能</div>
   </div>
   <div class=\"card overall\" id=\"overall\">
     <div class=\"status\"><span class=\"loading\"></span></div>
@@ -1917,7 +1917,7 @@ const server = http.createServer(async (req, res) => {
     <div style=\"text-align:center;color:#6666aa;font-size:13px;\">載入中…</div>
   </div>
   <button class=\"btn\" id=\"retryBtn\" onclick=\"runTest()\">重新檢查</button>
-  <div class=\"footer\">君主之刃 v2.5.4 · 伺服器自體檢查</div>
+  <div class=\"footer\">君主之刃 v2.5.5 · 伺服器自體檢查</div>
 </div>
 <script>
 async function runTest() {
@@ -2204,7 +2204,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.5.4 · 正式營運伺服器');
+    console.log('  君主之刃 v2.5.5 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());

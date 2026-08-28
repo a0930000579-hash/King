@@ -10,6 +10,15 @@
   const STORAGE_ACC_KEY = 'mmo_account';
   const STORAGE_OFFLINE_KEY = 'mmo_offline_account';
 
+  // v2.5.5：存檔 key 必須帶帳號，避免同裝置多帳號互相汙染
+  function getSlotSaveKey(acc, idx) {
+    if (!acc) return null;
+    return 'mmo_save_' + acc + '_' + (idx != null ? idx : 0);
+  }
+  function getCurrentAccount() {
+    try { return localStorage.getItem(STORAGE_ACC_KEY) || ''; } catch (e) { return ''; }
+  }
+
   // 當前狀態
   let currentView = 'home'; // home | login | register | server | char | charCreate
   let currentServer = null;
@@ -971,10 +980,10 @@
         })
         .catch(() => { /* 忽略，不影響遊戲體驗 */ });
 
-      // 通知 game.js 已登入（連線多人模式）
-      if (window.onAuthReady && currentServer) {
-        try { window.onAuthReady(currentServer); } catch (e) {}
-      }
+      // v2.5.5：新創角色不走 onAuthReady
+      //   enterWorld() 已呼叫過 init()，再次 onAuthReady → init 會造成二次載入
+      //   且 fallback 舊存檔會把新角色狀態覆蓋，導致空白創角面板
+      //   這裡只負責連線多人與 GM 狀態檢查
       if (window.MultiplayerClient && currentServer) {
         const serverUrl = window.location.origin;
         window.MultiplayerClient.connect(serverUrl, AuthSystem.getToken()).catch(() => {});
@@ -1005,12 +1014,18 @@
     };
   }
   function startGameWithChar(idx) {
-    // v2.5.1：從後端載入角色存檔；失敗彈錯並留在角色選擇頁，不得靜默進遊戲
+    // v2.5.0：從後端載入角色存檔；失敗彈錯並留在角色選擇頁，不得靜默進遊戲
+    // v2.5.5：寫入 account_charIdx 專屬 key，杜絕跨帳號資料錯亂
     api('/characters/' + idx + '?server=' + encodeURIComponent(currentServer?.id || ''))
       .then(data => {
         if (data && data.saveData) {
           try {
-            localStorage.setItem('mmo_save_' + idx, JSON.stringify(data.saveData));
+            const acc = getCurrentAccount();
+            if (acc) {
+              localStorage.setItem(getSlotSaveKey(acc, idx), JSON.stringify(data.saveData));
+            } else {
+              localStorage.setItem('mmo_save_' + idx, JSON.stringify(data.saveData));
+            }
             localStorage.setItem('mmo_char_idx', String(idx));
           } catch (e) {}
           startGameCommon();
@@ -1413,22 +1428,33 @@
       if (overlay) overlay.classList.add('hidden');
     },
     logout() {
-      // v2.3.0：登出時徹底清空所有 session 與前端狀態
-      // 避免換帳號後顯示上一隻角色的殘留資訊
+      // v2.5.5：登出時徹底清空所有 session、本機存檔與前端狀態
+      //   確保下一帳號絕對不會繼承上一帳號的任何資料
       try {
+        const acc = getCurrentAccount();
         localStorage.removeItem(STORAGE_TOKEN_KEY);
         localStorage.removeItem(STORAGE_OFFLINE_KEY);
         // 清除角色相關快取
         localStorage.removeItem('mmo_characters');
         localStorage.removeItem('mmo_char_idx');
-        // 清除所有 mmo_save_ 開頭的角色存檔
+        localStorage.removeItem('mmo_new_char');
+        // v2.5.5：清除「本帳號」所有角色存檔（account_ 前綴）
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
-          if (k && k.startsWith('mmo_save_')) keysToRemove.push(k);
+          if (!k) continue;
+          // 舊式 mmo_save_x 全清（跨帳號不安全的格式）
+          if (k.startsWith('mmo_save_') && !k.includes('_')) {
+            keysToRemove.push(k);
+            continue;
+          }
+          // 本帳號的新格式 mmo_save_account_idx
+          if (acc && k.startsWith('mmo_save_' + acc + '_')) {
+            keysToRemove.push(k);
+          }
         }
         keysToRemove.forEach(k => localStorage.removeItem(k));
-        // 通知 game.js 清空狀態
+        // 通知 game.js 重置所有 GS 狀態
         if (window.__clearGameState) {
           try { window.__clearGameState(); } catch (e) {}
         }

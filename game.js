@@ -6305,7 +6305,26 @@ const GS = {
 };
 
 // ==================== 全域存檔系統 ====================
+// v2.5.5：連線模式存檔 key 必須帶帳號＋角色槽，杜絕跨帳號/跨角色資料錯亂
+//   線上模式 key: mmo_save_<accountId>_<charIdx>
+//   離線模式 key: game_save_v2（單槽，僅用於未登入時）
 const GAME_SAVE_KEY = 'game_save_v2';
+
+// 計算當前的帳號級存檔前綴（連線模式才有，離線返回 null）
+function getSaveKeyPrefix() {
+  if (window.AuthSystem && AuthSystem.getToken && AuthSystem.getToken() && AuthSystem.getAccount) {
+    const acc = AuthSystem.getAccount();
+    if (acc) return 'mmo_save_' + acc + '_';
+  }
+  return null;
+}
+
+// 取得指定槽位的存檔 key（連線模式帶帳號，離線模式回傳 null）
+function getSlotSaveKey(idx) {
+  const prefix = getSaveKeyPrefix();
+  if (!prefix) return null;
+  return prefix + (idx != null ? idx : 0);
+}
 const SAVE_FIELDS = [
   'player', 'resources', 'currentMap',
   'ownedHeroes', 'ownedPets', 'ownedTransforms',
@@ -6327,12 +6346,18 @@ function saveGame() {
     SAVE_FIELDS.forEach(function(k) { if (k in GS) data[k] = GS[k]; });
     data.saveVersion = 2;
     data.savedAt = Date.now();
-    localStorage.setItem(GAME_SAVE_KEY, JSON.stringify(data));
-    // v2.5.0：同時寫入角色槽存檔，供選角頁切換使用
-    try {
-      const idx = GS.currentCharIdx != null ? GS.currentCharIdx : 0;
-      localStorage.setItem('mmo_save_' + idx, JSON.stringify(data));
-    } catch(e) {}
+    // 離線模式才寫全域 key；連線模式只寫帳號＋角色專屬 key
+    const slotKey = getSlotSaveKey(GS.currentCharIdx);
+    if (slotKey) {
+      localStorage.setItem(slotKey, JSON.stringify(data));
+    } else {
+      localStorage.setItem(GAME_SAVE_KEY, JSON.stringify(data));
+      // 離線模式同時寫入角色槽（向後兼容）
+      try {
+        const idx = GS.currentCharIdx != null ? GS.currentCharIdx : 0;
+        localStorage.setItem('mmo_save_' + idx, JSON.stringify(data));
+      } catch(e) {}
+    }
     // v2.0：同步到後端（若已登入）
     if (window.AuthSystem && AuthSystem.getToken()) {
       try {
@@ -6356,15 +6381,48 @@ function saveGame() {
     return true;
   } catch(e) { console.warn('[存檔] 保存失敗:', e); return false; }
 }
+// v2.5.5：從指定槽位載入存檔（連線模式使用 account_charIdx 為 key）
+//   回傳 true 表示載入成功，false 表示無存檔
+function loadGameFromSlot(idx) {
+  try {
+    const slotKey = getSlotSaveKey(idx);
+    if (slotKey) {
+      // 連線模式：從 account_charIdx 專屬 key 讀
+      const raw = localStorage.getItem(slotKey);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object') {
+          applySaveData(data);
+          console.log('[存檔] 從帳號角色槽 ' + slotKey + ' 載入成功');
+          return true;
+        }
+      }
+      // v2.5.5：連線模式不得 fallback 到全域 game_save_v2
+      // 否則新帳號會讀到前一帳號的殘留存檔（跨帳號資料錯亂）
+      console.log('[存檔] 連線模式無槽位存檔，跳過載入（以伺服器為權威）');
+      return false;
+    } else {
+      // 離線模式：從全域 key 讀
+      return loadGame();
+    }
+  } catch(e) { console.warn('[存檔] 槽位載入失敗:', e); return false; }
+}
+
+// 將存檔資料合併到 GS（共用邏輯）
+function applySaveData(data) {
+  if (!data || typeof data !== 'object') return false;
+  SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
+  console.log('[存檔] 英雄', GS.ownedHeroes?.length || 0, '張 / 寵物', GS.ownedPets?.length || 0, '張 / 變身', GS.ownedTransforms?.length || 0, '張');
+  return true;
+}
+
 function loadGame() {
   try {
     const raw = localStorage.getItem(GAME_SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return false;
-    SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
+    applySaveData(data);
     console.log('[存檔] 載入成功，保存時間:', new Date(data.savedAt || 0).toLocaleString());
-    console.log('[存檔] 英雄', GS.ownedHeroes?.length || 0, '張 / 寵物', GS.ownedPets?.length || 0, '張 / 變身', GS.ownedTransforms?.length || 0, '張');
     return true;
   } catch(e) { console.warn('[存檔] 載入失敗:', e); return false; }
 }
@@ -6847,10 +6905,17 @@ function _initCore() {
 
   // 顯示角色創建介面（僅新帳號無角色時才顯示）
   // v2.4.0：有角色直接進世界，不要無條件跳創角頁導致黑屏體驗
-  if (!GS.player || !GS.player.created) {
+  // v2.5.5：連線模式下以伺服器為權威；若已登入且角色已創建（GS.player.created）則不顯示
+  //   修復：新創角色後 init() 又 fallback 到舊存檔導致 created=false、彈出空白創角面板
+  const isOnline = !!(window.AuthSystem && AuthSystem.getToken && AuthSystem.getToken());
+  const charAlreadyCreated = GS.player && GS.player.created && GS.player.name;
+  if (!charAlreadyCreated && !isOnline) {
+    // 只有離線模式才顯示創角頁；連線模式一律從伺服器載入角色，不顯示創角頁
     showCharCreate();
   } else {
-    addLog('system', '歡迎回來，' + (GS.player.name || '冒險者') + '！');
+    if (GS.player?.name) {
+      addLog('system', '歡迎回來，' + GS.player.name + '！');
+    }
     // 有角色時確保介面正確更新
     try {
       updatePlayerSprite();
@@ -25520,64 +25585,140 @@ window.addEventListener('load', function() {
     AuthSystem.init();
     // 遊戲進入點由 AuthSystem 觸發
     window.onAuthReady = function(server) {
+      // v2.5.5：登入後先重置 GS，避免上一帳號/上一角色的記憶體狀態殘留
+      if (window.__resetGameState) window.__resetGameState();
+
       // v2.4.0 修復：若剛完成創角（auth.js 寫入 mmo_new_char），用其資料初始化
+      let isNewChar = false;
       try {
         const raw = localStorage.getItem('mmo_new_char');
         if (raw) {
           const nc = JSON.parse(raw);
+          if (!GS.player) GS.player = {};
           if (nc.name) GS.player.name = nc.name;
           if (nc.classId) GS.player.classId = nc.classId;
           GS.player.created = true;
           GS.player.level = nc.level || 1;
           GS.player.exp = 0;
           localStorage.removeItem('mmo_new_char');
+          isNewChar = true;
           console.log('[Auth] 新創角色載入:', GS.player.name, '/', GS.player.classId);
         }
       } catch (e) { console.warn('[Auth] 讀取新創角色失敗:', e); }
-      // 從後端載入角色存檔（如果有）
-    // v2.5.0：從角色槽位載入存檔（優先 mmo_save_x，後備 game_save_v2）
-    try {
-      const idxStr = localStorage.getItem('mmo_char_idx');
-      const idx = idxStr != null ? parseInt(idxStr, 10) : 0;
-      GS.currentCharIdx = isNaN(idx) ? 0 : idx;
-      const raw = localStorage.getItem('mmo_save_' + GS.currentCharIdx);
-      if (raw) {
-        const data = JSON.parse(raw);
-        SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
-        console.log('[存檔] 從角色槽 ' + GS.currentCharIdx + ' 載入成功');
-      } else {
-        loadGame(); // 後備：舊版單存檔 key
+
+      // v2.5.5：從後端載入角色存檔作為權威來源
+      //   連線模式必須以伺服器回傳的 saveData 為準，絕不 fallback 到本機舊存檔
+      try {
+        const idxStr = localStorage.getItem('mmo_char_idx');
+        const idx = idxStr != null ? parseInt(idxStr, 10) : 0;
+        GS.currentCharIdx = isNaN(idx) ? 0 : idx;
+
+        if (isNewChar) {
+          // 新創角色：沒有存檔，直接初始化（伺服器為權威，本機只是快取）
+          console.log('[存檔] 新創角色，跳過本機存檔載入');
+        } else {
+          // 既有角色：從伺服器權威載入（由 auth.js 的 startGameWithChar 已預載到槽位 key）
+          const slotKey = getSlotSaveKey(GS.currentCharIdx);
+          let loaded = false;
+          if (slotKey) {
+            const raw = localStorage.getItem(slotKey);
+            if (raw) {
+              const data = JSON.parse(raw);
+              applySaveData(data);
+              console.log('[存檔] 從帳號角色槽 ' + slotKey + ' 載入成功');
+              loaded = true;
+            }
+          }
+          if (!loaded) {
+            // 離線模式 fallback
+            loadGame();
+          }
+        }
+      } catch(e) {
+        console.warn('[存檔] 角色槽載入失敗:', e);
       }
-    } catch(e) {
-      console.warn('[存檔] 角色槽載入失敗，嘗試舊版存檔:', e);
-      loadGame();
-    }
-    init();
+      init();
     };
   } else {
     init();
   }
 });
 
-// v2.4.0：登出 / 換帳號時清空所有遊戲狀態
-// 確保換帳號登入後只顯示該帳號從 server 取到的角色，A 帳角色不會殘留到 B 帳
-window.__clearGameState = function() {
-  try {
-    // 清空 GS 全域狀態
-    if (typeof GS !== 'undefined') {
-      GS.player = null;
-      GS.inventory = [];
-      GS.monsters = [];
-      GS.aiPlayers = [];
-      GS.currentMap = null;
-      GS.siegeWar = null;
-      GS.siegeStats = {};
-      GS.ownedTransforms = [];
-      GS.resources = { gold: 0, gem: 0 };
-      GS.guild = null;
-      GS.nation = null;
-    }
-    // 清空 DOM 世界層元素
+    // v2.5.5：登出 / 換帳號 / 換角色前，完整重置 GS 到初始狀態
+    //   確保新帳號/新角色絕不繼承上一帳號的任何記憶體狀態
+    window.__resetGameState = function() {
+      try {
+        // 重置所有 SAVE_FIELDS 到預設值（以 GS_INIT 為藍本）
+        const defaults = {
+          player: null,
+          resources: { gold: 0, gem: 0 },
+          currentMap: null,
+          ownedHeroes: [],
+          ownedPets: [],
+          ownedTransforms: [],
+          equippedHeroId: null,
+          equippedPetId: null,
+          equipment: { weapon: null, armor: null, helmet: null, boots: null, ring: null, necklace: null },
+          inventory: [],
+          bagMaxSlots: 30,
+          enhanceTickets: 0,
+          bagPage: 0,
+          autoMode: false,
+          autoSkillEnabled: true,
+          autoPotionEnabled: true,
+          autoMpEnabled: true,
+          autoBuyPotion: false,
+          autoItems: [],
+          autoPvpMode: false,
+          killCount: 0,
+          quest: null,
+          heroPageTab: 0,
+          gachaPageTab: 0,
+          shopTab: 0,
+          menuPage: 0,
+          nation: null,
+          legionId: null,
+          legionRank: null,
+          nationContribution: 0,
+          nationSkillLevels: {},
+          todayDonatedGold: 0,
+          todayDonatedGem: 0,
+          nationTab: 0,
+          membersSubTab: 0,
+          transformRarity: 'rare',
+          heroRarity: 'rare',
+          petRarity: 'rare',
+          castleTreasuries: {},
+          gemTaxPool: {},
+          siegeStats: {},
+          weeklyTaxSettled: false,
+          warDeclareDate: 0,
+          warDeclareCount: 0,
+          warDeclared: false,
+          warCooldowns: {},
+          rankings: { level: [], power: [], wealth: [], kills: [] },
+          transformEndTime: 0,
+          transformTicketEndTimes: [],
+          boughtTrueDeathPack: false,
+          monsters: [],
+          aiPlayers: [],
+          siegeWar: null,
+          guild: null,
+          currentCharIdx: null,
+        };
+        Object.keys(defaults).forEach(k => { GS[k] = JSON.parse(JSON.stringify(defaults[k])); });
+        console.log('[ClearState] GS 已完全重置為初始狀態');
+      } catch (e) {
+        console.warn('[ClearState] 重置 GS 失敗:', e);
+      }
+    };
+    // v2.4.0：登出 / 換帳號時清空所有遊戲狀態
+    // 確保換帳號登入後只顯示該帳號從 server 取到的角色，A 帳角色不會殘留到 B 帳
+    window.__clearGameState = function() {
+      try {
+        // v2.5.5：改用完整重置，不留任何殘留欄位
+        if (window.__resetGameState) window.__resetGameState();
+        // 清空 DOM 世界層元素
     const wl = document.getElementById('world-layer');
     if (wl) wl.innerHTML = '';
     const nl = document.getElementById('npc-layer');
