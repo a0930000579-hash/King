@@ -303,11 +303,48 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
-  // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / 樣本檔存在性，方便 DO 上除錯
+  // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
   if (req.method === 'GET' && pathname === '/api/diag') {
     const sampleRel = '1YPfWK8cKg.png';
     const samplePath = path.join(ASSETS_DIR, sampleRel);
     const sampleExists = fs.existsSync(samplePath);
+    // 巢狀子資料夾樣本（deep sample）
+    const deepSampleRel = 'class/warrior/attack.jpg';
+    const deepSamplePath = path.join(ASSETS_DIR, deepSampleRel);
+    const deepSampleExists = fs.existsSync(deepSamplePath);
+    const hashSampleRel = 'boss/0yfRk9msfe.jpg'; // manifest 中典型 hash 檔
+    const hashSamplePath = path.join(ASSETS_DIR, hashSampleRel);
+    const hashSampleExists = fs.existsSync(hashSamplePath);
+
+    // manifest 核對
+    let manifestReferenced = 0;
+    let manifestMissingOnDisk = 0;
+    let manifestMissingSamples = [];
+    const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
+    let manifestExistsOnDisk = fs.existsSync(manifestPath);
+    let manifestLoadedOk = false;
+    let manifestSize = 0;
+    let clientAssetBase = '/assets/ (相對)';
+    try {
+      if (manifestExistsOnDisk) {
+        const raw = fs.readFileSync(manifestPath, 'utf-8');
+        manifestSize = raw.length;
+        const m = JSON.parse(raw);
+        manifestLoadedOk = true;
+        manifestReferenced = Object.keys(m).length;
+        for (const key of Object.keys(m)) {
+          const v = m[key];
+          const full = path.join(ROOT_DIR, v);
+          if (!fs.existsSync(full)) {
+            manifestMissingOnDisk++;
+            if (manifestMissingSamples.length < 10) manifestMissingSamples.push(v);
+          }
+        }
+      }
+    } catch (e) {
+      manifestLoadedOk = false;
+    }
+
     return sendJson(res, 200, {
       version: '2.3.5',
       cwd: process.cwd(),
@@ -318,6 +355,18 @@ async function handleApi(req, res, pathname, query) {
       assetFileCount: assetIndex.size,
       sampleAsset: '/assets/' + sampleRel,
       sampleAssetExists: sampleExists,
+      deepSampleAsset: '/assets/' + deepSampleRel,
+      deepSampleAssetExists: deepSampleExists,
+      hashSampleAsset: '/assets/' + hashSampleRel,
+      hashSampleAssetExists: hashSampleExists,
+      clientAssetBase: clientAssetBase,
+      manifestPath: manifestPath,
+      manifestExistsOnDisk: manifestExistsOnDisk,
+      manifestLoadedOk: manifestLoadedOk,
+      manifestSizeBytes: manifestSize,
+      manifestReferenced: manifestReferenced,
+      manifestMissingOnDisk: manifestMissingOnDisk,
+      manifestMissingSamples: manifestMissingSamples,
       dataDir: DATA_DIR,
       dataDirExists: fs.existsSync(DATA_DIR),
       port: PORT,
