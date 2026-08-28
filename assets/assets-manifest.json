@@ -2608,5 +2608,20 @@
   "aadkrxeb2kaes_ve_miaoda": "assets/ui/aadkrxeb2kaes_ve_miaoda.png",
   "ui/aadkrxid6zueu_ve_miaoda": "assets/ui/aadkrxid6zueu_ve_miaoda.png",
   "aadkrxid6zueu_ve_miaoda": "assets/ui/aadkrxid6zueu_ve_miaoda.png",
-  "skill/icon_sword": "assets/skill/icon_sword.jpg"
+  "skill/icon_sword": "assets/skill/icon_sword.jpg",
+  "class/warlock/idle": "assets/class/warlock/idle.jpg",
+  "class/warlock/walk_down": "assets/class/warlock/walk_down.jpg",
+  "class/warlock/walk_side": "assets/class/warlock/walk_side.jpg",
+  "class/warlock/walk_up": "assets/class/warlock/walk_up.jpg",
+  "class/warlock/attack_1": "assets/class/warlock/attack_1.jpg",
+  "class/warlock/attack_2": "assets/class/warlock/attack_2.jpg",
+  "class/warlock/attack_3": "assets/class/warlock/attack_3.jpg",
+  "class/warlock/hit": "assets/class/warlock/hit.jpg",
+  "12_map/siege_gate_00_intact": "assets/12_map/siege_gate_00_intact.jpg",
+  "12_map/siege_gate_01_half": "assets/12_map/siege_gate_01_half.jpg",
+  "12_map/siege_gate_02_destroyed": "assets/12_map/siege_gate_02_destroyed.jpg",
+  "12_map/siege_gate_03_open_tower_ok_scepter": "assets/12_map/siege_gate_03_open_tower_ok_scepter.jpg",
+  "12_map/siege_gate_04_open_tower_damaged": "assets/12_map/siege_gate_04_open_tower_damaged.jpg",
+  "12_map/siege_gate_05_open_tower_destroyed_scepter": "assets/12_map/siege_gate_05_open_tower_destroyed_scepter.jpg",
+  "12_map/siege_gate_06_open_no_scepter": "assets/12_map/siege_gate_06_open_no_scepter.jpg"
 }

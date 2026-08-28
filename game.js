@@ -745,15 +745,18 @@ const SPRITE = {
     slashColor: '#ffffff',
   },
   warlock: {
-    idle: assetUrl('class/warlock/portrait.jpg'),
-    walk: assetUrl('class/warlock/portrait.jpg'),
-    walk2: assetUrl('class/warlock/portrait.jpg'),
-    walk3: assetUrl('class/warlock/portrait.jpg'),
-    walk4: assetUrl('class/warlock/portrait.jpg'),
-    attack: assetUrl('class/warlock/portrait.jpg'),
-    attack2: assetUrl('class/warlock/portrait.jpg'),
-    hit: assetUrl('class/warlock/portrait.jpg'),
-    color: '#8844cc', glow: '#bb66ff', useImg: true, multiFrame: true, coverMode: true,
+    idle: assetUrl('class/warlock/idle'),
+    walk: assetUrl('class/warlock/walk_down'),
+    walk2: assetUrl('class/warlock/walk_side'),
+    walk3: assetUrl('class/warlock/walk_up'),
+    walk4: assetUrl('class/warlock/walk_side'),
+    attack: assetUrl('class/warlock/attack_1'),
+    attack2: assetUrl('class/warlock/attack_2'),
+    attack3: assetUrl('class/warlock/attack_3'),
+    hit: assetUrl('class/warlock/hit'),
+    color: '#8844cc', glow: '#bb66ff', useImg: true,
+    multiFrame: true, coverMode: true,
+    slashColor: '#c080ff', eightFrame: true,
   },
   // ========== 變身形態（8幀完整動畫） ==========
   // ---------- 金色神話 ----------
@@ -6320,7 +6323,7 @@ function saveGame() {
     data.saveVersion = 2;
     data.savedAt = Date.now();
     localStorage.setItem(GAME_SAVE_KEY, JSON.stringify(data));
-    // v2.5.1：同時寫入角色槽存檔，供選角頁切換使用
+    // v2.5.0：同時寫入角色槽存檔，供選角頁切換使用
     try {
       const idx = GS.currentCharIdx != null ? GS.currentCharIdx : 0;
       localStorage.setItem('mmo_save_' + idx, JSON.stringify(data));
@@ -6704,11 +6707,11 @@ function _initCore() {
   // 先載入存檔（會覆蓋 GS 中的進度欄位）
   loadGame();
 
-  // v2.5.1：載入帳號級共享數據（變身/英雄/守護）
+  // v2.5.0：載入帳號級共享數據（變身/英雄/守護）
   loadAccountSharedData();
-  // v2.5.1：載入跑馬燈公告
+  // v2.5.0：載入跑馬燈公告
   loadMarqueeAnnouncements();
-  // v2.5.1：預讀轉職費用
+  // v2.5.0：預讀轉職費用
   loadClassChangeCost();
 
   if (!GS.ownedTransforms) GS.ownedTransforms = [];
@@ -11802,7 +11805,7 @@ function confirmCC2CharCreate() {
       server: serverId,
     }).then(result => {
       if (result && result.ok) {
-        // v2.5.1：記錄當前角色索引，確保存檔寫對槽位
+        // v2.5.0：記錄當前角色索引，確保存檔寫對槽位
         GS.currentCharIdx = result.idx != null ? result.idx : 0;
         try { localStorage.setItem('mmo_char_idx', String(GS.currentCharIdx)); } catch(e) {}
         enterWorld();
@@ -21754,7 +21757,7 @@ function renderMenuPage(page) {
   }
 }
 
-// ==================== 倉庫系統 (v2.5.1) ====================
+// ==================== 倉庫系統 (v2.5.0) ====================
 let _warehouseCache = [];
 let _warehouseLoading = false;
 
@@ -22812,7 +22815,7 @@ function bindMenuPageEvents(page) {
   }
 }
 
-// ==================== 帳號級共享 (v2.5.1) ====================
+// ==================== 帳號級共享 (v2.5.0) ====================
 // 變身、英雄、守護：同帳號多角色互通；從 /api/account/shared 讀
 async function loadAccountSharedData() {
   try {
@@ -22868,7 +22871,7 @@ async function syncAccountSharedFromLocal() {
   } catch(e) { console.warn('[共享] 同步失敗:', e); }
 }
 
-// ==================== 跑馬燈公告 (v2.5.1) ====================
+// ==================== 跑馬燈公告 (v2.5.0) ====================
 let _marqueeQueue = [];
 let _marqueeIndex = 0;
 
@@ -23061,13 +23064,13 @@ const SIEGE_LORD_POS = { x: 1024, y: 450 };
 // 城門階段（0-2）：完好城門 / 半毀城門 / 全毀城門
 // 守護塔階段（3-6）：完好塔+頂端權杖 / 塔受損 / 塔全毀+地上有權杖 / 塔全毀+無權杖
 const SIEGE_MAP_IMAGES = [
-  assetUrl('s0h03lZoid'), // 0：完好城門
-  assetUrl('aFoKB6Ketl'), // 1：半毀城門
-  assetUrl('ftpva0x59j'), // 2：全毀城門
-  assetUrl('2U3AgH3L3w'), // 3：城門開+完好塔+權杖
-  assetUrl('1YPfWK8cKg'), // 4：城門開+塔受損
-  assetUrl('BczarboQ3l'), // 5：城門開+塔全毀+地上有權杖
-  assetUrl('W4ASp6KEF5'), // 6：城門開+塔全毀+無權杖（已拾取）
+  assetUrl('12_map/siege_gate_00_intact'),       // 0：完好城門
+  assetUrl('12_map/siege_gate_01_half'),         // 1：半毀城門
+  assetUrl('12_map/siege_gate_02_destroyed'),    // 2：全毀城門
+  assetUrl('12_map/siege_gate_03_open_tower_ok_scepter'), // 3：城門開+完好塔+權杖
+  assetUrl('12_map/siege_gate_04_open_tower_damaged'),    // 4：城門開+塔受損
+  assetUrl('12_map/siege_gate_05_open_tower_destroyed_scepter'), // 5：城門開+塔全毀+地上有權杖
+  assetUrl('12_map/siege_gate_06_open_no_scepter'), // 6：城門開+塔全毀+無權杖（已拾取）
 ];
 let currentSiegeMapFrame = -1;
 
@@ -25527,7 +25530,7 @@ window.addEventListener('load', function() {
         }
       } catch (e) { console.warn('[Auth] 讀取新創角色失敗:', e); }
       // 從後端載入角色存檔（如果有）
-    // v2.5.1：從角色槽位載入存檔（優先 mmo_save_x，後備 game_save_v2）
+    // v2.5.0：從角色槽位載入存檔（優先 mmo_save_x，後備 game_save_v2）
     try {
       const idxStr = localStorage.getItem('mmo_char_idx');
       const idx = idxStr != null ? parseInt(idxStr, 10) : 0;
