@@ -1005,7 +1005,7 @@
     };
   }
   function startGameWithChar(idx) {
-    // v2.5.0：從後端載入角色存檔；失敗彈錯並留在角色選擇頁，不得靜默進遊戲
+    // v2.5.1：從後端載入角色存檔；失敗彈錯並留在角色選擇頁，不得靜默進遊戲
     api('/characters/' + idx + '?server=' + encodeURIComponent(currentServer?.id || ''))
       .then(data => {
         if (data && data.saveData) {

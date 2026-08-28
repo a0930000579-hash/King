@@ -6320,7 +6320,7 @@ function saveGame() {
     data.saveVersion = 2;
     data.savedAt = Date.now();
     localStorage.setItem(GAME_SAVE_KEY, JSON.stringify(data));
-    // v2.5.0：同時寫入角色槽存檔，供選角頁切換使用
+    // v2.5.1：同時寫入角色槽存檔，供選角頁切換使用
     try {
       const idx = GS.currentCharIdx != null ? GS.currentCharIdx : 0;
       localStorage.setItem('mmo_save_' + idx, JSON.stringify(data));
@@ -6704,11 +6704,11 @@ function _initCore() {
   // 先載入存檔（會覆蓋 GS 中的進度欄位）
   loadGame();
 
-  // v2.5.0：載入帳號級共享數據（變身/英雄/守護）
+  // v2.5.1：載入帳號級共享數據（變身/英雄/守護）
   loadAccountSharedData();
-  // v2.5.0：載入跑馬燈公告
+  // v2.5.1：載入跑馬燈公告
   loadMarqueeAnnouncements();
-  // v2.5.0：預讀轉職費用
+  // v2.5.1：預讀轉職費用
   loadClassChangeCost();
 
   if (!GS.ownedTransforms) GS.ownedTransforms = [];
@@ -11802,7 +11802,7 @@ function confirmCC2CharCreate() {
       server: serverId,
     }).then(result => {
       if (result && result.ok) {
-        // v2.5.0：記錄當前角色索引，確保存檔寫對槽位
+        // v2.5.1：記錄當前角色索引，確保存檔寫對槽位
         GS.currentCharIdx = result.idx != null ? result.idx : 0;
         try { localStorage.setItem('mmo_char_idx', String(GS.currentCharIdx)); } catch(e) {}
         enterWorld();
@@ -21754,7 +21754,7 @@ function renderMenuPage(page) {
   }
 }
 
-// ==================== 倉庫系統 (v2.5.0) ====================
+// ==================== 倉庫系統 (v2.5.1) ====================
 let _warehouseCache = [];
 let _warehouseLoading = false;
 
@@ -22812,7 +22812,7 @@ function bindMenuPageEvents(page) {
   }
 }
 
-// ==================== 帳號級共享 (v2.5.0) ====================
+// ==================== 帳號級共享 (v2.5.1) ====================
 // 變身、英雄、守護：同帳號多角色互通；從 /api/account/shared 讀
 async function loadAccountSharedData() {
   try {
@@ -22868,7 +22868,7 @@ async function syncAccountSharedFromLocal() {
   } catch(e) { console.warn('[共享] 同步失敗:', e); }
 }
 
-// ==================== 跑馬燈公告 (v2.5.0) ====================
+// ==================== 跑馬燈公告 (v2.5.1) ====================
 let _marqueeQueue = [];
 let _marqueeIndex = 0;
 
@@ -25527,7 +25527,7 @@ window.addEventListener('load', function() {
         }
       } catch (e) { console.warn('[Auth] 讀取新創角色失敗:', e); }
       // 從後端載入角色存檔（如果有）
-    // v2.5.0：從角色槽位載入存檔（優先 mmo_save_x，後備 game_save_v2）
+    // v2.5.1：從角色槽位載入存檔（優先 mmo_save_x，後備 game_save_v2）
     try {
       const idxStr = localStorage.getItem('mmo_char_idx');
       const idx = idxStr != null ? parseInt(idxStr, 10) : 0;
