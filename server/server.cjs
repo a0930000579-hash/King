@@ -36,9 +36,46 @@ try {
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const ROOT_DIR = path.resolve(__dirname, '..');
+const ASSETS_DIR = path.resolve(ROOT_DIR, 'assets');
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2MB
 const GM_ACCOUNT = '19811013';
 const GM_PASSWORD = process.env.GM_PASSWORD || '19811013';
+
+// ========== 資產掃描（大小寫對照表，供大小寫不同的請求做備查） ==========
+function buildAssetIndex(dir) {
+  const map = new Map(); // 小寫路徑 -> 真實相對路徑
+  if (!fs.existsSync(dir)) return map;
+  function walk(current, rel) {
+    let entries;
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch (e) { return; }
+    for (const ent of entries) {
+      const full = path.join(current, ent.name);
+      const r = rel ? rel + '/' + ent.name : ent.name;
+      if (ent.isDirectory()) {
+        walk(full, r);
+      } else {
+        map.set(r.toLowerCase(), r);
+      }
+    }
+  }
+  walk(dir, '');
+  return map;
+}
+let assetIndex = buildAssetIndex(ASSETS_DIR);
+function countFiles(dir) {
+  if (!fs.existsSync(dir)) return 0;
+  let n = 0;
+  function walk(d) {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+    for (const ent of entries) {
+      if (ent.isDirectory()) walk(path.join(d, ent.name));
+      else n++;
+    }
+  }
+  walk(dir);
+  return n;
+}
 
 // 確保 data 目錄存在
 if (!fs.existsSync(DATA_DIR)) {
@@ -155,7 +192,8 @@ function serveStatic(req, res, pathname) {
     return;
   }
 
-  let filePath = path.join(ROOT_DIR, decodeURIComponent(pathname));
+  let decoded = decodeURIComponent(pathname);
+  let filePath = path.join(ROOT_DIR, decoded);
 
   if (pathname === '/' || pathname === '') {
     filePath = path.join(ROOT_DIR, 'index.html');
@@ -166,6 +204,15 @@ function serveStatic(req, res, pathname) {
       filePath = path.join(filePath, 'index.html');
     }
   } catch (e) { /* ignore */ }
+
+  // v2.3.5-patch：檔案不存在時，若為 /assets/* 則嘗試大小寫對照表備查
+  if (!fs.existsSync(filePath) && decoded.toLowerCase().startsWith('/assets/')) {
+    const rel = decoded.slice(8).toLowerCase(); // 去掉 /assets/
+    const real = assetIndex.get(rel);
+    if (real) {
+      filePath = path.join(ASSETS_DIR, real);
+    }
+  }
 
   if (!fs.existsSync(filePath)) {
     // API 路徑 404 → 回 JSON；靜態頁 404 → 回 HTML
@@ -243,6 +290,7 @@ async function handleApi(req, res, pathname, query) {
   // === 健康檢查（永遠回 JSON 200）===
   // 用於前端連線判定：確認此伺服器真的是 monarch-blade 營運伺服器
   if (req.method === 'GET' && pathname === '/api/health') {
+    const assetCount = assetIndex.size;
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
@@ -250,6 +298,32 @@ async function handleApi(req, res, pathname, query) {
       time: Date.now(),
       socketIo: socketIoInstalled,
       dbBackend: db.getBackend(),
+      assetCount: assetCount,
+      assetsReady: assetCount > 100,
+    });
+  }
+
+  // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / 樣本檔存在性，方便 DO 上除錯
+  if (req.method === 'GET' && pathname === '/api/diag') {
+    const sampleRel = '1YPfWK8cKg.png';
+    const samplePath = path.join(ASSETS_DIR, sampleRel);
+    const sampleExists = fs.existsSync(samplePath);
+    return sendJson(res, 200, {
+      version: '2.3.5',
+      cwd: process.cwd(),
+      serverFile: __filename,
+      rootDir: ROOT_DIR,
+      assetsRoot: ASSETS_DIR,
+      assetsExists: fs.existsSync(ASSETS_DIR),
+      assetFileCount: assetIndex.size,
+      sampleAsset: '/assets/' + sampleRel,
+      sampleAssetExists: sampleExists,
+      dataDir: DATA_DIR,
+      dataDirExists: fs.existsSync(DATA_DIR),
+      port: PORT,
+      nodeVersion: process.version,
+      platform: process.platform,
+      listenHost: '0.0.0.0',
     });
   }
 
@@ -798,16 +872,29 @@ async function initGM() {
 (async function bootstrap() {
   await db.init();
   await initGM();
+  // 重掃資產索引（init 前後若有變動）
+  assetIndex = buildAssetIndex(ASSETS_DIR);
+  const assetCount = assetIndex.size;
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
     console.log('  君主之刃 v2.3.5 · 正式營運伺服器');
     console.log('========================================');
-    console.log('  服務位址: http://localhost:' + PORT);
+    console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
+    console.log('  工作目錄: ' + process.cwd());
+    console.log('  專案根:   ' + ROOT_DIR);
+    console.log('  資產目錄: ' + ASSETS_DIR);
+    console.log('  資產檔數: ' + assetCount + (assetCount < 100 ? '  [警告] 資產數過少，可能 assets 未正確部署' : ''));
     console.log('  資料後端: ' + db.getBackend());
     console.log('  多人連線: ' + (socketIoInstalled ? '已啟用 (Socket.IO)' : '未啟用 (單機模式)'));
     console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
     if (GM_PASSWORD === '19811013') {
       console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');
+    }
+    if (assetCount < 100) {
+      console.log('  [警告] 偵測到資產不足，請確認 assets-part1.zip 與 assets-part2.zip 已解壓至');
+      console.log('         專案根目錄（與 server/、index.html 同層）。');
+      console.log('         診斷: GET /api/diag');
     }
     console.log('  API:');
     console.log('    POST /api/auth/register       註冊');
@@ -817,6 +904,8 @@ async function initGM() {
     console.log('    GET  /api/characters          角色列表');
     console.log('    POST /api/characters/save     存檔');
     console.log('    POST /api/bug-report          提交 Bug');
+    console.log('    GET  /api/health              健康檢查 (含資產數)');
+    console.log('    GET  /api/diag                部署診斷 (資產路徑/檔數/樣本)');
     console.log('========================================');
   });
 })();
