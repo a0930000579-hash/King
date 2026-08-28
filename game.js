@@ -6610,7 +6610,15 @@ function syncMultiplayerProfile() {
 }
 
 // ==================== 初始化 ====================
+// ==================== 遊戲初始化 ====================
+// v2.5.6：init 冪等化，只執行一次（避免重複繫結事件、重複啟動 game loop）
+let _initDone = false;
 function init() {
+  if (_initDone) {
+    console.log('[Init] 已初始化過，跳過重複呼叫');
+    return;
+  }
+  _initDone = true;
   try {
     _initCore();
   } catch (e) {
@@ -11803,10 +11811,21 @@ function confirmCC2CharCreate() {
   
   // 進入世界的共用流程
   function enterWorld() {
-    // 關閉創建介面
+    // 關閉創建介面並重置表單（v2.5.6：確保不留空白面板）
     const screen = $('char-create-screen');
-    if (screen) screen.classList.add('hidden');
-    
+    if (screen) {
+      screen.classList.add('hidden');
+      // 重置表單狀態
+      const nameInput = screen.querySelector('#cc2-name-input');
+      if (nameInput) nameInput.value = '';
+      charCreateState = { classId: 'warrior', name: '', statPoints: 5,
+        str: 10, con: 10, dex: 10, int: 10, luk: 10, vit: 10 };
+    }
+
+    // v2.5.6：確保遊戲完整初始化（game loop + 事件 + 精靈 + 地圖）
+    //  新創角時從此進入；冪等：若已初始化過則直接返回
+    init();
+
     // 更新介面
     if (el.topName) el.topName.textContent = name;
     if (el.classBadge) el.classBadge.textContent = cls.name;

@@ -497,6 +497,17 @@
   }
 
   // ========== 角色選擇 ==========
+  // v2.5.6：卡片式版面，每格顯示職業 portrait / 名字 / 職業 / 等級 / 進入遊戲按鈕
+  //   空格顯示「+新增角色」；暗黑風、手機好點
+  const CLASS_DISPLAY = {
+    warrior: { name: '騎士', color: '#c84030', accent: '#ff8060', icon: '⚔' },
+    mage:    { name: '法師', color: '#3060c8', accent: '#6090ff', icon: '✦' },
+    archer:  { name: '精靈', color: '#30a050', accent: '#60d080', icon: '🏹' },
+    rogue:   { name: '黑暗妖精', color: '#8040a0', accent: '#c060e0', icon: '🗡' },
+    paladin: { name: '聖騎士', color: '#d0a020', accent: '#ffd860', icon: '🛡' },
+    warlock: { name: '幻術師', color: '#7030a0', accent: '#b060e0', icon: '◈' },
+  };
+
   function renderCharSelect() {
     // 從 localStorage 讀取已建立的角色（v2.0 後端會回傳，這裡先用前端緩存）
     let chars = [];
@@ -505,43 +516,64 @@
       if (saved) chars = JSON.parse(saved);
     } catch (e) {}
 
-    const slots = [];
+    const cards = [];
     for (let i = 0; i < 3; i++) {
       const c = chars[i];
       if (c) {
-        slots.push(`
-          <div class="char-slot" data-char-idx="${i}">
-            <div class="char-avatar-box">
-              <span style="font-size:28px;color:#f0c040">[ 金 ]</span>
+        const cls = CLASS_DISPLAY[c.classId] || CLASS_DISPLAY.warrior;
+        const lv = c.level || 1;
+        const nationName = c.nationName || '無國籍';
+        cards.push(`
+          <div class="char-card" data-char-idx="${i}" style="--cls-color: ${cls.color}; --cls-accent: ${cls.accent};">
+            <div class="char-card-portrait">
+              <div class="char-card-portrait-ring"></div>
+              <div class="char-card-portrait-inner">
+                <span class="char-card-class-icon">${cls.icon}</span>
+              </div>
+              <div class="char-card-level-badge">Lv ${lv}</div>
             </div>
-            <div class="char-details">
-              <div class="char-name-row">${escapeHtml(c.name)}</div>
-              <div class="char-info-row">Lv.${c.level || 1} · ${escapeHtml(c.className || '戰士')} · ${escapeHtml(c.nationName || '無國籍')}</div>
+            <div class="char-card-info">
+              <div class="char-card-name">${escapeHtml(c.name)}</div>
+              <div class="char-card-class">
+                <span class="char-card-class-dot"></span>
+                ${escapeHtml(cls.name)}
+              </div>
+              <div class="char-card-nation">${escapeHtml(nationName)}</div>
             </div>
-            <button class="char-delete-btn" data-delete-idx="${i}" title="刪除角色">✕</button>
+            <button class="char-card-enter" data-action="enter" data-char-idx="${i}">
+              進入遊戲
+            </button>
+            <button class="char-card-delete" data-action="delete" data-delete-idx="${i}" title="刪除角色">
+              刪除
+            </button>
           </div>
         `);
       } else {
-        slots.push(`
-          <div class="char-slot empty" data-char-idx="${i}" data-create="1">
-            + 創建新角色
+        cards.push(`
+          <div class="char-card char-card-empty" data-char-idx="${i}" data-create="1">
+            <div class="char-card-empty-plus">+</div>
+            <div class="char-card-empty-text">新增角色</div>
+            <div class="char-card-empty-hint">第 ${i + 1} 個角色欄位</div>
           </div>
         `);
       }
     }
 
     return `
-      <div class="auth-fullpage">
+      <div class="auth-fullpage char-select-page">
         <div class="auth-fullpage-inner">
           <div class="auth-back-row">
             <button class="auth-back-btn" id="btn-char-back">‹ 更換伺服器</button>
           </div>
-          <div class="char-select-panel">
-            <div class="server-select-title">角 色 選 擇</div>
-            <div class="server-select-sub">伺服器：${escapeHtml(currentServer?.name || '未知')}</div>
-            <div style="margin-top:14px">
-              ${slots.join('')}
+          <div class="char-select-header">
+            <div class="char-select-title">角 色 選 擇</div>
+            <div class="char-select-subtitle">
+              <span class="char-select-server-dot"></span>
+              伺服器：${escapeHtml(currentServer?.name || '未知')}
             </div>
+          </div>
+          <div class="char-card-grid">
+            ${cards.join('')}
           </div>
         </div>
       </div>
@@ -767,20 +799,32 @@
         $('btn-server-back').addEventListener('click', () => switchView('home'));
         break;
       case 'char':
-        // v2.4.0：改用事件委派，避免 DOM 重建時遺失繫結；三槽都能點
-        const charContainer = document.querySelector('.char-select-panel');
-        if (charContainer) {
-          charContainer.addEventListener('click', (e) => {
-            // 找到被點的 .char-slot（冒泡向上找）
-            const slot = e.target.closest('.char-slot');
-            if (!slot) return;
-            // 刪除按鈕：不進入遊戲也不創角
-            if (e.target.closest('.char-delete-btn')) return;
+        // v2.5.6：卡片式版面，改用事件委派在 .char-card-grid 上
+        const grid = document.querySelector('.char-card-grid');
+        if (grid) {
+          grid.addEventListener('click', (e) => {
+            const card = e.target.closest('.char-card');
+            if (!card) return;
+            const idx = parseInt(card.dataset.charIdx);
+            const action = e.target.closest('[data-action]')?.dataset.action;
 
-            if (slot.dataset.create === '1') {
-              // 創建新角色
+            if (action === 'delete') {
+              // 刪除按鈕：單獨處理
+              e.stopPropagation();
+              handleDeleteChar(idx);
+              return;
+            }
+
+            if (action === 'enter' || (!card.classList.contains('char-card-empty') && !action)) {
+              // 點卡片本體或「進入遊戲」按鈕 → 載入既有角色
+              startGameWithChar(idx);
+              return;
+            }
+
+            if (card.dataset.create === '1' || card.classList.contains('char-card-empty')) {
+              // 空格卡片 → 創建新角色
               if (typeof window.showCharCreate === 'function') {
-                _pendingCreateSlot = parseInt(slot.dataset.charIdx);
+                _pendingCreateSlot = idx;
                 _hookCharCreateDone();
                 try {
                   window.showCharCreate();
@@ -789,51 +833,12 @@
                   showToast('創角介面啟動失敗，請重新整理');
                 }
               } else {
-                console.error('[Auth] window.showCharCreate 不存在 — game.js 可能未正確載入或版本過舊。請檢查 game.js 是否正常載入。');
+                console.error('[Auth] window.showCharCreate 不存在');
                 showToast('遊戲載入中，請稍後再試');
               }
-            } else {
-              // 載入既有角色
-              startGameWithChar(parseInt(slot.dataset.charIdx));
             }
           });
         }
-        // 刪除按鈕
-        document.querySelectorAll('.char-delete-btn').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const idx = parseInt(btn.dataset.deleteIdx);
-            const chars = [];
-            try {
-              const raw = localStorage.getItem('mmo_characters');
-              if (raw) chars.push(...JSON.parse(raw));
-            } catch(e) {}
-            const target = chars[idx];
-            if (!target) return;
-            if (!confirm(`確定要刪除角色「${target.name}」嗎？\n此操作無法復原。`)) return;
-            // 呼叫後端刪除 API（若有）
-            const srv = currentServer?.id || '';
-            api('/characters/delete', {
-              server: srv,
-              charIdx: idx,
-              name: target.name,
-            }).then(() => {
-              // 重新拉列表
-              return api('/characters?server=' + encodeURIComponent(srv));
-            }).then(data => {
-              const list = data.characters || [];
-              try { localStorage.setItem('mmo_characters', JSON.stringify(list)); } catch(e) {}
-              switchView('char');
-              showToast('角色已刪除');
-            }).catch(() => {
-              // 後端失敗：至少從前端快取移除
-              chars.splice(idx, 1);
-              try { localStorage.setItem('mmo_characters', JSON.stringify(chars)); } catch(e) {}
-              switchView('char');
-              showToast('角色已刪除');
-            });
-          });
-        });
         $('btn-char-back').addEventListener('click', () => switchView('server'));
         break;
           }
@@ -926,6 +931,36 @@
     } finally {
       btn.disabled = false;
     }
+  }
+
+  // v2.5.6：刪除角色（提取為共用函式）
+  function handleDeleteChar(idx) {
+    const chars = [];
+    try {
+      const raw = localStorage.getItem('mmo_characters');
+      if (raw) chars.push(...JSON.parse(raw));
+    } catch(e) {}
+    const target = chars[idx];
+    if (!target) return;
+    if (!confirm(`確定要刪除角色「${target.name}」嗎？\n此操作無法復原。`)) return;
+    const srv = currentServer?.id || '';
+    api('/characters/delete', {
+      server: srv,
+      charIdx: idx,
+      name: target.name,
+    }).then(() => {
+      return api('/characters?server=' + encodeURIComponent(srv));
+    }).then(data => {
+      const list = data.characters || [];
+      try { localStorage.setItem('mmo_characters', JSON.stringify(list)); } catch(e) {}
+      switchView('char');
+      showToast('角色已刪除');
+    }).catch(() => {
+      chars.splice(idx, 1);
+      try { localStorage.setItem('mmo_characters', JSON.stringify(chars)); } catch(e) {}
+      switchView('char');
+      showToast('角色已刪除');
+    });
   }
 
   // ========== 進入伺服器 ==========

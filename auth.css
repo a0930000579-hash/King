@@ -346,6 +346,314 @@
   letter-spacing: 1px;
 }
 
+/* ========== v2.5.6 角色選擇頁（卡片式暗黑風） ========== */
+.char-select-page .char-select-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.char-select-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #f0e0b0;
+  letter-spacing: 8px;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 20px rgba(200,150,60,0.3);
+  margin-bottom: 8px;
+}
+.char-select-subtitle {
+  font-size: 13px;
+  color: #8a7040;
+  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.char-select-server-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #40c060;
+  box-shadow: 0 0 8px rgba(64,192,96,0.6);
+}
+
+.char-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.char-card {
+  position: relative;
+  background: linear-gradient(160deg, #1f150a 0%, #120a04 100%);
+  border: 1px solid #4a3a1a;
+  border-radius: 12px;
+  padding: 20px 16px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  overflow: hidden;
+}
+.char-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--cls-color, #c89040), transparent);
+  opacity: 0.6;
+}
+.char-card:hover {
+  border-color: var(--cls-accent, #c89040);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px var(--cls-color, #c89040);
+}
+.char-card:hover::before {
+  opacity: 1;
+}
+
+.char-card-portrait {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 14px;
+}
+.char-card-portrait-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--cls-color, #c89040);
+  opacity: 0.5;
+  box-shadow: 0 0 20px var(--cls-color, #c89040), inset 0 0 20px rgba(0,0,0,0.5);
+}
+.char-card-portrait-inner {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, var(--cls-accent, #c89040) 0%, var(--cls-color, #8a6020) 40%, #1a0f05 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.char-card-class-icon {
+  font-size: 36px;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.8));
+}
+.char-card-level-badge {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, var(--cls-color, #c89040), var(--cls-accent, #e0b060));
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 10px;
+  letter-spacing: 1px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  white-space: nowrap;
+}
+
+.char-card-info {
+  flex: 1;
+  width: 100%;
+  margin-bottom: 12px;
+}
+.char-card-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f0e0b0;
+  margin-bottom: 6px;
+  letter-spacing: 1px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+.char-card-class {
+  font-size: 12px;
+  color: var(--cls-accent, #c89040);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  letter-spacing: 1px;
+}
+.char-card-class-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--cls-color, #c89040);
+  box-shadow: 0 0 6px var(--cls-color, #c89040);
+}
+.char-card-nation {
+  font-size: 11px;
+  color: #6a5020;
+  letter-spacing: 1px;
+}
+
+.char-card-enter {
+  width: 100%;
+  padding: 10px 0;
+  background: linear-gradient(90deg, var(--cls-color, #c89040), var(--cls-accent, #e0b060));
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.char-card-enter:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--cls-color, rgba(200,144,64,0.4));
+}
+.char-card-enter:active {
+  transform: translateY(0);
+}
+
+.char-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(80,20,20,0.6);
+  color: #e07060;
+  border: 1px solid #6a2020;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.char-card:hover .char-card-delete {
+  opacity: 1;
+}
+.char-card-delete:hover {
+  background: #802020;
+  color: #fff;
+}
+
+/* 空格卡片 */
+.char-card-empty {
+  border-style: dashed;
+  border-color: #3a2a10;
+  background: linear-gradient(160deg, rgba(30,20,10,0.4) 0%, rgba(20,12,5,0.2) 100%);
+  cursor: pointer;
+  justify-content: center;
+  min-height: 260px;
+}
+.char-card-empty::before {
+  background: linear-gradient(90deg, transparent, #4a3a1a, transparent);
+}
+.char-card-empty:hover {
+  border-color: #c89040;
+  border-style: solid;
+}
+.char-card-empty:hover::before {
+  background: linear-gradient(90deg, transparent, #c89040, transparent);
+  opacity: 1;
+}
+.char-card-empty-plus {
+  font-size: 48px;
+  color: #4a3a1a;
+  font-weight: 300;
+  line-height: 1;
+  margin-bottom: 12px;
+  transition: all 0.2s;
+}
+.char-card-empty:hover .char-card-empty-plus {
+  color: #c89040;
+  transform: scale(1.1);
+}
+.char-card-empty-text {
+  font-size: 16px;
+  color: #6a5020;
+  letter-spacing: 4px;
+  margin-bottom: 6px;
+  transition: color 0.2s;
+}
+.char-card-empty:hover .char-card-empty-text {
+  color: #e0b060;
+}
+.char-card-empty-hint {
+  font-size: 11px;
+  color: #3a2a10;
+  letter-spacing: 2px;
+}
+
+/* 手機版：直排 */
+@media (max-width: 600px) {
+  .char-card-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    max-width: 320px;
+  }
+  .char-card {
+    flex-direction: row;
+    text-align: left;
+    padding: 14px 16px;
+    min-height: auto;
+  }
+  .char-card-portrait {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 0;
+    margin-right: 14px;
+    flex-shrink: 0;
+  }
+  .char-card-class-icon {
+    font-size: 24px;
+  }
+  .char-card-info {
+    flex: 1;
+    margin-bottom: 0;
+    text-align: left;
+  }
+  .char-card-name {
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+  .char-card-class {
+    justify-content: flex-start;
+  }
+  .char-card-enter {
+    width: auto;
+    padding: 8px 16px;
+    font-size: 12px;
+    letter-spacing: 2px;
+    flex-shrink: 0;
+  }
+  .char-card-delete {
+    opacity: 1;
+  }
+  .char-card-empty {
+    min-height: auto;
+    flex-direction: column;
+    justify-content: center;
+    padding: 20px 16px;
+  }
+  .char-card-empty-plus {
+    font-size: 32px;
+    margin-bottom: 6px;
+  }
+  .char-select-title {
+    font-size: 22px;
+    letter-spacing: 6px;
+  }
+}
+
 /* ========== 離線提示點 ========== */
 .offline-indicator-dot {
   position: fixed;
