@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.5.6 · 正式營運後端伺服器
+  君主之刃 v2.5.7 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -529,9 +529,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.5.6',
-      build: '2.5.6-2608281846',
-      buildId: '2.5.6-2608281846',
+      version: '2.5.7',
+      build: '2.5.7-2608281900',
+      buildId: '2.5.7-2608281900',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -592,9 +592,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.5.6',
-      build: '2.5.6-2608281846',
-      buildId: '2.5.6-2608281846',
+      version: '2.5.7',
+      build: '2.5.7-2608281900',
+      buildId: '2.5.7-2608281900',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -637,7 +637,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.5.6', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.5.7', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -841,9 +841,9 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, {
       ok: allPass,
-      version: '2.5.6',
-      build: '2.5.6-2608281846',
-      buildId: '2.5.6-2608281846',
+      version: '2.5.7',
+      build: '2.5.7-2608281900',
+      buildId: '2.5.7-2608281900',
       timestamp: new Date().toISOString(),
       totalMs,
       summary: { total: checks.length, passed, failed },
@@ -995,11 +995,18 @@ async function handleApi(req, res, pathname, query) {
     if (!unique) return sendJson(res, 409, { error: '此名稱已被使用' });
     const charCount = await db.getCharacterCount(accName, serverId);
     if (charCount >= 3) return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
+    // v2.5.7：找到第一個空槽位作為新角色索引（刪除後可能有中間空槽）
+    const charList = await db.listCharacters(accName, serverId);
+    let slotIdx = 0;
+    for (let i = 0; i < 3; i++) {
+      if (!charList[i]) { slotIdx = i; break; }
+      if (i === 2) slotIdx = 3; // 不應該到這裡
+    }
     const newChar = {
       name, classId, level: 1, exp: 0, created: true, createdAt: Date.now(),
     };
-    await db.createCharacter(accName, serverId, charCount, name, classId, newChar);
-    return sendJson(res, 201, { ok: true, idx: charCount, character: newChar });
+    await db.createCharacter(accName, serverId, slotIdx, name, classId, newChar);
+    return sendJson(res, 201, { ok: true, idx: slotIdx, character: newChar });
   }
 
   // POST /api/characters/save

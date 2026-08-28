@@ -12204,15 +12204,15 @@ function updatePlayerSprite() {
                       </div>
         </div>`;
       spriteWrap.innerHTML = auraHTML + `
-        <img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${baseFilter}" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${s.walk || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${s.walk2 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${s.walk3 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${s.walk4 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-3" src="${s.attack3 || s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
-        <img class="unit-sprite-img sprite-frame-hit" src="${s.hit || s.idle}" style="filter:${baseFilter};display:none" alt=""/>
+        <img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${s.walk2 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${s.walk3 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${s.walk4 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${s.attack || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-3" src="${s.attack3 || s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-hit" src="${s.hit || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
         <div class="unit-sprite-tomb">墓</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>

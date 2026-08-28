@@ -363,7 +363,16 @@ async function getCharacterCount(account, serverId) {
     const accounts = loadJSON('accounts.json', {});
     const acc = accounts[account];
     if (!acc || !acc.characters) return 0;
-    return (acc.characters[serverId] || []).length;
+    const chars = acc.characters[serverId] || [];
+    // v2.5.7：只數非空槽位（已刪除的 null 不計入）
+    let cnt = 0;
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i];
+      if (!c) continue;
+      const p = c.player || c;
+      if (p && p.name) cnt++;
+    }
+    return cnt;
   }
 }
 
@@ -375,27 +384,42 @@ async function listCharacters(account, serverId) {
        FROM characters WHERE account = $1 AND server_id = $2 ORDER BY char_idx ASC`,
       [account, serverId]
     );
-    return rows.map(r => ({
-      idx: r.char_idx,
-      name: r.save_data?.player?.name || r.name || '',
-      level: r.save_data?.player?.level || r.level || 1,
-      classId: r.save_data?.player?.classId || r.class_id || 'warrior',
-      className: r.save_data?.player?.className || '',
-      nation: r.save_data?.nation || null,
-      nationName: r.save_data?.nationName || '',
-    }));
+    // v2.5.7：返回 3 個槽位的完整陣列，空槽為 null，確保前端索引正確對齊
+    const maxSlots = 3;
+    const byIdx = {};
+    rows.forEach(r => { byIdx[r.char_idx] = r; });
+    const result = [];
+    for (let i = 0; i < maxSlots; i++) {
+      const r = byIdx[i];
+      if (!r) { result.push(null); continue; }
+      const sd = r.save_data || {};
+      const p = sd.player || {};
+      if (!p.name && !r.name) { result.push(null); continue; }
+      result.push({
+        idx: i,
+        name: p.name || r.name || '',
+        level: p.level || r.level || 1,
+        classId: p.classId || r.class_id || 'warrior',
+        className: p.className || '',
+        nation: sd.nation || null,
+        nationName: sd.nationName || '',
+      });
+    }
+    return result;
   } else {
     const accounts = loadJSON('accounts.json', {});
     const acc = accounts[account];
     if (!acc) return [];
     const chars = (acc.characters && acc.characters[serverId]) || [];
+    // v2.5.7：返回 3 個槽位的完整陣列，空槽為 null，確保前端索引正確對齊
+    const maxSlots = 3;
     const result = [];
-    for (let i = 0; i < chars.length; i++) {
+    for (let i = 0; i < maxSlots; i++) {
       const c = chars[i];
-      if (!c) continue; // 已刪除的空槽跳過
+      if (!c) { result.push(null); continue; }
       // saveData 可能是 { player: { name, classId, ... } } 或扁平 { name, classId, ... }
       const p = c.player || c;
-      if (!p || !p.name) continue;
+      if (!p || !p.name) { result.push(null); continue; }
       result.push({
         idx: i,
         name: p.name || '',
@@ -502,6 +526,7 @@ async function createCharacter(account, serverId, charIdx, name, classId, saveDa
     archer:  { hp: 90,  mp: 80,  atk: 14, def: 5, spd: 2, crit: 12, hit: 98, dodge: 8 },
     rogue:   { hp: 85,  mp: 70,  atk: 13, def: 4, spd: 2, crit: 15, hit: 96, dodge: 12 },
     paladin: { hp: 140, mp: 90,  atk: 10, def: 12, spd: 1, crit: 3, hit: 95, dodge: 3 },
+    warlock: { hp: 95,  mp: 110, atk: 11, def: 5, spd: 1, crit: 7, hit: 95, dodge: 5 },
   };
   const cls = baseAttrs[classId] || baseAttrs.warrior;
   const fullSave = {

@@ -953,11 +953,27 @@
     }).then(data => {
       const list = data.characters || [];
       try { localStorage.setItem('mmo_characters', JSON.stringify(list)); } catch(e) {}
+      // v2.5.7：刪除後清理本機對應槽位存檔，避免殘留 ghost 資料
+      try {
+        const acc = getCurrentAccount();
+        const slotKey = acc ? getSlotSaveKey(acc, idx) : 'mmo_save_' + idx;
+        localStorage.removeItem(slotKey);
+        const currentIdx = localStorage.getItem('mmo_char_idx');
+        if (currentIdx != null && parseInt(currentIdx, 10) === idx) {
+          localStorage.removeItem('mmo_char_idx');
+        }
+      } catch(e) {}
       switchView('char');
       showToast('角色已刪除');
     }).catch(() => {
-      chars.splice(idx, 1);
+      chars[idx] = null; // v2.5.7：標記空槽，不用 splice 導致索引錯位
       try { localStorage.setItem('mmo_characters', JSON.stringify(chars)); } catch(e) {}
+      // 也清理本機槽位
+      try {
+        const acc = getCurrentAccount();
+        const slotKey = acc ? getSlotSaveKey(acc, idx) : 'mmo_save_' + idx;
+        localStorage.removeItem(slotKey);
+      } catch(e) {}
       switchView('char');
       showToast('角色已刪除');
     });
