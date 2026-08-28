@@ -610,6 +610,230 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
+  // 自體檢查 API：免登入，伺服器端實跑 6 項檢查並回報 JSON
+  if (req.method === 'GET' && pathname === '/api/selftest') {
+    const checks = [];
+    const overallStart = Date.now();
+
+    // 1. server 基本資訊
+    try {
+      const t0 = Date.now();
+      checks.push({
+        name: 'server',
+        pass: true,
+        detail: { version: '2.4.0', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        ms: Date.now() - t0,
+      });
+    } catch(e) {
+      checks.push({ name: 'server', pass: false, detail: { error: e.message }, ms: 0 });
+    }
+
+    // 2. static / assets
+    try {
+      const t0 = Date.now();
+      const assetsReady = fs.existsSync(ASSETS_DIR) && assetIndex.size > 0;
+      const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
+      const manifestExists = fs.existsSync(manifestPath);
+      let manifestOk = false;
+      let manifestRef = 0;
+      let manifestMissing = 0;
+      if (manifestExists) {
+        try {
+          const m = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+          manifestRef = Object.keys(m).length;
+          for (const k of Object.keys(m)) {
+            if (!fs.existsSync(path.join(ROOT_DIR, m[k]))) manifestMissing++;
+          }
+          manifestOk = manifestMissing === 0;
+        } catch(e) {}
+      }
+      checks.push({
+        name: 'static',
+        pass: assetsReady && manifestOk,
+        detail: { assetCount: assetIndex.size, assetsDir: ASSETS_DIR, assetsReady, manifestExists, manifestReferenced: manifestRef, manifestMissing },
+        ms: Date.now() - t0,
+      });
+    } catch(e) {
+      checks.push({ name: 'static', pass: false, detail: { error: e.message }, ms: 0 });
+    }
+
+    // 3. db roundtrip：寫 temp → 讀 → 刪
+    try {
+      const t0 = Date.now();
+      const backend = db.getBackend();
+      const tempAcc = 'selftest_' + Math.random().toString(36).slice(2, 10);
+      const tempPw = 'test_' + Math.random().toString(36).slice(2, 10);
+      const wrote = await db.createAccount(tempAcc, hashPassword(tempPw), false);
+      const readBack = wrote ? await db.getAccount(tempAcc) : null;
+      const readOk = readBack && readBack.account === tempAcc;
+      const deleted = readOk ? await db.deleteAccount(tempAcc) : false;
+      const verifyDeleted = deleted ? !(await db.getAccount(tempAcc)) : false;
+      const pass = wrote && readOk && deleted && verifyDeleted;
+      const warning = backend === 'json' ? '使用 JSON 檔案後端（本機持久層）' : null;
+      checks.push({
+        name: 'db',
+        pass,
+        detail: { backend, wrote, readOk, deleted, verifyDeleted, warning },
+        ms: Date.now() - t0,
+      });
+    } catch(e) {
+      checks.push({ name: 'db', pass: false, detail: { error: e.message }, ms: 0 });
+    }
+
+    // 4. multiplayer long-poll 雙 client 同步測試
+    try {
+      const t0 = Date.now();
+      const testMap = 'selftest_map_' + Math.random().toString(36).slice(2, 8);
+      const testServer = 'zeus';
+      const playerA = 'selftest_A_' + Math.random().toString(36).slice(2, 8);
+      const playerB = 'selftest_B_' + Math.random().toString(36).slice(2, 8);
+
+      const mapState = getMapState(testMap);
+      // A 加入
+      const stateA = {
+        playerId: 'selftest:A', account: playerA, charIdx: 0,
+        name: '測試A', level: 1, classId: 'warrior',
+        mapId: testMap, x: 100, y: 100, dir: 'down', hp: 100, maxHp: 100,
+        transformId: null, lastUpdate: Date.now(),
+      };
+      mapState.set('selftest:A', stateA);
+
+      // B 加入
+      const stateB = {
+        playerId: 'selftest:B', account: playerB, charIdx: 0,
+        name: '測試B', level: 1, classId: 'mage',
+        mapId: testMap, x: 200, y: 200, dir: 'down', hp: 100, maxHp: 100,
+        transformId: null, lastUpdate: Date.now(),
+      };
+      mapState.set('selftest:B', stateB);
+
+      // 模擬 B 的 long-poll：建立一個 fake response
+      let pollResult = null;
+      const fakeRes = {
+        end(data) {
+          pollResult = data;
+          return true;
+        },
+        setHeader() {},
+        writeHead() {},
+        write() {},
+        getHeader() { return undefined; },
+      };
+      if (!mpPollWaiters.has(testMap)) mpPollWaiters.set(testMap, []);
+      mpPollWaiters.get(testMap).push({
+        res: fakeRes, since: 0, playerId: 'selftest:B', startTime: Date.now(),
+      });
+
+      // A 更新位置
+      stateA.x = 512;
+      stateA.y = 388;
+      stateA.dir = 'left';
+      stateA.lastUpdate = Date.now();
+      notifyMapUpdate(testMap, {
+        type: 'move',
+        playerId: 'selftest:A',
+        x: 512, y: 388, dir: 'left',
+        hp: 100, transformId: null,
+        time: Date.now(),
+      });
+
+      // 檢查 B 是否收到事件
+      let receivedMove = false;
+      let moveX = 0, moveY = 0, moveDir = '';
+      if (pollResult) {
+        try {
+          const data = JSON.parse(pollResult);
+          const events = data.events || [];
+          const moveEvt = events.find(e => e.type === 'move' && e.playerId === 'selftest:A');
+          if (moveEvt) {
+            receivedMove = true;
+            moveX = moveEvt.x;
+            moveY = moveEvt.y;
+            moveDir = moveEvt.dir;
+          }
+        } catch(e) {}
+      }
+
+      // 清理：兩人離開地圖
+      mapState.delete('selftest:A');
+      mapState.delete('selftest:B');
+      notifyMapUpdate(testMap, { type: 'leave', playerId: 'selftest:A', time: Date.now() });
+      notifyMapUpdate(testMap, { type: 'leave', playerId: 'selftest:B', time: Date.now() });
+      if (mapState.size === 0) mpMapStates.delete(testMap);
+
+      const pass = receivedMove && moveX === 512 && moveY === 388 && moveDir === 'left';
+      checks.push({
+        name: 'multiplayer',
+        pass,
+        detail: { testMap, receivedMove, moveX, moveY, moveDir, expectedX: 512, expectedY: 388, expectedDir: 'left' },
+        ms: Date.now() - t0,
+      });
+    } catch(e) {
+      checks.push({ name: 'multiplayer', pass: false, detail: { error: e.message, stack: e.stack?.split('\n')[0] }, ms: 0 });
+    }
+
+    // 5. auth roundtrip：註冊 temp → 登入 → /me → 刪除
+    try {
+      const t0 = Date.now();
+      const tempAcc = 'selftest_auth_' + Math.random().toString(36).slice(2, 10);
+      const tempPw = 'pw_' + Math.random().toString(36).slice(2, 12);
+
+      // 註冊
+      const registered = await db.createAccount(tempAcc, hashPassword(tempPw), false);
+
+      // 登入（比對密碼）
+      let loginOk = false;
+      let token = null;
+      if (registered) {
+        const acc = await db.getAccount(tempAcc);
+        if (acc && acc.passwordHash === hashPassword(tempPw)) {
+          loginOk = true;
+          token = genToken(tempAcc);
+        }
+      }
+
+      // /me 等效：從 token 解析帳號並驗證存在
+      let meOk = false;
+      let meAccount = null;
+      if (loginOk && token) {
+        const decoded = verifyToken(token);
+        if (decoded) {
+          const acc2 = await db.getAccount(decoded);
+          if (acc2) { meOk = true; meAccount = acc2.account; }
+        }
+      }
+
+      // 刪除
+      const deleted = meOk ? await db.deleteAccount(tempAcc) : false;
+      const verifyDeleted = deleted ? !(await db.getAccount(tempAcc)) : false;
+
+      const pass = registered && loginOk && meOk && meAccount === tempAcc && deleted && verifyDeleted;
+      checks.push({
+        name: 'auth',
+        pass,
+        detail: { account: tempAcc, registered, loginOk, meOk, meAccount, deleted, verifyDeleted, tokenIssued: !!token },
+        ms: Date.now() - t0,
+      });
+    } catch(e) {
+      checks.push({ name: 'auth', pass: false, detail: { error: e.message }, ms: 0 });
+    }
+
+    const allPass = checks.every(c => c.pass);
+    const totalMs = Date.now() - overallStart;
+    const passed = checks.filter(c => c.pass).length;
+    const failed = checks.filter(c => !c.pass).length;
+
+    return sendJson(res, 200, {
+      ok: allPass,
+      version: '2.4.0',
+      timestamp: new Date().toISOString(),
+      totalMs,
+      summary: { total: checks.length, passed, failed },
+      checks,
+    });
+  }
+
+
   // === 帳號相關 ===
   // POST /api/auth/register
   if (req.method === 'POST' && pathname === '/api/auth/register') {
@@ -1317,6 +1541,144 @@ const server = http.createServer(async (req, res) => {
       console.error('[API] 未處理錯誤:', e);
       sendJson(res, 500, { error: 'internal server error' });
     }
+    return;
+  }
+
+  // /selftest 人類可讀 HTML 頁面（免登入，快速證明這是真遊戲伺服器）
+  if (req.method === 'GET' && (pathname === '/selftest' || pathname === '/selftest.html')) {
+    const html = `<!DOCTYPE html>
+<html lang=\"zh-Hant\">
+<head>
+<meta charset=\"UTF-8\" />
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+<title>伺服器自體檢查 · 君主之刃 v2.4.0</title>
+<meta name=\"creative-medium\" content=\"other\" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+    background: #0f0f1a;
+    color: #e0e0e8;
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  .header { text-align: center; margin-bottom: 24px; }
+  .title { font-size: 24px; font-weight: 700; color: #ffd700; margin-bottom: 4px; letter-spacing: 1px; }
+  .subtitle { font-size: 13px; color: #8888aa; }
+  .card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .overall { text-align: center; padding: 28px 20px; }
+  .overall .status { font-size: 48px; font-weight: 800; margin-bottom: 8px; }
+  .overall.pass .status { color: #3ddc97; text-shadow: 0 0 20px rgba(61,220,151,0.4); }
+  .overall.fail .status { color: #ff6b6b; text-shadow: 0 0 20px rgba(255,107,107,0.4); }
+  .overall .meta { font-size: 13px; color: #8888aa; }
+  .check-row { display: flex; align-items: center; padding: 14px 0; border-bottom: 1px solid #2a2a4a; }
+  .check-row:last-child { border-bottom: none; }
+  .check-icon { font-size: 22px; width: 36px; text-align: center; margin-right: 12px; flex-shrink: 0; }
+  .check-icon.pass { color: #3ddc97; }
+  .check-icon.fail { color: #ff6b6b; }
+  .check-body { flex: 1; min-width: 0; }
+  .check-name { font-size: 15px; font-weight: 600; color: #e0e0e8; margin-bottom: 4px; }
+  .check-detail { font-size: 12px; color: #8888aa; font-family: ui-monospace, 'SF Mono', Menlo, monospace; word-break: break-all; line-height: 1.5; }
+  .check-ms { font-size: 12px; color: #6666aa; margin-left: 12px; flex-shrink: 0; }
+  .btn { display: block; width: 100%; padding: 14px; background: linear-gradient(135deg, #ffd700, #ff9500); color: #1a1a2e; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 16px; letter-spacing: 1px; }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .footer { text-align: center; font-size: 11px; color: #555577; margin-top: 20px; }
+  .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #2a2a4a; border-top-color: #ffd700; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class=\"wrap\">
+  <div class=\"header\">
+    <div class=\"title\">&#9876; 君主之刃 · 伺服器自體檢查</div>
+    <div class=\"subtitle\">v2.4.0 · 即時驗證伺服器與遊戲功能</div>
+  </div>
+  <div class=\"card overall\" id=\"overall\">
+    <div class=\"status\"><span class=\"loading\"></span></div>
+    <div class=\"meta\">檢查中，請稍候…</div>
+  </div>
+  <div class=\"card\" id=\"checks\">
+    <div style=\"text-align:center;color:#6666aa;font-size:13px;\">載入中…</div>
+  </div>
+  <button class=\"btn\" id=\"retryBtn\" onclick=\"runTest()\">重新檢查</button>
+  <div class=\"footer\">君主之刃 v2.4.0 · 伺服器自體檢查</div>
+</div>
+<script>
+async function runTest() {
+  var overall = document.getElementById('overall');
+  var checksEl = document.getElementById('checks');
+  var btn = document.getElementById('retryBtn');
+  btn.disabled = true;
+  overall.className = 'card overall';
+  overall.innerHTML = '<div class=\"status\"><span class=\"loading\"></span></div><div class=\"meta\">檢查中，請稍候…</div>';
+  checksEl.innerHTML = '<div style=\"text-align:center;color:#6666aa;font-size:13px;\">載入中…</div>';
+  try {
+    var res = await fetch('/api/selftest?_=' + Date.now(), { cache: 'no-store' });
+    var data = await res.json();
+    if (data.ok) {
+      overall.className = 'card overall pass';
+      overall.innerHTML = '<div class=\"status\">&#9989; 全部通過</div>' +
+        '<div class=\"meta\">' + data.summary.passed + ' / ' + data.summary.total + ' 項 · 總耗時 ' + data.totalMs + ' ms · ' + data.timestamp + '</div>';
+    } else {
+      overall.className = 'card overall fail';
+      overall.innerHTML = '<div class=\"status\">&#10060; 部分失敗</div>' +
+        '<div class=\"meta\">' + data.summary.passed + ' / ' + data.summary.total + ' 項通過 · 總耗時 ' + data.totalMs + ' ms</div>';
+    }
+    var html = '';
+    for (var i = 0; i < data.checks.length; i++) {
+      var c = data.checks[i];
+      var icon = c.pass ? '&#9989;' : '&#10060;';
+      var iconCls = c.pass ? 'pass' : 'fail';
+      var detail = '';
+      if (c.detail) {
+        var d = c.detail;
+        var parts = [];
+        if (d.version) parts.push('version=' + d.version);
+        if (d.platform) parts.push('platform=' + d.platform);
+        if (d.nodeVersion) parts.push('node=' + d.nodeVersion);
+        if (d.uptimeMs != null) parts.push('uptime=' + (d.uptimeMs/1000).toFixed(1) + 's');
+        if (d.assetCount != null) parts.push('assets=' + d.assetCount);
+        if (d.manifestReferenced != null) parts.push('manifest=' + d.manifestReferenced);
+        if (d.manifestMissing != null) parts.push('missing=' + d.manifestMissing);
+        if (d.backend) parts.push('backend=' + d.backend);
+        if (d.warning) parts.push('warning=' + d.warning);
+        if (d.receivedMove != null) parts.push('moveReceived=' + d.receivedMove);
+        if (d.moveX != null) parts.push('pos=(' + d.moveX + ',' + d.moveY + ')');
+        if (d.account) parts.push('account=' + d.account);
+        if (d.registered != null) parts.push('reg=' + d.registered);
+        if (d.loginOk != null) parts.push('login=' + d.loginOk);
+        if (d.deleted != null) parts.push('deleted=' + d.deleted);
+        if (d.error) parts.push('error=' + d.error);
+        detail = parts.join(' · ');
+      }
+      html += '<div class=\"check-row\">' +
+        '<div class=\"check-icon ' + iconCls + '\">' + icon + '</div>' +
+        '<div class=\"check-body\">' +
+        '<div class=\"check-name\">' + c.name + '</div>' +
+        '<div class=\"check-detail\">' + (detail || '-') + '</div>' +
+        '</div>' +
+        '<div class=\"check-ms\">' + c.ms + 'ms</div>' +
+        '</div>';
+    }
+    checksEl.innerHTML = html;
+  } catch(e) {
+    overall.className = 'card overall fail';
+    overall.innerHTML = '<div class=\"status\">&#10060; 連線失敗</div><div class=\"meta\">' + e.message + '</div>';
+    checksEl.innerHTML = '<div style=\"text-align:center;color:#ff6b6b;font-size:13px;\">無法連線到伺服器</div>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+runTest();
+</script>
+</body>
+</html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.writeHead(200);
+    res.end(html);
     return;
   }
 

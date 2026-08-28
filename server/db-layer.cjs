@@ -321,6 +321,19 @@ async function saveCharacter(account, serverId, charIdx, saveData) {
   }
 }
 
+async function deleteAccount(account) {
+  if (backend === 'postgres') {
+    await pgPool.query('DELETE FROM accounts WHERE account = $1', [account]);
+    return true;
+  } else {
+    const accounts = loadJSON('accounts.json', {});
+    if (!accounts[account]) return false;
+    delete accounts[account];
+    saveJSON('accounts.json', accounts);
+    return true;
+  }
+}
+
 async function addBugReport(report) {
   if (backend === 'postgres') {
     await pgPool.query(
@@ -348,6 +361,7 @@ module.exports = {
   // 帳號
   getAccount,
   createAccount,
+  deleteAccount,
   updatePassword,
   // 角色
   listCharacters,
