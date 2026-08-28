@@ -1,4 +1,4 @@
-name: ZIP Auto Extract
+name: ZIP Merge Deploy
 on:
   push:
     branches:
@@ -7,10 +7,10 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: king-extract
+  group: king-merge
   cancel-in-progress: false
 jobs:
-  extract:
+  merge:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -18,25 +18,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract all ZIPs (merge, never delete other files)
+      - name: Merge-extract uploaded ZIPs (never delete other files)
         shell: bash
         run: |
           set -u
           zips=()
           while IFS= read -r f; do zips+=("$f"); done < <(find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*')
-          echo "Found ${#zips[@]} zip file(s)."
+          echo "Found ${#zips[@]} NEW zip(s) in this push."
           if [ "${#zips[@]}" -eq 0 ]; then
-            echo "No ZIP to extract. Nothing to do."
+            echo "No new ZIP. Keep current files."
             exit 0
           fi
+          # Extract onto EXISTING files (merge/overwrite, nothing is deleted)
           for z in "${zips[@]}"; do
             echo "=============================="
-            echo "Extracting (merge/overwrite): $z"
+            echo "Merge-extract: $z"
             echo "=============================="
             unzip -o "$z" -d . || { echo "unzip failed on $z"; exit 1; }
           done
-
-          # If a zip had one wrapper folder, lift its contents to root
+          # Lift a single wrapper folder only if index.html ends up nested
           if [ ! -f index.html ]; then
             inner=$(find . -mindepth 2 -type f -name index.html ! -path './.git/*' ! -path './.github/*' | head -n 1 || true)
             if [ -n "$inner" ]; then
@@ -46,40 +46,25 @@ jobs:
               mv "$d"/* . 2>/dev/null || true
             fi
           fi
-
-          # Remove only the consumed archives (game files are kept)
+          # Remove only the zip(s) just consumed; all extracted files stay
           find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*' -delete || true
-
-          echo "=== Root after extract ==="
-          ls -la
-          if [ -f index.html ]; then
-            echo "OK: index.html present."
-          else
-            echo "NOTE: index.html not at root yet (upload game-code.zip too)."
-          fi
+          echo "=== asset count so far ==="
+          find assets -type f 2>/dev/null | wc -l
 
       - name: Commit and push
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # IMPORTANT: never let an extracted zip modify workflows.
-          # The default GITHUB_TOKEN cannot push changes under .github/ ,
-          # which would otherwise reject the whole push.
+          # Never modify workflows (token cannot push .github)
           git checkout -- .github 2>/dev/null || true
-          rm -f .github/workflows/*.zip 2>/dev/null || true
-
-          # Force-add so a stray .gitignore (e.g. a line like "assets/")
-          # can NEVER silently skip the game images again.
+          # Force-add so a stray .gitignore cannot skip assets
           git add -f -A
-          # Make 100% sure nothing under .github is staged
           git reset -q -- .github 2>/dev/null || true
-
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes."
           else
-            git commit -m "Auto extract ZIP(s) and merge game files [skip ci]"
+            git commit -m "Merge-extract uploaded ZIP [skip ci]"
             git push
-            echo "Pushed extracted files."
+            echo "Merged and pushed."
           fi
