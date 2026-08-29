@@ -1463,7 +1463,7 @@ function openServerModal(srv) {
   document.getElementById('srvAiCount').value = srv ? srv.aiCount : 5;
   document.getElementById('srvInitLevel').value = srv ? srv.initLevel : 1;
   document.getElementById('srvMaxPlayers').value = srv ? srv.maxPlayers : 200;
-  document.getElementById('srvInfo').value = srv ? (s.info || '') : '';
+  document.getElementById('srvInfo').value = srv ? (srv.info || '') : '';
   document.getElementById('serverModal').classList.remove('hidden');
 }
 

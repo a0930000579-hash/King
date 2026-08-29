@@ -374,6 +374,11 @@ function assetUrl(id) {
       return '';
     }
   }
+  // v2.7.0：transform/ 路徑已全部去背為 PNG32，優先 .png
+  if (id.indexOf('transform/') !== -1) {
+    if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
+    return 'assets/' + pureId + '.png';
+  }
   // v2.4.0：語意路徑優先走 manifest；若不在 manifest，嘗試 jpg/png 並以 manifest 結果為準
   // 對於有 / 的語意路徑，優先嘗試 .jpg（多數美術圖為 jpg），其次 .png
   if (id.indexOf('/') !== -1) {
@@ -11568,12 +11573,12 @@ const CLASS_STAT_PREFS = {
 // ===== v2.4.0 創角頁：天堂經典樣式 =====
 // 職業 → 對應真•系列金變 映射
 const CLASS_TRANSFORM_MAP = {
-  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
-  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_fallen_paladin/portrait.jpg' },
-  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_assassin/portrait.jpg' },
-  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_archer/portrait.jpg' },
-  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/transform/gold/true_death_mage/portrait.jpg' },
-  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_sorcerer/portrait.jpg' },
+  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.png' },
+  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_fallen_paladin/portrait.png' },
+  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_assassin/portrait.png' },
+  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_archer/portrait.png' },
+  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/transform/gold/true_death_mage/portrait.png' },
+  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_sorcerer/portrait.png' },
 };
 
 // 職業詳細資訊（繁中）
@@ -19095,9 +19100,9 @@ const TRANSFORM_RARITY_SPEED_BONUS = {
   green:   { walk: 15, atk: 15 },
   blue:    { walk: 20, atk: 20 },
   purple:  { walk: 25, atk: 25 },
-  red:     { walk: 30, atk: 30 },
-  gold:    { walk: 35, atk: 35 },
-  true:    { walk: 45, atk: 45 },  // 真金系列
+  red:     { walk: 35, atk: 35 },
+  gold:    { walk: 45, atk: 45 },
+  true:    { walk: 55, atk: 55 },  // 真金系列
 };
 
 function addTransformBuff() {

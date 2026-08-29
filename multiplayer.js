@@ -328,6 +328,7 @@
     pollAbortController = new AbortController();
     const since = Date.now();
     const url = serverUrl + '/api/mp/poll?map=' + encodeURIComponent(currentMapId)
+      + '&server=' + encodeURIComponent(currentServerId || 'zeus')
       + '&charIdx=' + currentCharIdx
       + '&since=' + since;
 

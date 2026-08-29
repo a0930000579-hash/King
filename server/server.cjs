@@ -170,10 +170,53 @@ function mpCleanupIdle() {
     // 空的地圖狀態清理
     if (players.size === 0) mpMapStates.delete(key);
   }
-  // 更新 mpServerPlayers
+  recomputeMpServerCounts();
+}
+
+/** 重新計算每個 server 的線上人數（從 mpMapStates 合計） */
+function recomputeMpServerCounts() {
+  const serverCounts = {};
+  for (const [key, players] of mpMapStates) {
+    const srvId = key.split(':')[0];
+    serverCounts[srvId] = (serverCounts[srvId] || 0) + players.size;
+  }
   mpServerPlayers.clear();
   for (const [srvId, count] of Object.entries(serverCounts)) {
     mpServerPlayers.set(srvId, count);
+  }
+  // v2.7.0：同步 onlinePlayers（只保留活躍的 long-poll + socket 玩家）
+  // 從 mpMapStates 收集所有活躍 long-poll 玩家
+  const lpPlayers = new Set();
+  for (const [key, players] of mpMapStates) {
+    const srvId = key.split(':')[0];
+    const mapId = key.split(':').slice(1).join(':');
+    for (const [pid, st] of players) {
+      lpPlayers.add(pid);
+      const acc = pid.split(':')[0];
+      // 更新或新增
+      if (!onlinePlayers.has(pid)) {
+        onlinePlayers.set(pid, {
+          socketId: 'lp:' + pid,
+          account: acc,
+          name: st.name || acc,
+          serverId: srvId,
+          mapId,
+          level: st.level || 1,
+          transport: 'long-poll',
+        });
+      } else {
+        const p = onlinePlayers.get(pid);
+        p.lastSeen = Date.now();
+        if (st.name) p.name = st.name;
+        if (st.level) p.level = st.level;
+      }
+    }
+  }
+  // 清除已經不在 map 裡的 long-poll 玩家（socket 的由 socket 事件管理）
+  for (const [k, v] of onlinePlayers) {
+    if (v.transport === 'long-poll' && !lpPlayers.has(k)) {
+      onlinePlayers.delete(k);
+    }
   }
 }
 setInterval(mpCleanupIdle, 5000);
@@ -218,6 +261,18 @@ async function handleMpApi(req, res, pathname, query, account) {
       const mapState = getMapState(serverId, mapId);
       if (mapState.size >= MP_MAX_PLAYERS_PER_MAP) { sendJson(res, 503, { error: '地圖已滿' }); return; }
       mapState.set(playerId, state);
+      // v2.7.0：同步到全服線上列表（給 GM 概況用）
+      onlinePlayers.set(playerId, {
+        socketId: 'lp:' + playerId,
+        account,
+        name: state.name,
+        serverId,
+        mapId,
+        level: state.level,
+        lastSeen: Date.now(),
+        transport: 'long-poll',
+      });
+      recomputeMpServerCounts();
       notifyMapUpdate(serverId, mapId, { type: 'join', playerId, state, time: Date.now() });
       // 返回當前地圖所有玩家（不含自己）
       const others = [];
@@ -243,6 +298,9 @@ async function handleMpApi(req, res, pathname, query, account) {
       mpMapStates.get(key).delete(playerId);
       notifyMapUpdate(serverId, mapId, { type: 'leave', playerId, time: Date.now() });
     }
+    // v2.7.0：從線上列表移除
+    onlinePlayers.delete(playerId);
+    recomputeMpServerCounts();
     sendJson(res, 200, { ok: true });
     return;
   }
@@ -560,9 +618,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.6.0',
-      build: '2.6.0-2608290100',
-      buildId: '2.6.0-2608290100',
+      version: '2.7.0',
+      build: '2.7.0-2608290200',
+      buildId: '2.7.0-2608290200',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -623,7 +681,7 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.6.0',
+      version: '2.7.0',
       build: '2.5.8-2608281900',
       buildId: '2.5.8-2608281900',
       cwd: process.cwd(),
@@ -668,7 +726,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.6.0', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.7.0', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {

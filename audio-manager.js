@@ -112,6 +112,22 @@ const AudioManager = (() => {
     unlocked = true;
     initBgm();
     initSfxPools();
+    // 真正解鎖：在使用者手勢中 play 一個極短靜音，告訴瀏覽器這個 context 已解禁
+    // 對 HTML5 Audio 而言，需要實際呼叫 play() 才會移出自動播放限制黑名單
+    try {
+      const silent = new Audio();
+      silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
+      silent.volume = 0;
+      const p = silent.play();
+      if (p && p.then) p.catch(() => {});
+    } catch (e) { /* ignore */ }
+    // 同時嘗試 resume AudioContext（如果有 WebAudio 模式的話）
+    if (window.AudioContext) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (ctx.state === 'suspended') ctx.resume();
+      } catch (e) { /* ignore */ }
+    }
   }
 
   function ensureUnlocked() {
@@ -321,7 +337,6 @@ const AudioManager = (() => {
     sfxGacha,
     sfxTransform,
     sfxPotion,
-    sfxClick,
     sfxHit,
     sfxTest,
     sfxDeath,
