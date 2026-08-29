@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.5.8 · 正式營運後端伺服器
+ *   君主之刃 v2.6.0 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -108,36 +108,39 @@ function verifyToken(token) {
   } catch (e) { return null; }
 }
 
-// ========== 伺服器清單 ==========
-const SERVERS = [
-  { id: 'zeus', name: '宙斯', desc: '開放 · 順暢', status: 'smooth', online: true },
-  { id: 'hades', name: '黑帝斯', desc: '準備中 · 即將開放', status: 'maintain', online: false },
-];
-
 // ========== 線上玩家狀態（Socket.IO 用） ==========
 const onlinePlayers = new Map(); // socketId -> { account, name, serverId, mapId, ... }
 
 
 // ========== Long-Poll 多人連線狀態 ==========
 // v2.4.0：零依賴 HTTP long-polling 實現真·多人同步
+// v2.6.0：按 serverId 隔離（不同伺服器完全獨立世界）
 const MP_POLL_TIMEOUT = 25000; // 25s long-poll 超時
 const MP_IDLE_TIMEOUT = 30000; // 30s 沒 update 踢離線
 const MP_MAX_PLAYERS_PER_MAP = 200;
 
-/** 地圖玩家狀態：mapId -> Map(playerId -> state) */
+/** 地圖玩家狀態：key = "serverId:mapId" -> Map(playerId -> state) */
 const mpMapStates = new Map();
-/** 等待中的 poll 請求：mapId -> [{ res, since, playerId }] */
+/** 等待中的 poll 請求：key = "serverId:mapId" -> [{ res, since, playerId }] */
 const mpPollWaiters = new Map();
+/** 每個 server 的線上玩家計數：serverId -> number */
+const mpServerPlayers = new Map();
 /** 全服廣播歷史（最新 50 條） */
 const mpBroadcasts = [];
 
-function getMapState(mapId) {
-  if (!mpMapStates.has(mapId)) mpMapStates.set(mapId, new Map());
-  return mpMapStates.get(mapId);
+function mpKey(serverId, mapId) {
+  return (serverId || 'default') + ':' + (mapId || 'default');
 }
 
-function notifyMapUpdate(mapId, event) {
-  const waiters = mpPollWaiters.get(mapId) || [];
+function getMapState(serverId, mapId) {
+  const key = mpKey(serverId, mapId);
+  if (!mpMapStates.has(key)) mpMapStates.set(key, new Map());
+  return mpMapStates.get(key);
+}
+
+function notifyMapUpdate(serverId, mapId, event) {
+  const key = mpKey(serverId, mapId);
+  const waiters = mpPollWaiters.get(key) || [];
   const remaining = [];
   for (const w of waiters) {
     if (w.playerId === event.playerId && event.type === 'move') {
@@ -148,18 +151,29 @@ function notifyMapUpdate(mapId, event) {
       w.res.end(JSON.stringify({ ok: true, events: [event], time: Date.now() }));
     } catch(e) {}
   }
-  mpPollWaiters.set(mapId, remaining);
+  mpPollWaiters.set(key, remaining);
 }
 
 function mpCleanupIdle() {
   const now = Date.now();
-  for (const [mapId, players] of mpMapStates) {
+  const serverCounts = {};
+  for (const [key, players] of mpMapStates) {
+    const [srvId] = key.split(':');
     for (const [pid, p] of players) {
       if (now - p.lastUpdate > MP_IDLE_TIMEOUT) {
         players.delete(pid);
-        notifyMapUpdate(mapId, { type: 'leave', playerId: pid, time: now });
+        notifyMapUpdate(srvId, key.slice(srvId.length + 1), { type: 'leave', playerId: pid, time: now });
+      } else {
+        serverCounts[srvId] = (serverCounts[srvId] || 0) + 1;
       }
     }
+    // 空的地圖狀態清理
+    if (players.size === 0) mpMapStates.delete(key);
+  }
+  // 更新 mpServerPlayers
+  mpServerPlayers.clear();
+  for (const [srvId, count] of Object.entries(serverCounts)) {
+    mpServerPlayers.set(srvId, count);
   }
 }
 setInterval(mpCleanupIdle, 5000);
@@ -168,13 +182,18 @@ setInterval(mpCleanupIdle, 5000);
 async function handleMpApi(req, res, pathname, query, account) {
   if (!account) { sendJson(res, 401, { error: '未登入' }); return; }
 
-  // POST /api/mp/join 加入世界
+  // POST /api/mp/join 加入世界（帶 serverId，按伺服器隔離）
   if (req.method === 'POST' && pathname === '/api/mp/join') {
     const body = await parseJsonBody(req);
     const mapId = body.mapId || 'village_01';
     const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx ?? 0;
     try {
+      // 校驗伺服器存在且狀態為 open
+      const srv = await db.getServer(serverId);
+      if (!srv) { sendJson(res, 404, { error: '伺服器不存在' }); return; }
+      if (srv.status !== 'open') { sendJson(res, 403, { error: '伺服器未開放', status: srv.status }); return; }
+      
       const charData = await db.getCharacter(account, serverId, charIdx);
       if (!charData || (!charData.save_data && !charData.player && !charData.name)) { sendJson(res, 404, { error: '角色不存在' }); return; }
       const sd = charData.save_data || charData;
@@ -183,6 +202,7 @@ async function handleMpApi(req, res, pathname, query, account) {
         playerId,
         account,
         charIdx,
+        serverId,
         name: sd.player ? sd.player.name : account,
         level: sd.player ? sd.player.level : 1,
         classId: sd.player ? sd.player.classId : 'warrior',
@@ -195,16 +215,16 @@ async function handleMpApi(req, res, pathname, query, account) {
         transformId: sd.transformId || null,
         lastUpdate: Date.now(),
       };
-      const mapState = getMapState(mapId);
+      const mapState = getMapState(serverId, mapId);
       if (mapState.size >= MP_MAX_PLAYERS_PER_MAP) { sendJson(res, 503, { error: '地圖已滿' }); return; }
       mapState.set(playerId, state);
-      notifyMapUpdate(mapId, { type: 'join', playerId, state, time: Date.now() });
+      notifyMapUpdate(serverId, mapId, { type: 'join', playerId, state, time: Date.now() });
       // 返回當前地圖所有玩家（不含自己）
       const others = [];
       for (const [pid, s] of mapState) {
         if (pid !== playerId) others.push(s);
       }
-      sendJson(res, 200, { ok: true, playerId, others, mapId, time: Date.now() });
+      sendJson(res, 200, { ok: true, playerId, others, mapId, serverId, time: Date.now() });
     } catch(e) {
       sendJson(res, 500, { error: e.message });
     }
@@ -215,24 +235,27 @@ async function handleMpApi(req, res, pathname, query, account) {
   if (req.method === 'POST' && pathname === '/api/mp/leave') {
     const body = await parseJsonBody(req);
     const mapId = body.mapId;
+    const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx ?? 0;
     const playerId = account + ':' + charIdx;
-    if (mapId && mpMapStates.has(mapId)) {
-      mpMapStates.get(mapId).delete(playerId);
-      notifyMapUpdate(mapId, { type: 'leave', playerId, time: Date.now() });
+    const key = mpKey(serverId, mapId);
+    if (mapId && mpMapStates.has(key)) {
+      mpMapStates.get(key).delete(playerId);
+      notifyMapUpdate(serverId, mapId, { type: 'leave', playerId, time: Date.now() });
     }
     sendJson(res, 200, { ok: true });
     return;
   }
 
-  // POST /api/mp/update 上傳自身狀態並等待更新
+  // POST /api/mp/update 上傳自身狀態
   if (req.method === 'POST' && pathname === '/api/mp/update') {
     const body = await parseJsonBody(req);
     const mapId = body.mapId;
+    const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx ?? 0;
     const playerId = account + ':' + charIdx;
     if (!mapId) { sendJson(res, 400, { error: '缺少 mapId' }); return; }
-    const mapState = getMapState(mapId);
+    const mapState = getMapState(serverId, mapId);
     const state = mapState.get(playerId);
     if (!state) { sendJson(res, 401, { error: '未加入此地圖，請先 join' }); return; }
     // 更新狀態
@@ -243,33 +266,31 @@ async function handleMpApi(req, res, pathname, query, account) {
     if (body.transformId != null) state.transformId = body.transformId;
     state.lastUpdate = Date.now();
     // 廣播給其他等待中的人
-    notifyMapUpdate(mapId, {
+    notifyMapUpdate(serverId, mapId, {
       type: 'move',
       playerId,
       x: state.x, y: state.y, dir: state.dir,
       hp: state.hp, transformId: state.transformId,
       time: Date.now(),
     });
-    // 立即返回（不等 long-poll，客戶端另外用 GET /api/mp/poll 拉）
     sendJson(res, 200, { ok: true, time: Date.now() });
     return;
   }
 
-  // GET /api/mp/poll long-poll 拉取更新
+  // GET /api/mp/poll long-poll 拉取更新（按 serverId 隔離）
   if (req.method === 'GET' && pathname === '/api/mp/poll') {
     const mapId = query.map;
+    const serverId = query.server || 'zeus';
     const charIdx = query.charIdx ? parseInt(query.charIdx) : 0;
     const playerId = account + ':' + charIdx;
     const since = query.since ? parseInt(query.since) : 0;
     if (!mapId) { sendJson(res, 400, { error: '缺少 map' }); return; }
-    // 檢查是否有新的廣播（全服）
     const newBcasts = mpBroadcasts.filter(b => b.time > since);
-    // 掛起等待
-    if (!mpPollWaiters.has(mapId)) mpPollWaiters.set(mapId, []);
-    const waiters = mpPollWaiters.get(mapId);
+    const key = mpKey(serverId, mapId);
+    if (!mpPollWaiters.has(key)) mpPollWaiters.set(key, []);
+    const waiters = mpPollWaiters.get(key);
     const entry = { res, since, playerId, startTime: Date.now() };
     waiters.push(entry);
-    // 超時返回空
     setTimeout(() => {
       const idx = waiters.indexOf(entry);
       if (idx >= 0) {
@@ -279,7 +300,6 @@ async function handleMpApi(req, res, pathname, query, account) {
         } catch(e) {}
       }
     }, MP_POLL_TIMEOUT);
-    // 如果當時就有廣播，提前返回
     if (newBcasts.length > 0) {
       const idx = waiters.indexOf(entry);
       if (idx >= 0) {
@@ -296,12 +316,13 @@ async function handleMpApi(req, res, pathname, query, account) {
   if (req.method === 'POST' && pathname === '/api/mp/chat') {
     const body = await parseJsonBody(req);
     const mapId = body.mapId;
+    const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx ?? 0;
     const playerId = account + ':' + charIdx;
     const channel = body.channel || 'map';
     const text = (body.text || '').slice(0, 200);
     if (!mapId || !text) { sendJson(res, 400, { error: '參數錯誤' }); return; }
-    const mapState = getMapState(mapId);
+    const mapState = getMapState(serverId, mapId);
     const state = mapState.get(playerId);
     if (!state) { sendJson(res, 401, { error: '未加入' }); return; }
     const chatEvent = {
@@ -312,7 +333,7 @@ async function handleMpApi(req, res, pathname, query, account) {
       text,
       time: Date.now(),
     };
-    notifyMapUpdate(mapId, chatEvent);
+    notifyMapUpdate(serverId, mapId, chatEvent);
     sendJson(res, 200, { ok: true });
     return;
   }
@@ -321,13 +342,14 @@ async function handleMpApi(req, res, pathname, query, account) {
   if (req.method === 'POST' && pathname === '/api/mp/attack') {
     const body = await parseJsonBody(req);
     const mapId = body.mapId;
+    const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx ?? 0;
     const playerId = account + ':' + charIdx;
     const targetId = body.targetId;
     if (!mapId) { sendJson(res, 400, { error: '缺少 mapId' }); return; }
-    const mapState = getMapState(mapId);
+    const mapState = getMapState(serverId, mapId);
     if (!mapState.has(playerId)) { sendJson(res, 401, { error: '未加入' }); return; }
-    notifyMapUpdate(mapId, {
+    notifyMapUpdate(serverId, mapId, {
       type: 'attack',
       playerId,
       targetId,
@@ -477,7 +499,11 @@ function serveStatic(req, res, pathname) {
     }
     // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.5.8-code.zip',
+      '/game-code.zip': 'monarch-blade-v2.6.0-code.zip',
+      '/game-code-2.6.0.zip': 'monarch-blade-v2.6.0-code.zip',
+      '/update-2.6.0-code.zip': 'update-2.6.0-code.zip',
+      '/game-code-2.5.9.zip': 'monarch-blade-v2.5.9-code.zip',
+      '/update-2.5.9-code.zip': 'update-2.5.9-code.zip',
       '/game-code-2.5.8.zip': 'monarch-blade-v2.5.8-code.zip',
       '/update-2.5.8-code.zip': 'update-2.5.8-code.zip',
       '/game-code-2.5.7.zip': 'monarch-blade-v2.5.7-code.zip',
@@ -534,9 +560,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.5.8',
-      build: '2.5.8-2608281900',
-      buildId: '2.5.8-2608281900',
+      version: '2.6.0',
+      build: '2.6.0-2608290100',
+      buildId: '2.6.0-2608290100',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -597,7 +623,7 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.5.8',
+      version: '2.6.0',
       build: '2.5.8-2608281900',
       buildId: '2.5.8-2608281900',
       cwd: process.cwd(),
@@ -642,7 +668,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.5.8', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.6.0', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -930,13 +956,34 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
-  // === 伺服器列表 ===
+  // === 伺服器列表（公開 API，僅回傳 GM 建立的伺服器）===
   if (req.method === 'GET' && pathname === '/api/servers') {
-    const list = SERVERS.map(s => ({
-      ...s,
-      players: Array.from(onlinePlayers.values()).filter(p => p.serverId === s.id).length,
-    }));
-    return sendJson(res, 200, { ok: true, servers: list });
+    try {
+      const list = await db.listServers();
+      // 計算線上人數（long-poll 地圖狀態）
+      const onlineCount = {};
+      for (const [mapId, players] of mpMapStates) {
+        for (const [pid, p] of players) {
+          const srvId = p.serverId || (pid.split(':')[0] + ':default');
+          // 從 pid 推算 serverId 不可靠，這裡用 mpMapStatesByServer 替代
+        }
+      }
+      const servers = list.map(s => ({
+        id: s.id,
+        name: s.name,
+        status: s.status, // open / preparing / closed
+        desc: s.status === 'open' ? '開放 · 順暢' : s.status === 'preparing' ? '準備中 · 即將開放' : '維護中',
+        online: s.status === 'open',
+        players: (mpServerPlayers.get(s.id) || 0),
+        maxPlayers: s.maxPlayers,
+        aiCount: s.aiCount,
+        initLevel: s.initLevel,
+        info: s.info || '',
+      }));
+      return sendJson(res, 200, { ok: true, servers });
+    } catch(e) {
+      return sendJson(res, 500, { error: e.message });
+    }
   }
 
   // === 角色存檔 ===
@@ -1202,6 +1249,92 @@ async function handleApi(req, res, pathname, query) {
     } catch (e) {
       console.error('[GM] reset-logs 失敗:', e.message);
       return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ===== v2.6.0：GM 伺服器管理 =====
+
+  // GET /api/gm/server/list - 列出所有伺服器
+  if (req.method === 'GET' && pathname === '/api/gm/server/list') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    try {
+      const list = await db.listServers();
+      // 附加線上人數
+      const withOnline = list.map(s => ({
+        ...s,
+        onlineCount: mpServerPlayers.get(s.id) || 0,
+      }));
+      return sendJson(res, 200, { ok: true, servers: withOnline });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/server/create - 新增伺服器
+  if (req.method === 'POST' && pathname === '/api/gm/server/create') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const gmAcc = await getAuthAccount(req);
+    try {
+      const srv = await db.createServer(body);
+      await db.logGMAction(gmAcc, null, 'server_create', { id: srv.id, name: srv.name });
+      return sendJson(res, 200, { ok: true, server: srv });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/server/update - 更新伺服器
+  if (req.method === 'POST' && pathname === '/api/gm/server/update') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const id = body.id;
+    if (!id) return sendJson(res, 400, { error: '缺少 id' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      const srv = await db.updateServer(id, body);
+      await db.logGMAction(gmAcc, null, 'server_update', { id, changes: Object.keys(body).filter(k => k !== 'id') });
+      return sendJson(res, 200, { ok: true, server: srv });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/server/delete - 刪除伺服器
+  if (req.method === 'POST' && pathname === '/api/gm/server/delete') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const id = body.id;
+    if (!id) return sendJson(res, 400, { error: '缺少 id' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      await db.deleteServer(id);
+      await db.logGMAction(gmAcc, null, 'server_delete', { id });
+      return sendJson(res, 200, { ok: true });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/server/toggle - 切換狀態（open/preparing/closed）
+  if (req.method === 'POST' && pathname === '/api/gm/server/toggle') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const id = body.id;
+    const status = body.status;
+    if (!id || !status) return sendJson(res, 400, { error: '缺少參數' });
+    if (!['open', 'preparing', 'closed'].includes(status)) return sendJson(res, 400, { error: '狀態無效' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      const srv = await db.updateServer(id, { status });
+      await db.logGMAction(gmAcc, null, 'server_toggle', { id, status });
+      return sendJson(res, 200, { ok: true, server: srv });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
     }
   }
 
@@ -2285,7 +2418,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.5.6 · 正式營運伺服器');
+    console.log('  君主之刃 v2.6.0 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());

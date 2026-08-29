@@ -126,17 +126,15 @@
   }
 
   // ========== 伺服器列表 ==========
+  // v2.6.0：伺服器完全由 GM 建立，客戶端不得本地生成或 fallback
   async function loadServerList() {
     try {
       const data = await api('/servers');
       serverList = data.servers || [];
       return serverList;
     } catch (e) {
-      // 連線模式 fallback：顯示兩個神話伺服器
-      serverList = [
-        { id: 'zeus', name: '宙斯', desc: '開放 · 順暢', status: 'smooth', players: 0, online: true },
-        { id: 'hades', name: '黑帝斯', desc: '準備中 · 即將開放', status: 'maintain', players: 0, online: false },
-      ];
+      // v2.6.0：連線失敗時顯示空清單，不允許 fallback 出私人世界
+      serverList = [];
       return serverList;
     }
   }
@@ -463,16 +461,38 @@
 
   // ========== 伺服器選擇 ==========
   function renderServerSelect() {
-    const items = serverList.map(s => {
-      const statusClass = {
-        smooth: '順暢', busy: '擁擠', full: '滿員', maintain: '維護'
-      }[s.status] || s.status;
+    if (serverList.length === 0) {
       return `
-        <div class="server-card ${s.online === false ? 'disabled' : ''}" data-server-id="${s.id}">
-          <div class="server-status-dot ${s.status}"></div>
+        <div class="auth-fullpage">
+          <div class="auth-fullpage-inner">
+            <div class="auth-back-row">
+              <button class="auth-back-btn" id="btn-server-back">‹ 返回首頁</button>
+            </div>
+            <div class="server-select-title">選 擇 伺 服 器</div>
+            <div class="server-select-sub">目前無可用伺服器</div>
+            <div style="margin-top:40px;padding:30px;color:#8a6a2a;text-align:center;border:1px dashed #4a3818;border-radius:8px">
+              伺服器清單為空，請聯繫 GM 開放伺服器。<br/>
+              <span style="font-size:12px;opacity:.6">v2.6.0 起伺服器由 GM 統一管理</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    const items = serverList.map(s => {
+      // v2.6.0 新狀態：open / preparing / closed
+      let statusLabel = '順暢';
+      let statusClass = 'smooth';
+      let disabled = false;
+      if (s.status === 'preparing') { statusLabel = '準備中'; statusClass = 'maintain'; disabled = true; }
+      else if (s.status === 'closed') { statusLabel = '維護中'; statusClass = 'maintain'; disabled = true; }
+      else if (s.status === 'open') { statusLabel = '順暢'; statusClass = 'smooth'; disabled = false; }
+      else { statusLabel = s.status || '未知'; statusClass = 'maintain'; disabled = true; }
+      return `
+        <div class="server-card ${disabled ? 'disabled' : ''}" data-server-id="${s.id}" data-server-status="${s.status}">
+          <div class="server-status-dot ${statusClass}"></div>
           <div class="server-info">
             <div class="server-name">${s.name}</div>
-            <div class="server-desc">${statusClass} · 在線 ${s.players != null ? s.players : '--'} 人</div>
+            <div class="server-desc">${statusLabel} · 在線 ${s.players != null ? s.players : '--'} 人</div>
           </div>
           <div class="server-arrow">›</div>
         </div>
@@ -783,21 +803,27 @@
         if (btnRegBack) btnRegBack.addEventListener('click', () => switchView('home'));
         break;
        case 'server':
-        document.querySelectorAll('.server-card').forEach(card => {
-          card.addEventListener('click', () => {
-            const sid = card.dataset.serverId;
-            const srv = serverList.find(s => s.id === sid);
-            if (!srv) return;
-            if (srv.online === false) {
-              // 鎖定伺服器：顯示提示，不進入
-              showToast('黑帝斯伺服器準備中，敬請期待');
-              return;
-            }
-            enterServer(srv);
-          });
-        });
-        $('btn-server-back').addEventListener('click', () => switchView('home'));
-        break;
+         document.querySelectorAll('.server-card').forEach(card => {
+           card.addEventListener('click', () => {
+             const sid = card.dataset.serverId;
+             const srv = serverList.find(s => s.id === sid);
+             if (!srv) return;
+             // v2.6.0：只有 open 狀態可進入
+             if (srv.status !== 'open') {
+               if (srv.status === 'preparing') {
+                 showToast(srv.name + ' 伺服器準備中，敬請期待');
+               } else if (srv.status === 'closed') {
+                 showToast(srv.name + ' 伺服器維護中，暫時無法進入');
+               } else {
+                 showToast(srv.name + ' 暫不可進入');
+               }
+               return;
+             }
+             enterServer(srv);
+           });
+         });
+         $('btn-server-back').addEventListener('click', () => switchView('home'));
+         break;
       case 'char':
         // v2.5.6：卡片式版面，改用事件委派在 .char-card-grid 上
         const grid = document.querySelector('.char-card-grid');

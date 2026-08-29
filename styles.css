@@ -645,8 +645,8 @@ img { display: block; pointer-events: none; }
   will-change: left, top;
 }
 
-/* ========== 单张角色图 + CSS 动画精灵系统 ==========
-   彻底替代 8 帧精灵图，彻底避免多帧堆叠问题 */
+/* ========== 全身精靈圖顯示系統 ==========
+   v2.6.0：移除橢圓蒙版與拱門邊框，顯示完整全身角色圖 */
 .unit-sprite-wrap {
   position: relative;
   overflow: visible;
@@ -655,18 +655,11 @@ img { display: block; pointer-events: none; }
   display: block;
   transform-origin: center bottom;
   pointer-events: none;
-  /* 拱门形外框：椭圆形顶部 + 收窄底部，模拟经典 MMORPG 角色外框 */
-  border-radius: 50% 50% 45% 45% / 40% 40% 60% 60%;
-  box-shadow: inset 0 0 0 1px rgba(255,220,140,0.2),
-              0 2px 8px rgba(0,0,0,0.6);
-  /* 拱门形蒙版 + 底部柔和淡出，让角色自然融入场景 */
-  -webkit-mask-image: radial-gradient(ellipse 60% 80% at 50% 40%, #000 50%, transparent 85%);
-          mask-image: radial-gradient(ellipse 60% 80% at 50% 40%, #000 50%, transparent 85%);
-  -webkit-mask-size: 100% 100%;
-          mask-size: 100% 100%;
-  -webkit-mask-repeat: no-repeat;
-          mask-repeat: no-repeat;
-  /* 柔和阴影 */
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-mask-image: none;
+          mask-image: none;
+  /* 柔和陰影 */
   filter: drop-shadow(2px 4px 4px rgba(0,0,0,0.5))
           drop-shadow(0 1px 1px rgba(0,0,0,0.3));
   will-change: transform;
@@ -751,8 +744,8 @@ img { display: block; pointer-events: none; }
 
 /* ---- 竖版肖像多帧精灵：cover模式让角色填满容器 ---- */
 .unit-sprite-wrap.sprite-cover-mode .unit-sprite-img {
-  object-fit: cover;
-  object-position: center 30%;
+  object-fit: contain;
+  object-position: center bottom;
 }
 
 /* ---- 单张图模式：CSS 轻微上下浮动模拟呼吸感 ---- */

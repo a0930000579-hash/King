@@ -254,6 +254,16 @@ async function initPgSchema() {
     `CREATE INDEX IF NOT EXISTS idx_characters_name ON characters(name)`,
     `CREATE INDEX IF NOT EXISTS idx_bug_reports_created ON bug_reports(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(active, type)`,
+    `CREATE TABLE IF NOT EXISTS game_servers (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(128) NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'closed',
+      ai_count INTEGER NOT NULL DEFAULT 5,
+      init_level INTEGER NOT NULL DEFAULT 1,
+      max_players INTEGER NOT NULL DEFAULT 200,
+      info TEXT DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
   ];
   for (const sql of statements) {
     try { await pgPool.query(sql); }
@@ -285,7 +295,135 @@ async function initPgSchema() {
       ON CONFLICT (key) DO NOTHING
     `);
   } catch (e) { console.warn('[DB] config seed 跳過:', e.message); }
+  // 預設伺服器（首次 seed：宙斯 open、克洛諾斯 preparing）
+  try {
+    await pgPool.query(`
+      INSERT INTO game_servers (id, name, status, ai_count, init_level, max_players, info)
+      VALUES
+        ('zeus', '宙斯', 'open', 8, 1, 200, '希臘神王，開放中'),
+        ('cronus', '克洛諾斯', 'preparing', 6, 1, 200, '泰坦之王，準備中')
+      ON CONFLICT (id) DO NOTHING
+    `);
+  } catch (e) { console.warn('[DB] server seed 跳過:', e.message); }
   console.log('[DB] Schema 初始化完成');
+}
+
+// ==================== 遊戲伺服器 API ====================
+async function listServers() {
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const { rows } = await pgPool.query(
+      'SELECT id, name, status, ai_count as "aiCount", init_level as "initLevel", max_players as "maxPlayers", info, created_at as "createdAt" FROM game_servers ORDER BY created_at ASC'
+    );
+    return rows.map(r => ({
+      id: r.id, name: r.name, status: r.status,
+      aiCount: r.aiCount, initLevel: r.initLevel,
+      maxPlayers: r.maxPlayers, info: r.info || '',
+      createdAt: r.createdAt && r.createdAt.toISOString ? r.createdAt.toISOString() : r.createdAt,
+    }));
+  } else {
+    let servers = loadJSON('game-servers.json', null);
+    if (!servers || !Array.isArray(servers)) {
+      // 首次 seed
+      servers = [
+        { id: 'zeus', name: '宙斯', status: 'open', aiCount: 8, initLevel: 1, maxPlayers: 200, info: '希臘神王，開放中', createdAt: new Date().toISOString() },
+        { id: 'cronus', name: '克洛諾斯', status: 'preparing', aiCount: 6, initLevel: 1, maxPlayers: 200, info: '泰坦之王，準備中', createdAt: new Date().toISOString() },
+      ];
+      saveJSON('game-servers.json', servers);
+    }
+    return servers;
+  }
+}
+
+async function getServer(id) {
+  const list = await listServers();
+  return list.find(s => s.id === id) || null;
+}
+
+async function createServer(data) {
+  if (!data || !data.id || !data.name) throw new Error('缺少必要欄位');
+  const id = String(data.id).trim();
+  const name = String(data.name).trim();
+  const status = ['open', 'preparing', 'closed'].includes(data.status) ? data.status : 'closed';
+  const aiCount = Math.max(0, parseInt(data.aiCount) || 0);
+  const initLevel = Math.max(1, Math.min(99, parseInt(data.initLevel) || 1));
+  const maxPlayers = Math.max(1, parseInt(data.maxPlayers) || 200);
+  const info = String(data.info || '');
+  const server = { id, name, status, aiCount, initLevel, maxPlayers, info, createdAt: new Date().toISOString() };
+  if (backend === 'postgres') {
+    await ensureSchema();
+    try {
+      await pgPool.query(
+        'INSERT INTO game_servers (id, name, status, ai_count, init_level, max_players, info) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [id, name, status, aiCount, initLevel, maxPlayers, info]
+      );
+    } catch (e) {
+      if (e.code === '23505') throw new Error('伺服器ID已存在');
+      throw e;
+    }
+  } else {
+    const list = loadJSON('game-servers.json', []);
+    if (list.find(s => s.id === id)) throw new Error('伺服器ID已存在');
+    list.push(server);
+    saveJSON('game-servers.json', list);
+  }
+  return server;
+}
+
+async function updateServer(id, data) {
+  if (!id) throw new Error('缺少伺服器ID');
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (data.name != null) { fields.push(`name = ${idx++}`); values.push(String(data.name)); }
+    if (data.status != null) {
+      const s = ['open', 'preparing', 'closed'].includes(data.status) ? data.status : 'closed';
+      fields.push(`status = ${idx++}`); values.push(s);
+    }
+    if (data.aiCount != null) { fields.push(`ai_count = ${idx++}`); values.push(Math.max(0, parseInt(data.aiCount) || 0)); }
+    if (data.initLevel != null) { fields.push(`init_level = ${idx++}`); values.push(Math.max(1, Math.min(99, parseInt(data.initLevel) || 1))); }
+    if (data.maxPlayers != null) { fields.push(`max_players = ${idx++}`); values.push(Math.max(1, parseInt(data.maxPlayers) || 200)); }
+    if (data.info != null) { fields.push(`info = ${idx++}`); values.push(String(data.info)); }
+    if (fields.length === 0) return getServer(id);
+    values.push(id);
+    const { rowCount } = await pgPool.query(
+      `UPDATE game_servers SET ${fields.join(', ')} WHERE id = ${idx}`,
+      values
+    );
+    if (rowCount === 0) throw new Error('伺服器不存在');
+  } else {
+    const list = loadJSON('game-servers.json', []);
+    const idx = list.findIndex(s => s.id === id);
+    if (idx < 0) throw new Error('伺服器不存在');
+    const s = list[idx];
+    if (data.name != null) s.name = String(data.name);
+    if (data.status != null) s.status = ['open', 'preparing', 'closed'].includes(data.status) ? data.status : 'closed';
+    if (data.aiCount != null) s.aiCount = Math.max(0, parseInt(data.aiCount) || 0);
+    if (data.initLevel != null) s.initLevel = Math.max(1, Math.min(99, parseInt(data.initLevel) || 1));
+    if (data.maxPlayers != null) s.maxPlayers = Math.max(1, parseInt(data.maxPlayers) || 200);
+    if (data.info != null) s.info = String(data.info);
+    list[idx] = s;
+    saveJSON('game-servers.json', list);
+  }
+  return getServer(id);
+}
+
+async function deleteServer(id) {
+  if (!id) throw new Error('缺少伺服器ID');
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const { rowCount } = await pgPool.query('DELETE FROM game_servers WHERE id = $1', [id]);
+    if (rowCount === 0) throw new Error('伺服器不存在');
+  } else {
+    const list = loadJSON('game-servers.json', []);
+    const idx = list.findIndex(s => s.id === id);
+    if (idx < 0) throw new Error('伺服器不存在');
+    list.splice(idx, 1);
+    saveJSON('game-servers.json', list);
+  }
+  return true;
 }
 
 // ==================== 帳號 API ====================
@@ -1129,9 +1267,9 @@ async function getStats() {
     await ensureSchema();
     const tables = [
       'accounts', 'characters', 'account_shared', 'warehouse_logs',
-      'gm_action_logs', 'announcements', 'game_config', 'castle_states',
-      'custom_items', 'bug_reports',
-    ];
+       'gm_action_logs', 'announcements', 'game_config', 'castle_states',
+       'custom_items', 'bug_reports', 'game_servers',
+     ];
     const result = {};
     for (const t of tables) {
       try {
@@ -1162,6 +1300,7 @@ async function getStats() {
       castle_states: Object.keys(loadJSON('castle-states.json', {})).length,
       custom_items: Object.keys(loadJSON('custom-items.json', {})).length,
       bug_reports: loadJSON('bug-reports.json', []).length,
+      game_servers: loadJSON('game-servers.json', []).length,
     };
     return counts;
   }
@@ -1419,6 +1558,12 @@ module.exports = {
   // 遊戲參數
   getGameConfig,
   setGameConfig,
+  // 伺服器管理
+  listServers,
+  getServer,
+  createServer,
+  updateServer,
+  deleteServer,
   // 攻城戰
   getCastleStates,
   updateCastleState,

@@ -550,15 +550,77 @@
   .toast.error { border-color: #c06060; color: #f06060; }
   .toast.success { border-color: #60c060; color: #60c060; }
 
-  /* 響應式 */
+  /* 響應式：手機改為 drawer 模式 */
   @media (max-width: 768px) {
-    .sidebar { width: 60px; }
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: -260px;
+      width: 240px;
+      height: 100vh;
+      z-index: 1000;
+      transition: left 0.3s ease;
+      overflow-y: auto;
+    }
+    .sidebar.open { left: 0; }
     .sidebar-logo h2, .sidebar-logo .gm-badge,
-    .nav-item span, .sidebar-footer .gm-account { display: none; }
-    .nav-item { justify-content: center; padding: 14px 0; }
-    .main { margin-left: 60px; padding: 16px; }
+    .nav-item span:not(.icon), .sidebar-footer .gm-account { display: block; }
+    .nav-item { justify-content: flex-start; padding: 12px 16px; }
+    .main { margin-left: 0; padding: 16px; padding-top: 56px; }
     .modal { width: 95%; }
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .gm-mobile-header {
+      display: flex;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: linear-gradient(180deg, #1a1208, #120a04);
+      border-bottom: 1px solid #3a2a15;
+      align-items: center;
+      padding: 0 12px;
+      z-index: 999;
+      gap: 12px;
+    }
+    .gm-hamburger {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      background: #2a1a08;
+      border: 1px solid #4a3015;
+      border-radius: 4px;
+    }
+    .gm-hamburger span {
+      display: block;
+      width: 20px;
+      height: 2px;
+      background: #c8a868;
+      border-radius: 1px;
+    }
+    .gm-mobile-title {
+      color: #e8c060;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .gm-drawer-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 999;
+    }
+    .gm-drawer-overlay.open { display: block; }
+  }
+
+  @media (min-width: 769px) {
+    .gm-mobile-header, .gm-drawer-overlay { display: none !important; }
   }
 
   .hidden { display: none !important; }
@@ -629,8 +691,16 @@
 
 <!-- ===== 後台主體 ===== -->
 <div class="app hidden" id="app">
+  <!-- 手機版頂部欄 -->
+  <div class="gm-mobile-header">
+    <div class="gm-hamburger" onclick="toggleDrawer()">
+      <span></span><span></span><span></span>
+    </div>
+    <div class="gm-mobile-title">GM 後台</div>
+  </div>
+  <div class="gm-drawer-overlay" onclick="toggleDrawer()"></div>
   <!-- 側邊欄 -->
-  <div class="sidebar">
+  <div class="sidebar" id="gmSidebar">
     <div class="sidebar-logo">
       <h2>GM 後台</h2>
       <span class="gm-badge">MONARCH BLADE</span>
@@ -638,35 +708,35 @@
     <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
       <span class="icon">⚔</span><span>概況儀表板</span>
     </div>
+    <div class="nav-item" data-page="online" onclick="switchPage('online')">
+      <span class="icon">👥</span><span>線上玩家</span>
+    </div>
     <div class="nav-item" data-page="players" onclick="switchPage('players')">
       <span class="icon">👤</span><span>玩家管理</span>
     </div>
-    <div class="nav-item" data-page="broadcast" onclick="switchPage('broadcast')">
-      <span class="icon">📢</span><span>全服廣播</span>
-    </div>
     <div class="nav-item" data-page="reward" onclick="switchPage('reward')">
-      <span class="icon">🎁</span><span>發放獎勵</span>
+      <span class="icon">🎁</span><span>道具/裝備管理</span>
     </div>
-    <div class="nav-item" data-page="items" onclick="switchPage('items')">
-      <span class="icon">⚔</span><span>道具編輯器</span>
-    </div>
-    <div class="nav-item" data-page="castle" onclick="switchPage('castle')">
-      <span class="icon">🏰</span><span>攻城戰設定</span>
+    <div class="nav-item" data-page="transform" onclick="switchPage('transform')">
+      <span class="icon">✦</span><span>變身管理</span>
     </div>
     <div class="nav-item" data-page="announce" onclick="switchPage('announce')">
-      <span class="icon">📣</span><span>遊戲公告</span>
+      <span class="icon">📣</span><span>公告管理</span>
     </div>
-    <div class="nav-item" data-page="config" onclick="switchPage('config')">
-      <span class="icon">⚙</span><span>遊戲參數</span>
+    <div class="nav-item" data-page="castle" onclick="switchPage('castle')">
+      <span class="icon">🏰</span><span>攻城/城堡設定</span>
     </div>
-    <div class="nav-item" data-page="gmlog" onclick="switchPage('gmlog')">
-      <span class="icon">📋</span><span>GM 日誌</span>
-    </div>
-    <div class="nav-item" data-page="bug" onclick="switchPage('bug')">
-      <span class="icon">🐛</span><span>Bug 回報</span>
+    <div class="nav-item highlight" data-page="servers" onclick="switchPage('servers')">
+      <span class="icon">🌐</span><span>★伺服器管理</span>
     </div>
     <div class="nav-item danger" data-page="database" onclick="switchPage('database')">
       <span class="icon">☠</span><span>資料庫管理</span>
+    </div>
+    <div class="nav-item" data-page="gmlog" onclick="switchPage('gmlog')">
+      <span class="icon">📋</span><span>操作日誌</span>
+    </div>
+    <div class="nav-item" data-page="bug" onclick="switchPage('bug')">
+      <span class="icon">🐛</span><span>Bug 回報</span>
     </div>
     <div class="sidebar-footer">
       <div class="gm-account" id="gmAccount">--</div>
@@ -1043,6 +1113,86 @@
       </div>
     </div>
 
+    <!-- ===== 伺服器管理（v2.6.0 新增） ===== -->
+    <div class="page hidden" id="page-servers">
+      <div class="page-header">
+        <h2 style="color:#60d0ff;">🌐 伺服器管理</h2>
+        <div class="desc">建立與管理遊戲伺服器，控制開放狀態、人數上限與初始設定</div>
+      </div>
+      <div class="card">
+        <div class="flex justify-between items-center">
+          <h3>伺服器清單</h3>
+          <button class="btn btn-sm" onclick="openServerModal()">+ 新增伺服器</button>
+        </div>
+        <div style="margin-top:12px;">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名稱</th>
+                <th>狀態</th>
+                <th>AI數量</th>
+                <th>初始等級</th>
+                <th>人數上限</th>
+                <th>線上</th>
+                <th>建立時間</th>
+                <th style="width:200px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="serverTableBody">
+              <tr><td colspan="9" style="text-align:center;color:#8a6a2a;padding:24px;">載入中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 伺服器編輯彈窗 -->
+    <div class="modal hidden" id="serverModal">
+      <div class="modal-header">
+        <h3 id="serverModalTitle">新增伺服器</h3>
+        <button class="modal-close" onclick="closeServerModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>伺服器 ID <span style="color:#e05050;">*</span></label>
+          <input type="text" id="srvId" placeholder="例如：zeus" maxlength="32">
+        </div>
+        <div class="form-row">
+          <label>伺服器名稱 <span style="color:#e05050;">*</span></label>
+          <input type="text" id="srvName" placeholder="例如：宙斯" maxlength="32">
+        </div>
+        <div class="form-row">
+          <label>狀態</label>
+          <select id="srvStatus">
+            <option value="open">open - 玩家可進入</option>
+            <option value="preparing">preparing - 準備中（顯示鎖定）</option>
+            <option value="closed">closed - 維護中</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>AI 數量</label>
+          <input type="number" id="srvAiCount" value="5" min="0" max="50">
+        </div>
+        <div class="form-row">
+          <label>初始等級</label>
+          <input type="number" id="srvInitLevel" value="1" min="1" max="99">
+        </div>
+        <div class="form-row">
+          <label>人數上限</label>
+          <input type="number" id="srvMaxPlayers" value="200" min="1" max="1000">
+        </div>
+        <div class="form-row">
+          <label>伺服器資訊</label>
+          <textarea id="srvInfo" rows="3" placeholder="伺服器描述或備註"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeServerModal()">取消</button>
+        <button class="btn" onclick="saveServer()">儲存</button>
+      </div>
+    </div>
+
     <!-- ===== 資料庫管理（危險區塊） ===== -->
     <div class="page hidden" id="page-database">
       <div class="page-header">
@@ -1064,6 +1214,7 @@
           <div class="stat-card"><div class="value" id="dbStat-game_config">--</div><div class="label">遊戲參數</div></div>
           <div class="stat-card"><div class="value" id="dbStat-castle_states">--</div><div class="label">城堡狀態</div></div>
           <div class="stat-card"><div class="value" id="dbStat-custom_items">--</div><div class="label">自定義道具</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-game_servers">--</div><div class="label">伺服器</div></div>
         </div>
         <div class="mt-16 flex gap-10">
           <button class="btn btn-sm btn-ghost" onclick="loadDbStats()">重新整理</button>
@@ -1233,6 +1384,169 @@ function switchPage(page) {
   else if (page === 'gmlog') loadGMLogs();
   else if (page === 'bug') loadBugs();
   else if (page === 'database') loadDbStats();
+  else if (page === 'servers') loadServerList();
+  // 手機版：切頁後關閉 drawer
+  if (window.innerWidth <= 768) closeDrawer();
+}
+
+// ===== 手機版 Drawer 切換 =====
+function toggleDrawer() {
+  const sidebar = document.getElementById('gmSidebar');
+  const overlay = document.querySelector('.gm-drawer-overlay');
+  if (!sidebar || !overlay) return;
+  if (sidebar.classList.contains('open')) {
+    closeDrawer();
+  } else {
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+  }
+}
+function closeDrawer() {
+  const sidebar = document.getElementById('gmSidebar');
+  const overlay = document.querySelector('.gm-drawer-overlay');
+  if (sidebar) sidebar.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+// ===== 伺服器管理 =====
+let currentServerEditId = null;
+
+async function loadServerList() {
+  const tbody = document.getElementById('serverTableBody');
+  if (!tbody) return;
+  try {
+    const data = await apiCall('/api/gm/server/list');
+    if (data && data.ok && data.servers) {
+      const servers = data.servers;
+      if (servers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#8a6a2a;padding:24px;">尚無伺服器，請點「新增伺服器」建立</td></tr>';
+        return;
+      }
+      tbody.innerHTML = servers.map(s => {
+        const statusLabel = { open: '開放', preparing: '準備中', closed: '維護' }[s.status] || s.status;
+        const statusClass = s.status === 'open' ? 'status-open' : s.status === 'preparing' ? 'status-preparing' : 'status-closed';
+        return `
+          <tr>
+            <td><code style="color:#c8a868;">${s.id}</code></td>
+            <td><strong>${s.name}</strong></td>
+            <td><span class="${statusClass}" style="padding:2px 8px;border-radius:3px;font-size:12px;">${statusLabel}</span></td>
+            <td>${s.aiCount}</td>
+            <td>${s.initLevel}</td>
+            <td>${s.maxPlayers}</td>
+            <td>${s.onlineCount != null ? s.onlineCount : '--'}</td>
+            <td style="font-size:12px;color:#8a6a2a;">${s.createdAt ? new Date(s.createdAt).toLocaleDateString('zh-TW') : '--'}</td>
+            <td>
+              <div class="flex gap-6" style="flex-wrap:wrap;">
+                <button class="btn btn-xs" onclick="editServer('${s.id}')">編輯</button>
+                <button class="btn btn-xs btn-ghost" onclick="toggleServerStatus('${s.id}', '${s.status}')">
+                  ${s.status === 'open' ? '關閉' : '開啟'}
+                </button>
+                <button class="btn btn-xs btn-danger" onclick="deleteServer('${s.id}')">刪除</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#e05050;padding:24px;">載入失敗：${e.message}</td></tr>`;
+  }
+}
+
+function openServerModal(srv) {
+  currentServerEditId = srv ? srv.id : null;
+  document.getElementById('serverModalTitle').textContent = srv ? '編輯伺服器' : '新增伺服器';
+  document.getElementById('srvId').value = srv ? srv.id : '';
+  document.getElementById('srvId').disabled = !!srv; // 編輯時不可改ID
+  document.getElementById('srvName').value = srv ? srv.name : '';
+  document.getElementById('srvStatus').value = srv ? srv.status : 'closed';
+  document.getElementById('srvAiCount').value = srv ? srv.aiCount : 5;
+  document.getElementById('srvInitLevel').value = srv ? srv.initLevel : 1;
+  document.getElementById('srvMaxPlayers').value = srv ? srv.maxPlayers : 200;
+  document.getElementById('srvInfo').value = srv ? (s.info || '') : '';
+  document.getElementById('serverModal').classList.remove('hidden');
+}
+
+function closeServerModal() {
+  document.getElementById('serverModal').classList.add('hidden');
+  currentServerEditId = null;
+}
+
+async function saveServer() {
+  const id = document.getElementById('srvId').value.trim();
+  const name = document.getElementById('srvName').value.trim();
+  const status = document.getElementById('srvStatus').value;
+  const aiCount = parseInt(document.getElementById('srvAiCount').value) || 0;
+  const initLevel = parseInt(document.getElementById('srvInitLevel').value) || 1;
+  const maxPlayers = parseInt(document.getElementById('srvMaxPlayers').value) || 200;
+  const info = document.getElementById('srvInfo').value.trim();
+  
+  if (!id) { showToast('請輸入伺服器ID', 'error'); return; }
+  if (!name) { showToast('請輸入伺服器名稱', 'error'); return; }
+  
+  try {
+    if (currentServerEditId) {
+      // 編輯
+      await apiCall('/api/gm/server/update', {
+        method: 'POST',
+        body: JSON.stringify({ id: currentServerEditId, name, status, aiCount, initLevel, maxPlayers, info }),
+      });
+      showToast('更新成功', 'success');
+    } else {
+      // 新增
+      await apiCall('/api/gm/server/create', {
+        method: 'POST',
+        body: JSON.stringify({ id, name, status, aiCount, initLevel, maxPlayers, info }),
+      });
+      showToast('建立成功', 'success');
+    }
+    closeServerModal();
+    loadServerList();
+  } catch (e) {
+    showToast('操作失敗：' + e.message, 'error');
+  }
+}
+
+async function editServer(id) {
+  try {
+    const data = await apiCall('/api/gm/server/list');
+    if (data && data.ok && data.servers) {
+      const srv = data.servers.find(s => s.id === id);
+      if (srv) openServerModal(srv);
+    }
+  } catch (e) {
+    showToast('載入失敗：' + e.message, 'error');
+  }
+}
+
+async function toggleServerStatus(id, currentStatus) {
+  // open <-> closed 快速切換；preparing 需要手動編輯
+  const next = currentStatus === 'open' ? 'closed' : 'open';
+  try {
+    await apiCall('/api/gm/server/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ id, status: next }),
+    });
+    showToast('狀態已切換為 ' + next, 'success');
+    loadServerList();
+  } catch (e) {
+    showToast('切換失敗：' + e.message, 'error');
+  }
+}
+
+async function deleteServer(id) {
+  if (!confirm('確定要刪除伺服器「' + id + '」嗎？此操作不可逆！')) return;
+  if (!confirm('再次確認：真的要刪除此伺服器嗎？')) return;
+  try {
+    await apiCall('/api/gm/server/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    showToast('已刪除', 'success');
+    loadServerList();
+  } catch (e) {
+    showToast('刪除失敗：' + e.message, 'error');
+  }
 }
 
 // ===== 儀表板 =====
@@ -1919,7 +2233,7 @@ async function loadDbStats() {
     const s = data.stats;
     const fields = ['accounts', 'characters', 'account_shared', 'warehouse_logs',
       'gm_action_logs', 'announcements', 'game_config', 'castle_states',
-      'custom_items', 'bug_reports'];
+       'custom_items', 'bug_reports', 'game_servers'];
     for (const f of fields) {
       const el = document.getElementById('dbStat-' + f);
       if (el) el.textContent = s[f] != null ? s[f].toLocaleString() : '--';

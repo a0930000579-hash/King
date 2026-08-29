@@ -11168,10 +11168,204 @@ function getDirSpriteUrl(s, frame) {
   return assetUrl(info.cat + '/frames/' + dirKey + '/' + frame + '.jpg');
 }
 
-// ==================== 精灵图 HTML（单张图 + CSS 动画模式） ====================
-// 每个角色使用单张完整角色图，通过 CSS 动画实现待机呼吸、行走弹跳、攻擊冲刺、受击闪白晃动、死亡倒地
-// 彻底避免多帧堆叠问题
-function buildSpriteHTML(spriteObj, kind, lean) {
+// ==================== 精靈圖 HTML（完整 8 幀模式 + 方向驅動） =====================
+// v2.6.0：徹底重寫動畫引擎
+//   - walk 4 張圖 = 4 個方向各 1 張（down/side/up/side），不是同一方向的 4 步
+//   - 走路時：按當前方向取對應 walk 圖，與 idle 之間 ~120ms 來回切換 + 上下 bob 模擬踏步
+//   - 攻擊時：attack_1 → attack_2 → attack_3 依次播放，每幀 ~100ms，播完回 idle/walk
+//   - 受擊時：短顯 hit 幀 (~200ms) 後回到原狀態
+//   - 朝左：scaleX(-1) 水平鏡射（只有 side 方向走這個分支）
+//   - 精靈永遠是完整角色圖，不用圓框/濾鏡/肖像卡
+// ==============================================================================
+
+// 動畫狀態機：每個 unit 有獨立狀態
+//   state: 'idle' | 'walk' | 'attack' | 'hit' | 'dead'
+//   dir:   'down' | 'up' | 'left' | 'right'
+//   phase: 0=idleFrame, 1=walkFrame (用於踏步來回)
+//   attackIdx: 0/1/2 (攻擊第幾幀)
+//   timer: 當前幀剩餘時間 ms
+
+const ANIM_V260_CONFIG = {
+  walkStepMs: 130,      // 每步 (idle↔walk) 切換週期的一半，約 120-150ms/幀
+  attackFrameMs: 100,   // 攻擊每幀 ~100ms，3 幀共 300ms
+  hitMs: 200,           // 受擊顯示時長
+  bobPx: 2,             // 走路上下 bob 幅度
+};
+
+// 取得某 unit 當前應顯示的 sprite 圖片 URL（依狀態 + 方向）
+function getUnitFrameSrc(unitAnim, spriteObj) {
+  if (!spriteObj || !spriteObj.useImg) return null;
+  const state = unitAnim.state;
+  const dir = unitAnim.dir || 'down';
+  
+  if (state === 'dead') return spriteObj.hit || spriteObj.idle; // 死亡暫用 hit 或 idle，會走 tomb
+  if (state === 'hit') return spriteObj.hit || spriteObj.idle;
+  
+  if (state === 'attack') {
+    const idx = unitAnim.attackIdx || 0;
+    if (idx === 0) return spriteObj.attack || spriteObj.idle;
+    if (idx === 1) return spriteObj.attack2 || spriteObj.attack || spriteObj.idle;
+    return spriteObj.attack3 || spriteObj.attack2 || spriteObj.attack || spriteObj.idle;
+  }
+  
+  if (state === 'walk') {
+    // 踏步：phase=0 顯示 walk[方向]，phase=1 顯示 idle，來回切換
+    if (unitAnim.phase === 0) {
+      if (dir === 'down') return spriteObj.walk || spriteObj.idle;
+      if (dir === 'up') return spriteObj.walk3 || spriteObj.walk || spriteObj.idle;
+      // left / right 都用 walk_side (walk2)
+      return spriteObj.walk2 || spriteObj.walk || spriteObj.idle;
+    } else {
+      return spriteObj.idle;
+    }
+  }
+  
+  // idle
+  return spriteObj.idle;
+}
+
+// 判斷是否需要水平鏡射（只有朝左時）
+function shouldFlipLeft(unitAnim) {
+  return unitAnim.dir === 'left';
+}
+
+// 將動畫狀態應用到 DOM（單張主 img，直接改 src + transform）
+function applyAnimToDom(unitEl, unitAnim, spriteObj) {
+  if (!unitEl || !spriteObj || !spriteObj.useImg) return;
+  
+  // 找主顯示 img（8 幀模式下使用 sprite-frame-idle 作為主顯示圖，直接改 src）
+  const mainImg = unitEl.querySelector('.sprite-frame-idle');
+  if (!mainImg) return;
+  
+  const src = getUnitFrameSrc(unitAnim, spriteObj);
+  if (src && mainImg.src !== src) {
+    mainImg.src = src;
+  }
+  
+  // 水平鏡射
+  const flip = shouldFlipLeft(unitAnim);
+  mainImg.style.transform = flip ? 'scaleX(-1)' : 'none';
+  
+  // 走路 bob：phase 切換時輕微上下移動
+  const wrap = unitEl.querySelector('.unit-sprite-wrap');
+  if (wrap) {
+    if (unitAnim.state === 'walk' && unitAnim.phase === 0) {
+      mainImg.style.marginTop = '0px';
+    } else if (unitAnim.state === 'walk') {
+      mainImg.style.marginTop = ANIM_V260_CONFIG.bobPx + 'px';
+    } else {
+      mainImg.style.marginTop = '0px';
+    }
+  }
+  
+  // 其他 frame 全部隱藏（避免舊 frame 殘留）
+  const allFrames = unitEl.querySelectorAll('.unit-sprite-img:not(.sprite-frame-idle)');
+  for (let i = 0; i < allFrames.length; i++) {
+    allFrames[i].style.display = 'none';
+  }
+  mainImg.style.display = 'block';
+  
+  // tomb 顯示
+  const tomb = unitEl.querySelector('.unit-sprite-tomb');
+  if (tomb) tomb.style.display = unitAnim.state === 'dead' ? 'flex' : 'none';
+}
+
+// 推進一個 unit 的動畫狀態（dtMs 毫秒）
+function tickUnitAnim(uid, dtMs, spriteObj, unitEl) {
+  const anim = unitAnimState.get(uid);
+  if (!anim) return;
+  
+  // 死亡：不動
+  if (anim.state === 'dead') return;
+  
+  anim.timer -= dtMs;
+  if (anim.timer > 0) {
+    // 時間沒到，但如果狀態變了立即刷新顯示
+    if (anim._dirtyDisplay) {
+      applyAnimToDom(unitEl, anim, spriteObj);
+      anim._dirtyDisplay = false;
+    }
+    return;
+  }
+  
+  // 時間到，進入下一階段
+  if (anim.state === 'walk') {
+    // 踏步：phase 在 0 和 1 之間來回
+    anim.phase = 1 - (anim.phase || 0);
+    anim.timer = ANIM_V260_CONFIG.walkStepMs;
+  } else if (anim.state === 'attack') {
+    // 攻擊：0 → 1 → 2 → 結束(回到原狀態)
+    if (anim.attackIdx < 2) {
+      anim.attackIdx++;
+      anim.timer = ANIM_V260_CONFIG.attackFrameMs;
+    } else {
+      // 攻擊結束，回到 walk 或 idle
+      anim.state = anim._postAttackState || 'idle';
+      anim.attackIdx = 0;
+      anim.phase = 0;
+      anim.timer = ANIM_V260_CONFIG.walkStepMs;
+    }
+  } else if (anim.state === 'hit') {
+    // 受擊結束，回到原狀態
+    anim.state = anim._postHitState || 'idle';
+    anim.timer = ANIM_V260_CONFIG.walkStepMs;
+  } else {
+    // idle：不推進
+    anim.timer = 99999;
+  }
+  
+  applyAnimToDom(unitEl, anim, spriteObj);
+}
+
+// 切換動畫狀態（外部調用：開始走路/停止/開打/受擊）
+function setUnitAnimState(uid, newState, opts = {}) {
+  let anim = unitAnimState.get(uid);
+  if (!anim) {
+    anim = { state: 'idle', dir: 'down', phase: 0, attackIdx: 0, timer: 0, _dirtyDisplay: true };
+    unitAnimState.set(uid, anim);
+  }
+  
+  if (newState === anim.state) {
+    // 同狀態：只更新方向
+    if (opts.dir && opts.dir !== anim.dir) {
+      anim.dir = opts.dir;
+      anim._dirtyDisplay = true;
+    }
+    return;
+  }
+  
+  // 狀態切換
+  const prevState = anim.state;
+  
+  if (newState === 'walk') {
+    anim.state = 'walk';
+    anim.dir = opts.dir || anim.dir || 'down';
+    anim.phase = 0;
+    anim.timer = ANIM_V260_CONFIG.walkStepMs;
+  } else if (newState === 'attack') {
+    // 記住攻擊前的狀態，播完回那狀態
+    anim._postAttackState = prevState === 'walk' ? 'walk' : 'idle';
+    anim.state = 'attack';
+    anim.dir = opts.dir || anim.dir || 'down';
+    anim.attackIdx = 0;
+    anim.timer = ANIM_V260_CONFIG.attackFrameMs;
+  } else if (newState === 'hit') {
+    anim._postHitState = prevState === 'walk' ? 'walk' : 'idle';
+    anim.state = 'hit';
+    anim.timer = ANIM_V260_CONFIG.hitMs;
+  } else if (newState === 'dead') {
+    anim.state = 'dead';
+    anim.timer = 99999;
+  } else {
+    // idle
+    anim.state = 'idle';
+    anim.dir = opts.dir || anim.dir || 'down';
+    anim.phase = 0;
+    anim.timer = 99999;
+  }
+  
+  anim._dirtyDisplay = true;
+}
   const size = SPRITE_SIZE[kind] || SPRITE_SIZE.hero;
   const s = typeof spriteObj === 'object' && spriteObj ? spriteObj : SPRITE.goblin;
   const color = s.color || '#c0a060';
@@ -12427,27 +12621,30 @@ function renderPlayer() {
   unit.classList.remove('idle','walking','attacking','casting','hit','dead');
   if (p.hitTimer > 0) unit.classList.add('hit');
   else unit.classList.add(p.state);
-  // v2.4.0：四方向 sprite 方向更新
-  const wrap = unit.querySelector('.unit-sprite-wrap');
-  if (wrap && wrap.classList.contains('sprite-dir-mode')) {
-    let dir = p._lastDir || 'down';
-    if (p.state === 'walking' || p.state === 'chasing') {
-      const dx = p.targetX - p.x;
-      const dy = p.targetY - p.y;
-      if (Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 0.1) {
-        dir = dx >= 0 ? 'right' : 'left';
-      } else if (Math.abs(dy) > 0.1) {
-        dir = dy >= 0 ? 'down' : 'up';
-      }
-      p._lastDir = dir;
-    } else if (p.state === 'attacking' && p._attackDir) {
-      dir = p._attackDir;
+  // v2.6.0：新動畫引擎 — 計算方向並設定動畫狀態
+  let dir = p._lastDir || 'down';
+  if (p.state === 'walking' || p.state === 'chasing') {
+    const dx = p.targetX - p.x;
+    const dy = p.targetY - p.y;
+    if (Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 0.1) {
+      dir = dx >= 0 ? 'right' : 'left';
+    } else if (Math.abs(dy) > 0.1) {
+      dir = dy >= 0 ? 'down' : 'up';
     }
-    wrap.classList.remove('dir-down','dir-up','dir-left','dir-right');
-    wrap.classList.add('dir-' + dir);
+    p._lastDir = dir;
+  } else if (p.state === 'attacking' && p._attackDir) {
+    dir = p._attackDir;
   }
-  // 应用帧动画
-  applyUnitAnimFrame(unit, 'player', p.state);
+  // 將舊狀態字串對應到新動畫狀態
+  let animState = 'idle';
+  if (p.hp <= 0) animState = 'dead';
+  else if (p.hitTimer > 0) animState = 'hit';
+  else if (p.state === 'attacking' || p.state === 'casting') animState = 'attack';
+  else if (p.state === 'walking' || p.state === 'chasing' || p.state === 'wandering') animState = 'walk';
+  else animState = 'idle';
+  // 設置動畫狀態（內部會比較是否變化，只有變化才刷新）
+  setUnitAnimState('player', animState, { dir });
+  // 精靈圖已由 tickUnitAnim 每幀更新，此處只做狀態同步
 }
 
 // 更新玩家名字旁國旗
@@ -13208,59 +13405,143 @@ function updateSummonRender(s) {
   applyUnitAnimFrame(elDiv, s.id, s.hp <= 0 ? 'dead' : s.state);
 }
 
-// ==================== 动画更新 (单图模式) ====================
-// 单张图 + CSS 动画模式：所有动画通过 CSS 类（idle/walking/attacking/hit/dead）驱动
-// 无需 JS 帧切换，此处保留接口兼容
-// 8帧多帧动画驱动：walk 4帧循环 / attack 2帧序列 / hit 1帧定时
+// ==================== 動畫更新 (v2.6.0 新引擎) ====================
+// 所有可動單位統一走 tickUnitAnim 狀態機：
+//   - 玩家、英雄守護、有 8 幀的怪物/NPC：方向 + 狀態雙驅動
+//   - 只有單張圖的單位：仍然顯示 idle 圖，狀態機不推進（等於靜態）
+// 每幀呼叫一次，dt 為秒數
 function updateSpriteFrames(dt) {
   const dtMs = dt * 1000;
-  // 玩家（唯一走8幀JS驅動的單位）
+  // 玩家
   if (worldLayer && GS.player) {
     const unit = worldLayer.querySelector('.world-unit.hero');
-    if (unit) updateUnitAnimFrame('player', GS.player.state, unit);
+    if (unit && !unit._offscreen) {
+      const spriteObj = getPlayerSprite();
+      tickUnitAnim('player', dtMs, spriteObj, unit);
+    } else if (unit && unit._offscreen) {
+      // 離屏：不推進動畫，但確保圖片顯示正確
+      const spriteObj = getPlayerSprite();
+      const anim = unitAnimState.get('player');
+      if (anim && anim._dirtyDisplay) applyAnimToDom(unit, anim, spriteObj);
+    }
   }
-  // 多帧怪物：使用8幀JS驅動動畫（walk 4幀循環、attack 2幀、hit 1幀）
+  // 怪物：有 multiFrame 的才推進動畫
   if (worldLayer && GS.monsters && GS.monsters.length > 0) {
     for (const m of GS.monsters) {
-      if (!m.sprite || !m.sprite.multiFrame) continue;
       if (m.hp <= 0 && m.state === 'dead') {
-        // 死亡的怪物：如果动画状态还存在，保持dead帧即可，不再推进
-        if (unitAnimState.has(m.uid)) {
-          const el = m.el || worldLayer.querySelector(`[data-id="${m.uid}"]`);
-          if (el) {
-            const anim = unitAnimState.get(m.uid);
-            if (anim.lastCategory !== 'dead') {
-              anim.lastCategory = 'dead';
-              applyUnitAnimFrame(el, m.uid, 'dead');
-            }
+        const el = m.el || worldLayer.querySelector(`[data-id="${m.uid}"]`);
+        if (el) {
+          const anim = unitAnimState.get(m.uid);
+          if (anim && anim.state !== 'dead') {
+            anim.state = 'dead';
+            const s = m.sprite || SPRITE.goblin;
+            applyAnimToDom(el, anim, s);
           }
         }
         continue;
       }
       const el = m.el || worldLayer.querySelector(`[data-id="${m.uid}"]`);
       if (!el) continue;
-      // 畫面外單位暫停動畫更新（節省效能，但後台邏輯繼續）
-      if (el._offscreen) {
-        // 只確保狀態顯示正確，不推進幀
-        const anim = unitAnimState.get(m.uid);
-        if (anim && anim.lastCategory !== _stateToCategory(m.state)) {
-          anim.lastCategory = _stateToCategory(m.state);
-          applyUnitAnimFrame(el, m.uid, m.state);
+      const s = m.sprite || SPRITE.goblin;
+      if (!s.multiFrame) continue; // 單張圖跳過
+      // 狀態同步：m.state -> anim.state
+      const anim = unitAnimState.get(m.uid);
+      if (anim) {
+        let targetState = 'idle';
+        if (m.state === 'walking' || m.state === 'chasing' || m.state === 'wandering') targetState = 'walk';
+        else if (m.state === 'attacking' || m.state === 'casting') targetState = 'attack';
+        else if (m.state === 'hit') targetState = 'hit';
+        else if (m.state === 'dead') targetState = 'dead';
+        if (anim.state !== targetState) {
+          // 方向：怪物移動時朝向玩家
+          let dir = anim.dir || 'down';
+          if (targetState === 'walk' && m.target) {
+            const dx = m.target.x - m.x;
+            const dy = m.target.y - m.y;
+            if (Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 0.1) {
+              dir = dx >= 0 ? 'right' : 'left';
+            } else if (Math.abs(dy) > 0.1) {
+              dir = dy >= 0 ? 'down' : 'up';
+            }
+          }
+          setUnitAnimState(m.uid, targetState, { dir });
         }
-        continue;
       }
-      updateUnitAnimFrame(m.uid, m.state, el);
+      if (el._offscreen) continue; // 離屏跳過推進
+      tickUnitAnim(m.uid, dtMs, s, el);
     }
   }
-  // AI玩家：使用單張圖+CSS動畫，完全跳過JS幀切換
-  // 召喚：multiFrame 英雄走 8 幀 JS 驅動，其餘用單張圖+CSS動畫
+  // AI 玩家
+  if (worldLayer && GS.aiPlayers && GS.aiPlayers.length > 0) {
+    for (const ai of GS.aiPlayers) {
+      if (!ai.el) continue;
+      const s = ai.sprite || SPRITE.warrior;
+      if (!s.multiFrame) continue;
+      // 狀態同步
+      const anim = unitAnimState.get(ai.uid);
+      if (anim) {
+        let targetState = 'idle';
+        if (ai.state === 'walking' || ai.state === 'chasing' || ai.state === 'wandering') targetState = 'walk';
+        else if (ai.state === 'attacking' || ai.state === 'casting') targetState = 'attack';
+        else if (ai.state === 'hit') targetState = 'hit';
+        else if (ai.state === 'dead') targetState = 'dead';
+        if (anim.state !== targetState) {
+          let dir = anim.dir || 'down';
+          if (targetState === 'walk' && ai.target) {
+            const dx = ai.target.x - ai.x;
+            const dy = ai.target.y - ai.y;
+            if (Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 0.1) {
+              dir = dx >= 0 ? 'right' : 'left';
+            } else if (Math.abs(dy) > 0.1) {
+              dir = dy >= 0 ? 'down' : 'up';
+            }
+          }
+          setUnitAnimState(ai.uid, targetState, { dir });
+        }
+      }
+      if (ai.el._offscreen) continue;
+      tickUnitAnim(ai.uid, dtMs, s, ai.el);
+    }
+  }
+  // 召喚物 / 英雄守護
   if (GS.summons && worldLayer) {
     for (const s of GS.summons) {
-      if (!s.multiFrame) continue;
+      if (!s.multiFrame && !s.sprite?.multiFrame) continue;
       const el = worldLayer.querySelector(`[data-id="${s.id}"]`);
-      if (el) updateUnitAnimFrame(s.id, s.state || 'idle', el);
+      if (!el) continue;
+      const spriteObj = s.sprite || SPRITE.goblin;
+      // 狀態同步
+      const anim = unitAnimState.get(s.id);
+      if (anim) {
+        const sState = s.state || 'idle';
+        let targetState = 'idle';
+        if (sState === 'walking' || sState === 'chasing' || sState === 'wandering') targetState = 'walk';
+        else if (sState === 'attacking' || sState === 'casting') targetState = 'attack';
+        else if (sState === 'hit') targetState = 'hit';
+        else if (sState === 'dead') targetState = 'dead';
+        if (anim.state !== targetState) {
+          setUnitAnimState(s.id, targetState, {});
+        }
+      }
+      if (el._offscreen) continue;
+      tickUnitAnim(s.id, dtMs, spriteObj, el);
     }
   }
+  // 多人連線的其他玩家
+  if (window.MultiplayerClient && MultiplayerClient.connected && worldLayer) {
+    const remoteLayer = worldLayer.querySelector('#mp-layer') || worldLayer;
+    const remoteEls = remoteLayer.querySelectorAll('.mp-player');
+    for (const el of remoteEls) {
+      if (el._offscreen) continue;
+      const uid = el.dataset.mpId;
+      if (!uid) continue;
+      // 嘗試從單元上取 sprite 對象
+      const spriteObj = el._spriteObj;
+      if (!spriteObj || !spriteObj.multiFrame) continue;
+      tickUnitAnim('mp_' + uid, dtMs, spriteObj, el);
+    }
+  }
+}
 
   // 狀態轉類別的輔助函數
   function _stateToCategory(state) {
@@ -13457,15 +13738,8 @@ function updatePlayer(dt) {
   const dy = p.targetY - p.y;
   const dist = Math.hypot(dx, dy);
   let speed = 85;
-  // 計算移動速度加成
-  let moveSpdBonus = 0;
-  for (const key in p.buffs) {
-    const b = p.buffs[key];
-    if (typeof b === 'object' && b.type === 'moveSpeed') moveSpdBonus += b.value;
-  }
-  // 變身移動速度加成
-  const tfInfo = TRANSFORM_POOL.find(t => t.id === p.transformId);
-  if (tfInfo?.stats?.walkSpeedPct) moveSpdBonus += tfInfo.stats.walkSpeedPct;
+  // 計算移動速度加成（v2.6.0 統一函數）
+  const moveSpdBonus = getTotalWalkSpeedPct();
   if (moveSpdBonus > 0) speed *= (1 + moveSpdBonus / 100);
   if (p.buffs.windwalk) speed *= 1.3;
 
@@ -13731,7 +14005,10 @@ function manualCombat(dt) {
       }
       spawnEffect(atkType, target.x, target.y - 28, { direction: p.facing, classColor: atkColor });
       // 普攻音效在命中时播放（doPlayerNormalAttack内部播放）
-      p.attackCooldown = cls.atkInterval || 1.0;
+      // v2.6.0：攻速加成縮短冷卻
+      const atkSpeedPct = getTotalAtkSpeedPct();
+      const baseCd = cls.atkInterval || 1.0;
+      p.attackCooldown = baseCd / (1 + atkSpeedPct / 100);
       p.state = 'attacking';
       setTimeout(() => {
         if (p.state === 'attacking') p.state = 'idle';
@@ -13901,7 +14178,10 @@ function doPlayerNormalAttack(target, isAITarget) {
   const p = GS.player;
   if (p.hp <= 0) return;
   p.state = 'attacking';
-  p.attackCooldown = p.attackInterval || 1.0;
+  // v2.6.0：攻速加成縮短冷卻
+  const atkSpeedPct = getTotalAtkSpeedPct();
+  const baseCd = p.attackInterval || 1.0;
+  p.attackCooldown = baseCd / (1 + atkSpeedPct / 100);
   const atkVal = getTotalAtk();
   const defVal = (isAITarget ? getAITotalDef(target) : (Number(target.def) || 0));
   const dr = Math.min(0.75, defVal * 0.005);
@@ -16250,6 +16530,52 @@ function getPetBonus() {
   };
 }
 
+// ==================== 總速度加成計算（v2.6.0） ====================
+// 疊加所有來源：職業被動、裝備、buff、變身、英雄守護
+// 返回百分比數值（如 35 表示 +35%）
+function getTotalWalkSpeedPct() {
+  let total = 0;
+  const p = GS.player;
+  if (!p) return total;
+  // buff
+  for (const key in p.buffs) {
+    const b = p.buffs[key];
+    if (typeof b === 'object' && typeof b.walkSpeedPct === 'number') total += b.walkSpeedPct;
+  }
+  // 變身 stat (buff 已經包含變身的 walkSpeedPct，這裡不重複加)
+  // 英雄守護
+  const hero = GS.ownedHeroes?.find(h => h.id === GS.equippedHeroId);
+  if (hero) {
+    const heroData = SUMMON_POOL.find(s => s.id === hero.id);
+    if (heroData?.stats?.walkSpeedPct) total += heroData.stats.walkSpeedPct;
+  }
+  // 寵物加成
+  const petBonus = getPetBonus();
+  if (petBonus?.walkSpeedPct) total += petBonus.walkSpeedPct;
+  return total;
+}
+
+function getTotalAtkSpeedPct() {
+  let total = 0;
+  const p = GS.player;
+  if (!p) return total;
+  // buff
+  for (const key in p.buffs) {
+    const b = p.buffs[key];
+    if (typeof b === 'object' && typeof b.atkSpeedPct === 'number') total += b.atkSpeedPct;
+  }
+  // 英雄守護
+  const hero = GS.ownedHeroes?.find(h => h.id === GS.equippedHeroId);
+  if (hero) {
+    const heroData = SUMMON_POOL.find(s => s.id === hero.id);
+    if (heroData?.stats?.atkSpeedPct) total += heroData.stats.atkSpeedPct;
+  }
+  // 寵物加成
+  const petBonus = getPetBonus();
+  if (petBonus?.atkSpeedPct) total += petBonus.atkSpeedPct;
+  return total;
+}
+
 function getTotalAtk() {
   let atk = Number(GS.player.atk) || 0;
   for (const slot in GS.equipment) {
@@ -18570,7 +18896,7 @@ function refreshPlayerSprite() {
 // 舊函數別名（向後兼容）
 function useTransformScroll(tfId) { return activateTransform(tfId); }
 
-// 變身體驗券：直接啟動變身（不受職業限制、不須擁有該變身）
+// 變身體驗券：僅限時啟動變身，不寫入永久收藏/圖鑑/owned，到期自動還原
 function useTransformTicket(tfId) {
   // 從背包找對應體驗券並消耗1張
   const ticket = GS.inventory.find(i => i.effect?.useTransformTicket && i.effect.transformId === tfId);
@@ -18581,16 +18907,18 @@ function useTransformTicket(tfId) {
   // 找到變身數據（用於名稱、屬性、sprite）
   const tf = TRANSFORM_POOL.find(t => t.id === tfId);
   if (!tf) { addLog('system', '變身數據不存在'); return false; }
+  // v2.6.0：體驗券只給臨時變身效果，永不加入 ownedTransforms
+  const prevCount = GS.ownedTransforms ? GS.ownedTransforms.length : 0;
   // 套用變身：直接設置 transformId 與結束時間，跳過職業限制
   GS.player.transformId = tfId;
   GS.transformEndTime = Date.now() + 4 * 60 * 60 * 1000; // 4小時
-  // 確保 ownedTransforms 中有這張（供圖鑑和UI顯示）
-  if (!GS.ownedTransforms) GS.ownedTransforms = [];
-  const existing = GS.ownedTransforms.find(t => t.id === tfId);
-  if (!existing) {
-    GS.ownedTransforms.push({ id: tf.id, name: tf.name, rarity: tf.rarity, unlocked: true, fromTicket: true });
+  GS.activeTempTransform = { tfId, startTime: Date.now(), fromTicket: true };
+  // 校驗：絕不加入永久收藏
+  if (GS.ownedTransforms) {
+    GS.ownedTransforms = GS.ownedTransforms.filter(t => t.id !== tfId || !t.fromTicket);
   }
-  addLog('system', `使用體驗券，啟動變身【${tf.name}】，持續 4 小時（體驗版，不受職業限制）`);
+  const afterCount = GS.ownedTransforms ? GS.ownedTransforms.length : 0;
+  addLog('system', `使用體驗券，啟動變身【${tf.name}】，持續 4 小時（臨時體驗，不加入永久收藏）`);
   // 消耗體驗券
   ticket.count = (ticket.count || 1) - 1;
   if (ticket.count <= 0) {
@@ -18604,6 +18932,7 @@ function useTransformTicket(tfId) {
   updateRankings();
   updateUI();
   saveGame();
+  console.log('[useTransformTicket] 使用前收藏數:', prevCount, '使用後收藏數:', afterCount, '臨時變身:', GS.activeTempTransform);
   return true;
 }
 
@@ -18811,16 +19140,36 @@ function showBuffDetail(buff) {
 }
 
 // 變身 buff 管理
+// v2.6.0：變身階級內建速度加成（行走+攻擊）
+//   白 10% / 綠 15% / 藍 20% / 紫 25% / 金 35% / 真金 45%
+const TRANSFORM_RARITY_SPEED_BONUS = {
+  white:   { walk: 10, atk: 10 },
+  green:   { walk: 15, atk: 15 },
+  blue:    { walk: 20, atk: 20 },
+  purple:  { walk: 25, atk: 25 },
+  red:     { walk: 30, atk: 30 },
+  gold:    { walk: 35, atk: 35 },
+  true:    { walk: 45, atk: 45 },  // 真金系列
+};
+
 function addTransformBuff() {
   const tf = TRANSFORM_POOL.find(t => t.id === GS.player.transformId);
   if (!tf) return;
   const remainSec = getTransformRemaining() / 1000;
   if (remainSec <= 0) return;
-  const statDesc = Object.entries(tf.stats || {}).map(([k, v]) => {
+  // v2.6.0：變身階級內建速度加成
+  const baseStats = { ...(tf.stats || {}) };
+  const rarityKey = tf.isTrueGold ? 'true' : tf.rarity;
+  const speedBonus = TRANSFORM_RARITY_SPEED_BONUS[rarityKey] || null;
+  if (speedBonus) {
+    baseStats.walkSpeedPct = (baseStats.walkSpeedPct || 0) + speedBonus.walk;
+    baseStats.atkSpeedPct = (baseStats.atkSpeedPct || 0) + speedBonus.atk;
+  }
+  const statDesc = Object.entries(baseStats).map(([k, v]) => {
     const nameMap = { atk: '攻擊', def: '防禦', hpMax: '生命', mpMax: '魔力', crit: '暴擊', critDmg: '暴傷', walkSpeedPct: '移速', atkSpeedPct: '攻速', dodge: '閃躲', hit: '命中', allStatPct: '全屬性', pvpDmgPct: 'PVP傷害', skillDmgPct: '技能傷害' };
     return `${nameMap[k] || k}+${v}`;
   }).join(' ');
-  addBuff('transform', `變身·${tf.name}`, `變身為【${tf.name}】，獲得強大力量。${statDesc}`, remainSec, tf.stats || {});
+  addBuff('transform', `變身·${tf.name}`, `變身為【${tf.name}】，獲得強大力量。${statDesc}`, remainSec, baseStats);
 }
 
 function removeTransformBuff() {
