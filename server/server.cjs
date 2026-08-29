@@ -1,5 +1,5 @@
 /**
-  君主之刃 v2.5.7 · 正式營運後端伺服器
+  君主之刃 v2.5.8 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -477,7 +477,12 @@ function serveStatic(req, res, pathname) {
     }
     // v2.4.0：分卷資產 + 程式碼小包，直接可下載
     const dlFiles = {
-      '/game-code.zip': 'monarch-blade-v2.5.6-code.zip',
+      '/game-code.zip': 'monarch-blade-v2.5.8-code.zip',
+      '/game-code-2.5.8.zip': 'monarch-blade-v2.5.8-code.zip',
+      '/update-2.5.8-code.zip': 'update-2.5.8-code.zip',
+      '/game-code-2.5.7.zip': 'monarch-blade-v2.5.7-code.zip',
+      '/update-2.5.7-classassets.zip': 'update-2.5.7-classassets.zip',
+      '/update-2.5.7-code.zip': 'update-2.5.7-code.zip',
       '/game-code-2.5.6.zip': 'monarch-blade-v2.5.6-code.zip',
       '/assets-part1.zip': 'monarch-blade-v2.5.6-assets-part1.zip',
       '/assets-part2.zip': 'monarch-blade-v2.5.6-assets-part2.zip',
@@ -529,9 +534,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.5.7',
-      build: '2.5.7-2608281900',
-      buildId: '2.5.7-2608281900',
+      version: '2.5.8',
+      build: '2.5.8-2608281900',
+      buildId: '2.5.8-2608281900',
       time: Date.now(),
       socketIo: socketIoInstalled,
       longPoll: true,
@@ -592,9 +597,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.5.7',
-      build: '2.5.7-2608281900',
-      buildId: '2.5.7-2608281900',
+      version: '2.5.8',
+      build: '2.5.8-2608281900',
+      buildId: '2.5.8-2608281900',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -637,7 +642,7 @@ async function handleApi(req, res, pathname, query) {
       checks.push({
         name: 'server',
         pass: true,
-        detail: { version: '2.5.7', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
+        detail: { version: '2.5.8', uptimeMs: Math.floor(process.uptime() * 1000), platform: process.platform, nodeVersion: process.version, pid: process.pid },
         ms: Date.now() - t0,
       });
     } catch(e) {
@@ -841,9 +846,9 @@ async function handleApi(req, res, pathname, query) {
 
     return sendJson(res, 200, {
       ok: allPass,
-      version: '2.5.7',
-      build: '2.5.7-2608281900',
-      buildId: '2.5.7-2608281900',
+      version: '2.5.8',
+      build: '2.5.8-2608281900',
+      buildId: '2.5.8-2608281900',
       timestamp: new Date().toISOString(),
       totalMs,
       summary: { total: checks.length, passed, failed },
@@ -995,7 +1000,7 @@ async function handleApi(req, res, pathname, query) {
     if (!unique) return sendJson(res, 409, { error: '此名稱已被使用' });
     const charCount = await db.getCharacterCount(accName, serverId);
     if (charCount >= 3) return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
-    // v2.5.7：找到第一個空槽位作為新角色索引（刪除後可能有中間空槽）
+    // v2.5.8：找到第一個空槽位作為新角色索引（刪除後可能有中間空槽）
     const charList = await db.listCharacters(accName, serverId);
     let slotIdx = 0;
     for (let i = 0; i < 3; i++) {
@@ -1131,9 +1136,78 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true });
   }
 
+  // ===== v2.5.8：資料庫管理（危險區塊） =====
+
+  // GET /api/gm/admin/stats - 各表筆數統計
+  if (req.method === 'GET' && pathname === '/api/gm/admin/stats') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    try {
+      const stats = await db.getStats();
+      return sendJson(res, 200, { ok: true, stats, backend: db.getBackend() });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/admin/reset-all - 全部重置（清空所有遊戲資料）
+  if (req.method === 'POST' && pathname === '/api/gm/admin/reset-all') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body = {};
+    try { body = await parseJsonBody(req); } catch (e) { body = {}; }
+    const gmAcc = await getAuthAccount(req);
+    const keepCustomItems = body.keepCustomItems !== false;
+    try {
+      const counts = await db.resetAll({ keepCustomItems });
+      // 重置後重新 seed GM 帳號
+      if (db.getBackend() === 'postgres') {
+        await db.ensureGMAccount(GM_ACCOUNT, hashPassword(GM_PASSWORD));
+      } else {
+        await db.createAccount(GM_ACCOUNT, hashPassword(GM_PASSWORD), true);
+      }
+      // 寫入 GM 操作日誌（重置後 DB 已可用）
+      await db.logGMAction(gmAcc, null, 'reset_all', {
+        keepCustomItems,
+        counts,
+      });
+      return sendJson(res, 200, { ok: true, counts, keepCustomItems });
+    } catch (e) {
+      console.error('[GM] reset-all 失敗:', e.message, e.stack);
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/admin/reset-characters - 只清角色
+  if (req.method === 'POST' && pathname === '/api/gm/admin/reset-characters') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      const counts = await db.resetCharacters();
+      await db.logGMAction(gmAcc, null, 'reset_characters', { counts });
+      return sendJson(res, 200, { ok: true, counts });
+    } catch (e) {
+      console.error('[GM] reset-characters 失敗:', e.message);
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/admin/reset-logs - 清空日誌
+  if (req.method === 'POST' && pathname === '/api/gm/admin/reset-logs') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      const counts = await db.resetLogs();
+      // 重置日誌後留一條本次操作記錄
+      await db.logGMAction(gmAcc, null, 'reset_logs', { counts });
+      return sendJson(res, 200, { ok: true, counts });
+    } catch (e) {
+      console.error('[GM] reset-logs 失敗:', e.message);
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
   // GET /api/gm/online - GM 查看線上玩家
   if (req.method === 'GET' && pathname === '/api/gm/online') {
-    if (!verifyGM(req)) return sendJson(res, 403, { error: 'unauthorized' });
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
     const list = Array.from(onlinePlayers.values()).map(p => ({
       socketId: p.socketId,
       account: p.account,

@@ -115,6 +115,18 @@
   .btn.btn-danger:hover {
     background: linear-gradient(180deg, #f06060 0%, #a83030 100%);
   }
+  .btn.btn-warning {
+    background: linear-gradient(180deg, #d0802a 0%, #8a5010 100%);
+    border-color: #f0a040;
+    color: #fff;
+  }
+  .btn.btn-warning:hover {
+    background: linear-gradient(180deg, #f0a040 0%, #b06020 100%);
+  }
+  .btn[disabled], .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
   .btn.btn-ghost {
     background: transparent;
     border: 1px solid #8a6a2a;
@@ -195,6 +207,33 @@
     width: 18px;
     text-align: center;
     font-size: 16px;
+  }
+  .nav-item.danger {
+    color: #e07070;
+    border-top: 1px solid rgba(224, 112, 112, 0.2);
+    margin-top: 8px;
+    padding-top: 14px;
+  }
+  .nav-item.danger:hover {
+    background: rgba(224, 80, 80, 0.1);
+    color: #f06060;
+  }
+  .nav-item.danger.active {
+    background: rgba(224, 80, 80, 0.15);
+    color: #f06060;
+    border-left-color: #e05050;
+  }
+  .danger-card {
+    border: 1px solid rgba(224, 80, 80, 0.4);
+    background: rgba(40, 15, 15, 0.5);
+  }
+  .checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #c8a868;
+    font-size: 13px;
+    cursor: pointer;
   }
   .sidebar-footer {
     position: absolute;
@@ -626,6 +665,9 @@
     <div class="nav-item" data-page="bug" onclick="switchPage('bug')">
       <span class="icon">🐛</span><span>Bug 回報</span>
     </div>
+    <div class="nav-item danger" data-page="database" onclick="switchPage('database')">
+      <span class="icon">☠</span><span>資料庫管理</span>
+    </div>
     <div class="sidebar-footer">
       <div class="gm-account" id="gmAccount">--</div>
       <div id="gmServerStatus">伺服器: 連線中</div>
@@ -1001,6 +1043,72 @@
       </div>
     </div>
 
+    <!-- ===== 資料庫管理（危險區塊） ===== -->
+    <div class="page hidden" id="page-database">
+      <div class="page-header">
+        <h2 style="color:#e05050;">☠ 資料庫管理</h2>
+        <div class="desc" style="color:#e07070;">危險區塊：以下操作不可逆，請謹慎使用</div>
+      </div>
+
+      <!-- 即時統計 -->
+      <div class="card">
+        <h3>各表即時筆數</h3>
+        <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);" id="dbStatsGrid">
+          <div class="stat-card"><div class="value" id="dbStat-accounts">--</div><div class="label">帳號</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-characters">--</div><div class="label">角色</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-account_shared">--</div><div class="label">帳號共享</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-warehouse_logs">--</div><div class="label">倉庫記錄</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-announcements">--</div><div class="label">公告</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-gm_action_logs">--</div><div class="label">GM 日誌</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-bug_reports">--</div><div class="label">Bug 回報</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-game_config">--</div><div class="label">遊戲參數</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-castle_states">--</div><div class="label">城堡狀態</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-custom_items">--</div><div class="label">自定義道具</div></div>
+        </div>
+        <div class="mt-16 flex gap-10">
+          <button class="btn btn-sm btn-ghost" onclick="loadDbStats()">重新整理</button>
+          <span style="color:#8a6a2a;font-size:12px;align-self:center;" id="dbStatsTime"></span>
+        </div>
+      </div>
+
+      <!-- 全部重置 -->
+      <div class="card danger-card">
+        <h3 style="color:#e05050;">全部重置</h3>
+        <div class="desc" style="color:#c06060;">清空所有遊戲資料：帳號、角色、共享資料、倉庫、公告、日誌、Bug 回報。game_config 與 castle_states 重置為預設值。GM 帳號會自動重建。</div>
+        <div class="form-row mt-16">
+          <label>保留自定義道具</label>
+          <label class="checkbox-inline">
+            <input type="checkbox" id="resetKeepCustom" checked> 保留 custom_items 表
+          </label>
+        </div>
+        <div class="form-row">
+          <label>確認字 <span style="color:#e05050;">*</span></label>
+          <input type="text" id="resetConfirm" placeholder="請輸入 RESET 以確認" oninput="checkResetConfirm()">
+        </div>
+        <div class="text-right mt-10">
+          <button class="btn btn-danger" id="btnResetAll" disabled onclick="confirmResetAll()">全部重置</button>
+        </div>
+      </div>
+
+      <!-- 只清角色 -->
+      <div class="card danger-card">
+        <h3 style="color:#e07050;">只清角色</h3>
+        <div class="desc" style="color:#c06060;">刪除所有角色、帳號共享資料與倉庫記錄，但保留帳號（玩家可重新登入創角）。</div>
+        <div class="text-right mt-16">
+          <button class="btn btn-warning" onclick="confirmResetCharacters()">清空角色資料</button>
+        </div>
+      </div>
+
+      <!-- 清空日誌 -->
+      <div class="card danger-card">
+        <h3 style="color:#c08040;">清空日誌</h3>
+        <div class="desc" style="color:#c06060;">清空 GM 操作日誌與 Bug 回報。本次操作本身會留下一條記錄。</div>
+        <div class="text-right mt-16">
+          <button class="btn" style="background:#8a5a2a;" onclick="confirmResetLogs()">清空日誌</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -1124,6 +1232,7 @@ function switchPage(page) {
   else if (page === 'config') loadConfig();
   else if (page === 'gmlog') loadGMLogs();
   else if (page === 'bug') loadBugs();
+  else if (page === 'database') loadDbStats();
 }
 
 // ===== 儀表板 =====
@@ -1148,7 +1257,7 @@ async function loadDashboard() {
       dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
     }
     document.getElementById('assetCount').textContent = health.assetCount || '--';
-    // 同步模式：優先 long-poll（v2.5.1 預設），其次 Socket.IO
+    // 同步模式：優先 long-poll（v2.5.0 預設），其次 Socket.IO
     const syncEl = document.getElementById('syncMode');
     if (health.longPoll) {
       syncEl.textContent = '長輪詢（已啟用）';
@@ -1801,6 +1910,105 @@ document.getElementById('loginAccount').addEventListener('keypress', e => {
 document.getElementById('playerModal').addEventListener('click', e => {
   if (e.target.id === 'playerModal') closeModal();
 });
+
+// ===== 資料庫管理（危險區塊） =====
+
+async function loadDbStats() {
+  const data = await apiCall('/api/gm/admin/stats');
+  if (data && data.ok && data.stats) {
+    const s = data.stats;
+    const fields = ['accounts', 'characters', 'account_shared', 'warehouse_logs',
+      'gm_action_logs', 'announcements', 'game_config', 'castle_states',
+      'custom_items', 'bug_reports'];
+    for (const f of fields) {
+      const el = document.getElementById('dbStat-' + f);
+      if (el) el.textContent = s[f] != null ? s[f].toLocaleString() : '--';
+    }
+    document.getElementById('dbStatsTime').textContent = '更新時間：' + new Date().toLocaleString('zh-TW');
+  }
+}
+
+function checkResetConfirm() {
+  const val = document.getElementById('resetConfirm').value.trim();
+  document.getElementById('btnResetAll').disabled = val !== 'RESET';
+}
+
+function confirmResetAll() {
+  const val = document.getElementById('resetConfirm').value.trim();
+  if (val !== 'RESET') {
+    showToast('請先輸入確認字 RESET', 'error');
+    return;
+  }
+  const keep = document.getElementById('resetKeepCustom').checked;
+  const msg = keep
+    ? '確定要全部重置嗎？所有帳號、角色、資料將被清空，僅保留自定義道具。此操作不可逆！'
+    : '確定要全部重置嗎？所有資料將被清空，包含自定義道具！此操作不可逆！';
+  if (!confirm(msg)) return;
+  if (!confirm('再次確認：真的要執行全部重置嗎？')) return;
+
+  const btn = document.getElementById('btnResetAll');
+  btn.disabled = true;
+  btn.textContent = '處理中...';
+
+  apiCall('/api/gm/admin/reset-all', {
+    method: 'POST',
+    body: JSON.stringify({ keepCustomItems: keep }),
+  }).then(data => {
+    btn.disabled = false;
+    btn.textContent = '全部重置';
+    if (data && data.ok) {
+      const c = data.counts;
+      const detail = [
+        '帳號: ' + c.accounts,
+        '角色: ' + c.characters,
+        '公告: ' + c.announcements,
+        'GM日誌: ' + c.gm_action_logs,
+        'Bug: ' + c.bug_reports,
+      ].join(' / ');
+      showToast('重置完成！' + detail, 'success');
+      document.getElementById('resetConfirm').value = '';
+      checkResetConfirm();
+      loadDbStats();
+    } else {
+      showToast('重置失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  });
+}
+
+function confirmResetCharacters() {
+  if (!confirm('確定要清空所有角色、共享資料與倉庫記錄嗎？帳號將保留。此操作不可逆！')) return;
+  if (!confirm('再次確認：真的要清空所有角色嗎？')) return;
+
+  apiCall('/api/gm/admin/reset-characters', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      const c = data.counts;
+      showToast('角色資料已清空！角色: ' + c.characters + ' / 共享: ' + c.account_shared + ' / 倉庫: ' + c.warehouse_logs, 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  });
+}
+
+function confirmResetLogs() {
+  if (!confirm('確定要清空 GM 日誌與 Bug 回報嗎？此操作不可逆！')) return;
+
+  apiCall('/api/gm/admin/reset-logs', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      const c = data.counts;
+      showToast('日誌已清空！GM日誌: ' + c.gm_action_logs + ' / Bug: ' + c.bug_reports, 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  });
+}
 
 // 自動登入
 if (gmToken && gmAccount) {

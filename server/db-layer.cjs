@@ -695,16 +695,16 @@ async function saveAccountShared(account, patch) {
     const params = [account];
     let idx = 2;
     if ('ownedTransforms' in patch) {
-      sets.push(`owned_transforms = ${idx}`); params.push(patch.ownedTransforms); idx++;
+      sets.push(`owned_transforms = $${idx}::jsonb`); params.push(patch.ownedTransforms); idx++;
     }
     if ('ownedHeroes' in patch) {
-      sets.push(`owned_heroes = ${idx}`); params.push(patch.ownedHeroes); idx++;
+      sets.push(`owned_heroes = $${idx}::jsonb`); params.push(patch.ownedHeroes); idx++;
     }
     if ('ownedPets' in patch) {
-      sets.push(`owned_pets = ${idx}`); params.push(patch.ownedPets); idx++;
+      sets.push(`owned_pets = $${idx}::jsonb`); params.push(patch.ownedPets); idx++;
     }
     if ('warehouse' in patch) {
-      sets.push(`warehouse = ${idx}`); params.push(patch.warehouse); idx++;
+      sets.push(`warehouse = $${idx}::jsonb`); params.push(patch.warehouse); idx++;
     }
     if (sets.length === 0) return;
     sets.push('updated_at = NOW()');
@@ -713,7 +713,7 @@ async function saveAccountShared(account, patch) {
       k === 'ownedHeroes' ? 'owned_heroes' :
       k === 'ownedPets' ? 'owned_pets' : k
     ).join(', ');
-    const placeholders = params.slice(1).map((_, i) => '$' + (i + 2)).join(', ');
+    const placeholders = params.slice(1).map((_, i) => '$' + (i + 2) + '::jsonb').join(', ');
     await pgPool.query(
       `INSERT INTO account_shared (account, ${colNames}, updated_at)
        VALUES ($1, ${placeholders}, NOW())
@@ -1121,6 +1121,267 @@ async function searchPlayers(keyword, limit) {
   }
 }
 
+// ==================== GM 資料庫管理（重置 / 統計） ====================
+
+// 取得所有資料表筆數統計
+async function getStats() {
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const tables = [
+      'accounts', 'characters', 'account_shared', 'warehouse_logs',
+      'gm_action_logs', 'announcements', 'game_config', 'castle_states',
+      'custom_items', 'bug_reports',
+    ];
+    const result = {};
+    for (const t of tables) {
+      try {
+        const { rows } = await pgPool.query(`SELECT COUNT(*)::int AS c FROM "${t}"`);
+        result[t] = rows[0].c;
+      } catch (e) { result[t] = -1; }
+    }
+    return result;
+  } else {
+    // JSON 模式：角色巢狀在 accounts[account].characters[serverId] 陣列中
+    const accounts = loadJSON('accounts.json', {});
+    let charCount = 0;
+    for (const acc of Object.values(accounts)) {
+      const bySrv = acc.characters || {};
+      for (const srv of Object.keys(bySrv)) {
+        const arr = bySrv[srv] || [];
+        for (const c of arr) { if (c && c.name) charCount++; }
+      }
+    }
+    const counts = {
+      accounts: Object.keys(accounts).length,
+      characters: charCount,
+      account_shared: Object.keys(loadJSON('account-shared.json', {})).length,
+      warehouse_logs: loadJSON('warehouse-logs.json', []).length,
+      gm_action_logs: loadJSON('gm-action-logs.json', []).length,
+      announcements: loadJSON('announcements.json', []).length,
+      game_config: Object.keys(loadJSON('game-config.json', {})).length,
+      castle_states: Object.keys(loadJSON('castle-states.json', {})).length,
+      custom_items: Object.keys(loadJSON('custom-items.json', {})).length,
+      bug_reports: loadJSON('bug-reports.json', []).length,
+    };
+    return counts;
+  }
+}
+
+// --- seed 預設資料（game_config + castle_states） ---
+async function seedDefaults() {
+  if (backend === 'postgres') {
+    await ensureSchema();
+    try {
+      await pgPool.query(`
+        INSERT INTO game_config (key, value)
+        VALUES
+          ('exp_rate', to_jsonb(1.0::float)),
+          ('gold_rate', to_jsonb(1.0::float)),
+          ('drop_rate', to_jsonb(1.0::float)),
+          ('class_change_cost', to_jsonb(3600)),
+          ('warehouse_max_slots', to_jsonb(200))
+        ON CONFLICT (key) DO NOTHING
+      `);
+    } catch (e) { console.warn('[DB] config seed 跳過:', e.message); }
+    try {
+      await pgPool.query(`
+        INSERT INTO castle_states (castle_id, owner_nation, siege_start_hour, siege_duration_min)
+        VALUES
+          ('gludio', 'kent', 20, 60),
+          ('oren',   'oren', 20, 60),
+          ('dion',   'dion', 20, 60),
+          ('giran',  'aden', 20, 60),
+          ('aden',   'aden', 20, 60)
+        ON CONFLICT (castle_id) DO NOTHING
+      `);
+    } catch (e) { console.warn('[DB] castle seed 跳過:', e.message); }
+    return true;
+  } else {
+    const cfg = loadJSON('game-config.json', {});
+    const defaults = {
+      exp_rate: 1.0, gold_rate: 1.0, drop_rate: 1.0,
+      class_change_cost: 3600, warehouse_max_slots: 200,
+    };
+    let changed = false;
+    for (const k of Object.keys(defaults)) {
+      if (cfg[k] == null) { cfg[k] = defaults[k]; changed = true; }
+    }
+    if (changed) saveJSON('game-config.json', cfg);
+    const castles = loadJSON('castle-states.json', {});
+    const castleDefaults = {
+      gludio: { castleId: 'gludio', ownerNation: 'kent', siegeStartHour: 20, siegeDurationMin: 60 },
+      oren:   { castleId: 'oren',   ownerNation: 'oren', siegeStartHour: 20, siegeDurationMin: 60 },
+      dion:   { castleId: 'dion',   ownerNation: 'dion', siegeStartHour: 20, siegeDurationMin: 60 },
+      giran:  { castleId: 'giran',  ownerNation: 'aden', siegeStartHour: 20, siegeDurationMin: 60 },
+      aden:   { castleId: 'aden',   ownerNation: 'aden', siegeStartHour: 20, siegeDurationMin: 60 },
+    };
+    let cChanged = false;
+    for (const k of Object.keys(castleDefaults)) {
+      if (!castles[k]) { castles[k] = castleDefaults[k]; cChanged = true; }
+    }
+    if (cChanged) saveJSON('castle-states.json', castles);
+    return true;
+  }
+}
+
+// --- 全部重置：清空所有遊戲資料，custom_items 可選保留 ---
+async function resetAll(options = {}) {
+  const keepCustomItems = options.keepCustomItems !== false;
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const counts = {};
+    const tables = [
+      'characters', 'account_shared', 'warehouse_logs',
+      'announcements', 'gm_action_logs', 'bug_reports', 'accounts',
+    ];
+    if (!keepCustomItems) tables.push('custom_items');
+    for (const t of tables) {
+      try {
+        const { rows } = await pgPool.query(`SELECT COUNT(*)::int AS c FROM "${t}"`);
+        counts[t] = rows[0].c;
+      } catch (e) { counts[t] = 0; }
+    }
+    const truncateList = keepCustomItems
+      ? 'accounts, characters, account_shared, warehouse_logs, announcements, gm_action_logs, bug_reports'
+      : 'accounts, characters, account_shared, warehouse_logs, announcements, gm_action_logs, bug_reports, custom_items';
+    try {
+      await pgPool.query(`TRUNCATE TABLE ${truncateList} RESTART IDENTITY CASCADE`);
+    } catch (e) {
+      console.error('[DB] TRUNCATE 失敗:', e.message);
+      throw e;
+    }
+    // 重置 game_config / castle_states 為預設
+    try { await pgPool.query('TRUNCATE TABLE game_config RESTART IDENTITY'); } catch(e) {}
+    try { await pgPool.query('TRUNCATE TABLE castle_states RESTART IDENTITY'); } catch(e) {}
+    await seedDefaults();
+    const { rows: cfgRows } = await pgPool.query('SELECT COUNT(*)::int AS c FROM game_config');
+    const { rows: castleRows } = await pgPool.query('SELECT COUNT(*)::int AS c FROM castle_states');
+    counts.game_config_after = cfgRows[0].c;
+    counts.castle_states_after = castleRows[0].c;
+    if (keepCustomItems) {
+      const { rows: ciRows } = await pgPool.query('SELECT COUNT(*)::int AS c FROM custom_items');
+      counts.custom_items_kept = ciRows[0].c;
+    }
+    return counts;
+  } else {
+    // JSON 模式：角色巢狀在 accounts[account].characters[serverId]
+    const accounts = loadJSON('accounts.json', {});
+    let charCount = 0;
+    for (const acc of Object.values(accounts)) {
+      const bySrv = acc.characters || {};
+      for (const srv of Object.keys(bySrv)) {
+        const arr = bySrv[srv] || [];
+        for (const c of arr) { if (c && c.name) charCount++; }
+      }
+    }
+    const counts = {};
+    counts.accounts = Object.keys(accounts).length;
+    counts.characters = charCount;
+    counts.account_shared = Object.keys(loadJSON('account-shared.json', {})).length;
+    counts.warehouse_logs = loadJSON('warehouse-logs.json', []).length;
+    counts.announcements = loadJSON('announcements.json', []).length;
+    counts.gm_action_logs = loadJSON('gm-action-logs.json', []).length;
+    counts.bug_reports = loadJSON('bug-reports.json', []).length;
+    if (!keepCustomItems) {
+      counts.custom_items = Object.keys(loadJSON('custom-items.json', {})).length;
+    }
+    // 全部清空
+    saveJSON('accounts.json', {});
+    saveJSON('account-shared.json', {});
+    saveJSON('warehouse-logs.json', []);
+    saveJSON('announcements.json', []);
+    saveJSON('gm-action-logs.json', []);
+    saveJSON('bug-reports.json', []);
+    if (!keepCustomItems) saveJSON('custom-items.json', {});
+    saveJSON('game-config.json', {});
+    saveJSON('castle-states.json', {});
+    await seedDefaults();
+    counts.game_config_after = Object.keys(loadJSON('game-config.json', {})).length;
+    counts.castle_states_after = Object.keys(loadJSON('castle-states.json', {})).length;
+    if (keepCustomItems) {
+      counts.custom_items_kept = Object.keys(loadJSON('custom-items.json', {})).length;
+    }
+    return counts;
+  }
+}
+
+// --- 只清角色：characters / account_shared / warehouse_logs，保留 accounts ---
+async function resetCharacters() {
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const counts = {};
+    const tables = ['characters', 'account_shared', 'warehouse_logs'];
+    for (const t of tables) {
+      try {
+        const { rows } = await pgPool.query(`SELECT COUNT(*)::int AS c FROM "${t}"`);
+        counts[t] = rows[0].c;
+      } catch (e) { counts[t] = 0; }
+    }
+    try {
+      await pgPool.query('TRUNCATE TABLE characters, account_shared, warehouse_logs RESTART IDENTITY CASCADE');
+    } catch (e) {
+      // 部分資料庫可能不支援多表 TRUNCATE CASCADE，降級成逐表 DELETE + 重置序列
+      await pgPool.query('DELETE FROM characters');
+      await pgPool.query('DELETE FROM account_shared');
+      await pgPool.query('DELETE FROM warehouse_logs');
+      try { await pgPool.query('ALTER SEQUENCE characters_id_seq RESTART WITH 1'); } catch(_) {}
+      try { await pgPool.query('ALTER SEQUENCE warehouse_logs_id_seq RESTART WITH 1'); } catch(_) {}
+    }
+    return counts;
+  } else {
+    // JSON 模式：角色巢狀在 accounts[account].characters[serverId]，只清角色保留帳號
+    const accounts = loadJSON('accounts.json', {});
+    let charCount = 0;
+    for (const acc of Object.values(accounts)) {
+      const bySrv = acc.characters || {};
+      for (const srv of Object.keys(bySrv)) {
+        const arr = bySrv[srv] || [];
+        for (const c of arr) { if (c && c.name) charCount++; }
+        // 清空該 server 的角色槽（保留空陣列結構）
+        bySrv[srv] = [];
+      }
+    }
+    const counts = {
+      characters: charCount,
+      account_shared: Object.keys(loadJSON('account-shared.json', {})).length,
+      warehouse_logs: loadJSON('warehouse-logs.json', []).length,
+    };
+    saveJSON('accounts.json', accounts);
+    saveJSON('account-shared.json', {});
+    saveJSON('warehouse-logs.json', []);
+    return counts;
+  }
+}
+
+// --- 清空日誌：gm_action_logs + bug_reports ---
+async function resetLogs() {
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const counts = {};
+    const { rows: g } = await pgPool.query('SELECT COUNT(*)::int AS c FROM gm_action_logs');
+    const { rows: b } = await pgPool.query('SELECT COUNT(*)::int AS c FROM bug_reports');
+    counts.gm_action_logs = g[0].c;
+    counts.bug_reports = b[0].c;
+    try {
+      await pgPool.query('TRUNCATE TABLE gm_action_logs, bug_reports RESTART IDENTITY');
+    } catch (e) {
+      await pgPool.query('DELETE FROM gm_action_logs');
+      await pgPool.query('DELETE FROM bug_reports');
+      try { await pgPool.query('ALTER SEQUENCE gm_action_logs_id_seq RESTART WITH 1'); } catch(_) {}
+    }
+    return counts;
+  } else {
+    const counts = {
+      gm_action_logs: loadJSON('gm-action-logs.json', []).length,
+      bug_reports: loadJSON('bug-reports.json', []).length,
+    };
+    saveJSON('gm-action-logs.json', []);
+    saveJSON('bug-reports.json', []);
+    return counts;
+  }
+}
+
+
 module.exports = {
   init,
   getBackend,
@@ -1165,4 +1426,10 @@ module.exports = {
   listCustomItems,
   upsertCustomItem,
   deleteCustomItem,
+  // 資料庫管理（GM）
+  getStats,
+  seedDefaults,
+  resetAll,
+  resetCharacters,
+  resetLogs,
 };

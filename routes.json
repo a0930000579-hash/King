@@ -2,7 +2,7 @@
   {
     "path": "/",
     "file": "index.html",
-    "name": "君主之刃 v2.4.0 · 本地化自足版"
+    "name": "君主之刃 v2.5.6"
   },
   {
     "path": "/diag",
@@ -22,6 +22,11 @@
   {
     "path": "/gm",
     "file": "gm.html",
-    "name": "GM 後台 · 管理者入口"
+    "name": "GM 後台 · 君主之刃"
+  },
+  {
+    "path": "/offline",
+    "file": "offline/index.html",
+    "name": "君主之刃 · 自由移動 MMORPG"
   }
 ]
