@@ -1,11 +1,12 @@
-/**
- * v2.7.2：零依賴 WebSocket 伺服器（RFC 6455）
+/*
+ * v2.7.3：零依賴 WebSocket 伺服器（RFC 6455）+ AI 權威持久化
  * 用 Node 原生 http + crypto，不需要 socket.io / ws 套件，避免 npm install 佔空間
  *
  * 功能：
  *  - 多人 presence / 移動 / 聊天（按 serverId:mapId 隔離）
- *  - 伺服器級 AI 廣播（權威生成、GM 調整數量即時生效）
+ *  - 伺服器級 AI 廣播（權威生成、GM 調整數量即時生效、持久化重啟不變）
  *  - GM 廣播與設定推送
+ *  - Long-Poll 回調（AI 變動時通知 LP 玩家）
  */
 
 const crypto = require('crypto');
@@ -20,6 +21,18 @@ function createWsServer(httpServer) {
   const mapStates = new Map();
   // AI 狀態：key = "serverId:mapId" -> Map(aiId -> aiData)
   const aiStates = new Map();
+  // 哪些地圖的 AI 已從持久化載入（避免重複載入）
+  const aiLoaded = new Set();
+  // AI 持久化介面（由外部注入）
+  let aiPersistence = null;
+  // Long-Poll 廣播回調（通知 LP 玩家 AI 變動）
+  let lpAIBroadcast = null;
+
+  // v2.7.3：設定 AI 持久化
+  function setAIPersistence(p) { aiPersistence = p; }
+
+  // v2.7.3：設定 long-poll AI 廣播回調
+  function setLPAIBroadcast(fn) { lpAIBroadcast = typeof fn === 'function' ? fn : null; }
 
   function mapKey(serverId, mapId) {
     return (serverId || 'zeus') + ':' + (mapId || 'default');
@@ -46,58 +59,105 @@ function createWsServer(httpServer) {
     }
   }
 
-  // 廣播 AI 快照到地圖內所有人
+  // 廣播 AI 快照到地圖內所有人（WS + LP）
   function broadcastAISnapshot(serverId, mapId) {
     const aiState = getAIState(serverId, mapId);
     const snapshot = Array.from(aiState.values());
     const msg = { type: 'ai_snapshot', serverId, mapId, ais: snapshot, time: Date.now() };
     broadcastToMap(serverId, mapId, msg);
+    // v2.7.3：也通知 long-poll 玩家
+    if (lpAIBroadcast) {
+      try { lpAIBroadcast(serverId, mapId, snapshot); } catch(e) {}
+    }
   }
 
   // ========== AI 權威生成 ==========
   // 根據伺服器設定的 aiCount，在指定地圖生成/銷毀 AI
+  // v2.7.3：用確定性種子（serverId + mapId）+ 持久化，重啟 AI id/數量不變
+
+  // 簡單偽隨機（seeded）—— 用 serverId+mapId 當種子，確保同服同圖 AI 一致
+  function seededRandom(seedStr) {
+    let h = 2166136261;
+    for (let i = 0; i < seedStr.length; i++) {
+      h ^= seedStr.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    let s = h >>> 0;
+    return function() {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const AI_CLASSES = ['warrior', 'mage', 'archer', 'rogue', 'paladin', 'warlock'];
+  const AI_NAMES = ['艾倫', '麗娜', '索爾', '凱特', '布萊恩', '索菲', '雷克斯',
+                    '艾琳', '馬克', '珍妮', '湯姆', '凱文', '蘿西', '迪克',
+                    '漢斯', '安娜', '彼得', '露西', '傑克', '艾米'];
+  const AI_NATIONS = ['liang', 'wei', 'shu', 'wu', 'qun'];
+
+  function generateAI(serverId, mapId, idx, initLevel) {
+    const rng = seededRandom(`${serverId}:${mapId}:ai:${idx}`);
+    const classId = AI_CLASSES[Math.floor(rng() * AI_CLASSES.length)];
+    const nameIdx = Math.floor(rng() * AI_NAMES.length);
+    const name = AI_NAMES[nameIdx] + '·AI';
+    const nationIdx = Math.floor(rng() * AI_NATIONS.length);
+    const nation = AI_NATIONS[nationIdx];
+    // 等級：initLevel 為基礎，浮動 ±0~2（受 idx 影響，穩定）
+    const level = Math.max(1, Math.floor(initLevel + Math.floor(rng() * 3)));
+    const x = Math.floor(150 + rng() * 1700);
+    const y = Math.floor(150 + rng() * 1100);
+    const dirs = ['up', 'down', 'left', 'right'];
+    const dir = dirs[Math.floor(rng() * 4)];
+    return {
+      id: `ai_${serverId}_${mapId}_${idx + 1}`,
+      name,
+      classId,
+      level,
+      nation,
+      x, y, dir,
+      hp: 100,
+      maxHp: 100,
+      isAI: true,
+      serverId,
+      mapId,
+      createdAt: Date.now(),
+    };
+  }
+
   function adjustAICount(serverId, mapId, targetCount, opts = {}) {
     const aiState = getAIState(serverId, mapId);
     const current = aiState.size;
+    targetCount = Math.max(0, Math.floor(targetCount));
 
     if (targetCount < current) {
       // 刪除多餘的 AI（從後往前刪）
       let toRemove = current - targetCount;
-      const ids = Array.from(aiState.keys()).reverse();
+      const ids = Array.from(aiState.keys()).sort().reverse();
       for (const id of ids) {
         if (toRemove <= 0) break;
         aiState.delete(id);
         toRemove--;
       }
     } else if (targetCount > current) {
-      // 生成新 AI
-      const classes = ['warrior', 'mage', 'archer', 'rogue', 'paladin', 'warlock'];
-      const names = ['艾倫', '麗娜', '索爾', '凱特', '布萊恩', '索菲', '雷克斯',
-                     '艾琳', '馬克', '珍妮', '湯姆', '凱文', '蘿西', '迪克'];
-      let aiId = current + 1;
+      // 生成新 AI（用確定性函式，確保同一服同圖同序號 AI 一致）
+      const initLv = opts.initLevel != null ? parseInt(opts.initLevel) : 1;
       for (let i = current; i < targetCount; i++) {
-        const id = `ai_${serverId}_${mapId}_${aiId}`;
-        const ai = {
-          id,
-          name: names[Math.floor(Math.random() * names.length)] + '·AI',
-          classId: classes[Math.floor(Math.random() * classes.length)],
-          level: opts.initLevel || 1 + Math.floor(Math.random() * 5),
-          x: 200 + Math.floor(Math.random() * 1600),
-          y: 200 + Math.floor(Math.random() * 1000),
-          dir: 'down',
-          hp: 100,
-          maxHp: 100,
-          isAI: true,
-          serverId,
-          mapId,
-          createdAt: Date.now(),
-        };
-        aiState.set(id, ai);
-        aiId++;
+        const ai = generateAI(serverId, mapId, i, initLv);
+        aiState.set(ai.id, ai);
       }
     }
 
-    // 廣播給當前地圖玩家
+    // 持久化
+    if (aiPersistence && aiPersistence.save) {
+      try {
+        aiPersistence.save(serverId, mapId, Array.from(aiState.values()));
+      } catch(e) {}
+    }
+
+    // 廣播給當前地圖玩家（WS + LP）
     broadcastAISnapshot(serverId, mapId);
     return aiState.size;
   }
@@ -483,10 +543,10 @@ function createWsServer(httpServer) {
       adjustAICount(serverId, map, targetCount, opts);
       affected.push(map);
     }
-    // 如果這伺服器還沒有任何地圖的 AI 狀態，預設為 village_01 生成
+    // 如果這伺服器還沒有任何地圖的 AI 狀態，預設為 village 生成
     if (affected.length === 0 && !opts.mapId) {
-      adjustAICount(serverId, 'village_01', targetCount, opts);
-      affected.push('village_01');
+      adjustAICount(serverId, 'village', targetCount, opts);
+      affected.push('village');
     }
     return { affected, count: targetCount };
   }
@@ -522,12 +582,28 @@ function createWsServer(httpServer) {
   let _serverAIConfigProvider = null; // (serverId) => { aiCount, initLevel }
   function setServerAIConfigProvider(fn) { _serverAIConfigProvider = fn; }
 
-  function ensureAIForMap(serverId, mapId, aiCount, initLevel) {
+  async function ensureAIForMap(serverId, mapId, aiCount, initLevel) {
+    const k = mapKey(serverId, mapId);
     const aiState = getAIState(serverId, mapId);
+
+    // v2.7.3：先嘗試從持久化載入（重啟不變）
+    if (!aiLoaded.has(k) && aiPersistence && aiPersistence.load) {
+      try {
+        const saved = aiPersistence.load(serverId, mapId);
+        if (Array.isArray(saved) && saved.length > 0) {
+          aiState.clear();
+          saved.forEach(ai => aiState.set(ai.id, ai));
+          aiLoaded.add(k);
+          console.log(`[AI] 從持久化載入 ${serverId}:${mapId}，共 ${saved.length} 個 AI`);
+          return aiState.size;
+        }
+      } catch(e) { console.warn('[AI] 持久化載入失敗:', e.message); }
+      aiLoaded.add(k); // 標記已嘗試載入（不論成敗）
+    }
+
     if (aiState.size === 0 && aiCount > 0) {
       adjustAICount(serverId, mapId, aiCount, { initLevel });
     }
-    // 同步 long-poll 的 AI 狀態
     return aiState.size;
   }
 
@@ -546,6 +622,8 @@ function createWsServer(httpServer) {
     getOnlinePlayers,
     ensureAIForMap,
     setServerAIConfigProvider,
+    setAIPersistence,
+    setLPAIBroadcast,
     getAIList,
     broadcastToMap,
     broadcastAISnapshot,

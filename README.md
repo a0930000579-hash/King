@@ -1,13 +1,13 @@
-# 君主之刃 v2.3.5 · 分段資產部署版
+# 君主之刃 v2.7.3 · 正式營運版
 
 黑暗奇幻 MMORPG 瀏覽器遊戲，單機可玩、支援多人連線、跨設備帳號同步。
 
 ## 版本資訊
 
-- 目前版本：v2.3.5
-- `/api/health` 回傳 `version: "2.3.5"`
-- 8 幀一致性：六職業 + 真系列金變已全數修復，無重複幀、無混圖
-- missing=0（assets-manifest.json 全數對應本機檔案）
+- 目前版本：v2.7.3
+- `/api/health` 回傳 `version: "2.7.3"`，含 `instanceId` / `socketIo` / `webSocket`
+- 離線模式判定：fetch `/api/health` 有回應=已連線(綠)，404/連不到=未連線(紅)並提示「目前伺服器未提供API，可能部署成靜態站而非Web Service」
+- v2.7.3 重點：6 套真系列金變 8 幀重製 / 權威 AI 多人同步持久化 / 商店數量選擇器 / 原生彈窗遊戲化 / 倉庫系統 / buff icon 補齊 / NPC 對話頭像
 
 ---
 
@@ -136,9 +136,14 @@ npm start
 **沒有 `DATABASE_URL` 時自動退回本機 JSON 檔案模式**（`data/accounts.json`）。
 適用於本機開發或純單機體驗。
 
-**重要：在 DigitalOcean App Platform、Render、Fly.io 這類 PaaS 平台上，
-容器重啟或重新部署後，本機檔案會被清空，帳號資料會遺失。
-請勿依賴本機硬碟做為永久儲存。** 正式營運請一定設定 `DATABASE_URL`。
+**⚠️ 重要：在 DigitalOcean App Platform、Render、Fly.io 這類 PaaS 平台上，
+容器重啟或重新部署後，本機檔案會被清空，帳號與角色資料會遺失。
+AI 持久化檔 `data/ai/*.json` 同樣會在重啟後還原為預設狀態。
+請勿依賴本機硬碟做為永久儲存。** 正式營運請一定：
+
+1. 設定 `DATABASE_URL` 接外部 PostgreSQL（推薦 DO Managed PostgreSQL / Neon / Supabase）
+2. 或掛載持久化磁碟（Volume）到 `data/` 目錄
+3. 或改用 Redis / MongoDB 等外部狀態存儲
 
 ---
 

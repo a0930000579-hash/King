@@ -41,6 +41,14 @@ const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2MB
 const GM_ACCOUNT = '19811013';
 const GM_PASSWORD = process.env.GM_PASSWORD || '19811013';
 
+// v2.7.3：伺服器實例標識（兩支手機比對是否連到同 process）
+const SERVER_INSTANCE_ID = 'srv_' + crypto.randomBytes(6).toString('hex') + '_' + process.pid;
+const SERVER_START_TIME = Date.now();
+
+// v2.7.3：AI 持久化目錄（伺服器重啟後 AI id/數量/等級一致）
+const AI_DATA_DIR = path.join(DATA_DIR, 'ai');
+try { if (!fs.existsSync(AI_DATA_DIR)) fs.mkdirSync(AI_DATA_DIR, { recursive: true }); } catch(e) {}
+
 // ========== 資產掃描（大小寫對照表，供大小寫不同的請求做備查） ==========
 function buildAssetIndex(dir) {
   const map = new Map(); // 小寫路徑 -> 真實相對路徑
@@ -279,19 +287,27 @@ async function handleMpApi(req, res, pathname, query, account) {
       for (const [pid, s] of mapState) {
         if (pid !== playerId) others.push(s);
       }
-      // v2.7.2：同時返回伺服器級 AI 列表（權威）
-      const ais = wsServer.getAIList(serverId, mapId);
-      // 若此伺服器此地圖還沒有 AI，按設定生成
+      // v2.7.3：先確保 AI 已生成（同步等待，從持久化載入或按設定生成），再返回
+      //  避免第一個玩家拿到空 AI、第二個玩家才有（偽線上症狀的主因）
+      let ais = wsServer.getAIList(serverId, mapId);
       if (ais.length === 0) {
-        db.getServer(serverId).then(srv => {
+        try {
+          const srv = await db.getServer(serverId);
           if (srv) {
             const cnt = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
             const lv = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
-            wsServer.ensureAIForMap(serverId, mapId, cnt, lv);
+            await wsServer.ensureAIForMap(serverId, mapId, cnt, lv);
+            ais = wsServer.getAIList(serverId, mapId);
+          } else {
+            // 伺服器不存在（可能是新服），用預設值生成
+            await wsServer.ensureAIForMap(serverId, mapId, 8, 1);
+            ais = wsServer.getAIList(serverId, mapId);
           }
-        }).catch(() => {});
+        } catch(e) {
+          console.warn('[Join] AI 初始化失敗:', e.message);
+        }
       }
-      sendJson(res, 200, { ok: true, playerId, others, ais, mapId, serverId, time: Date.now() });
+      sendJson(res, 200, { ok: true, playerId, others, ais, mapId, serverId, instanceId: SERVER_INSTANCE_ID, time: Date.now() });
     } catch(e) {
       sendJson(res, 500, { error: e.message });
     }
@@ -356,27 +372,37 @@ async function handleMpApi(req, res, pathname, query, account) {
     const since = query.since ? parseInt(query.since) : 0;
     if (!mapId) { sendJson(res, 400, { error: '缺少 map' }); return; }
     const newBcasts = mpBroadcasts.filter(b => b.time > since);
+    // v2.7.3：每輪 poll 都帶最新 AI 快照（GM 改 aiCount 時 LP 玩家也同步）
+    const currentAIs = wsServer.getAIList(serverId, mapId);
     const key = mpKey(serverId, mapId);
     if (!mpPollWaiters.has(key)) mpPollWaiters.set(key, []);
     const waiters = mpPollWaiters.get(key);
     const entry = { res, since, playerId, startTime: Date.now() };
     waiters.push(entry);
+    const sendPollResponse = (events, timeout) => {
+      try {
+        res.end(JSON.stringify({
+          ok: true,
+          events: events || [],
+          broadcasts: newBcasts,
+          ais: currentAIs,
+          time: Date.now(),
+          timeout: !!timeout,
+        }));
+      } catch(e) {}
+    };
     setTimeout(() => {
       const idx = waiters.indexOf(entry);
       if (idx >= 0) {
         waiters.splice(idx, 1);
-        try {
-          res.end(JSON.stringify({ ok: true, events: [], broadcasts: newBcasts, time: Date.now(), timeout: true }));
-        } catch(e) {}
+        sendPollResponse([], true);
       }
     }, MP_POLL_TIMEOUT);
     if (newBcasts.length > 0) {
       const idx = waiters.indexOf(entry);
       if (idx >= 0) {
         waiters.splice(idx, 1);
-        try {
-          res.end(JSON.stringify({ ok: true, events: [], broadcasts: newBcasts, time: Date.now() }));
-        } catch(e) {}
+        sendPollResponse([], false);
       }
     }
     return;
@@ -630,11 +656,13 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.7.2',
-      build: '2.7.2-2608290600',
-      buildId: '2.7.2-2608290600',
+      version: '2.7.3',
+      build: '2.7.3-2608292300',
+      buildId: '2.7.3-2608292300',
+      instanceId: SERVER_INSTANCE_ID,
+      startTime: SERVER_START_TIME,
       time: Date.now(),
-      socketIo: true, // v2.7.2：WebSocket 原生實作（零依賴），對外兼容 socket.io 語義
+      socketIo: true,
       webSocket: true,
       longPoll: true,
       dbBackend: backend,
@@ -693,10 +721,49 @@ async function handleApi(req, res, pathname, query) {
       manifestLoadedOk = false;
     }
 
+    // v2.7.3：實例與多人連線概況
+    const uptime = Date.now() - SERVER_START_TIME;
+    const serverSummaries = {};
+    try {
+      // 遍歷 WS 端所有活躍地圖
+      const wsOnline = wsServer.getOnlinePlayers();
+      const serverMapCounts = {}; // serverId -> { online, maps: { mapId: { players, ais } } }
+      for (const p of wsOnline) {
+        if (!serverMapCounts[p.serverId]) serverMapCounts[p.serverId] = { online: 0, maps: {} };
+        serverMapCounts[p.serverId].online++;
+        if (!serverMapCounts[p.serverId].maps[p.mapId]) {
+          serverMapCounts[p.serverId].maps[p.mapId] = { wsPlayers: 0, lpPlayers: 0, aiCount: 0 };
+        }
+        serverMapCounts[p.serverId].maps[p.mapId].wsPlayers++;
+      }
+      // LP 玩家（從 mpMapStates 數）
+      for (const [key, state] of mpMapStates.entries()) {
+        const [srv, mapId] = key.split(':');
+        if (!serverMapCounts[srv]) serverMapCounts[srv] = { online: 0, maps: {} };
+        if (!serverMapCounts[srv].maps[mapId]) {
+          serverMapCounts[srv].maps[mapId] = { wsPlayers: 0, lpPlayers: 0, aiCount: 0 };
+        }
+        serverMapCounts[srv].maps[mapId].lpPlayers = state.size;
+        serverMapCounts[srv].online += state.size;
+      }
+      // AI 數（從 wsServer 取）
+      for (const [srv, info] of Object.entries(serverMapCounts)) {
+        for (const mapId of Object.keys(info.maps)) {
+          info.maps[mapId].aiCount = wsServer.getAIList(srv, mapId).length;
+        }
+        info.totalPlayers = info.online;
+        serverSummaries[srv] = info;
+      }
+    } catch(e) { /* 忽略彙整錯誤 */ }
+
     return sendJson(res, 200, {
-      version: '2.7.1',
-      build: '2.7.1-2608290300',
-      buildId: '2.7.1-2608290300',
+      version: '2.7.3',
+      build: '2.7.3-2608292300',
+      buildId: '2.7.3-2608292300',
+      instanceId: SERVER_INSTANCE_ID,
+      startTime: SERVER_START_TIME,
+      uptimeMs: uptime,
+      uptime: Math.floor(uptime / 1000) + 's',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -721,10 +788,14 @@ async function handleApi(req, res, pathname, query) {
       manifestMissingSamples: manifestMissingSamples,
       dataDir: DATA_DIR,
       dataDirExists: fs.existsSync(DATA_DIR),
+      aiDataDir: AI_DATA_DIR,
       port: PORT,
       nodeVersion: process.version,
       platform: process.platform,
       listenHost: '0.0.0.0',
+      wsClientCount: wsServer.clientCount,
+      wsAuthenticatedCount: wsServer.authenticatedCount,
+      servers: serverSummaries,
     });
   }
 
@@ -806,7 +877,7 @@ async function handleApi(req, res, pathname, query) {
       const playerA = 'selftest_A_' + Math.random().toString(36).slice(2, 8);
       const playerB = 'selftest_B_' + Math.random().toString(36).slice(2, 8);
 
-      const mapState = getMapState(testMap);
+      const mapState = getMapState(testServer, testMap);
       // A 加入
       const stateA = {
         playerId: 'selftest:A', account: playerA, charIdx: 0,
@@ -837,8 +908,8 @@ async function handleApi(req, res, pathname, query) {
         write() {},
         getHeader() { return undefined; },
       };
-      if (!mpPollWaiters.has(testMap)) mpPollWaiters.set(testMap, []);
-      mpPollWaiters.get(testMap).push({
+      if (!mpPollWaiters.has(mpKey(testServer, testMap))) mpPollWaiters.set(mpKey(testServer, testMap), []);
+      mpPollWaiters.get(mpKey(testServer, testMap)).push({
         res: fakeRes, since: 0, playerId: 'selftest:B', startTime: Date.now(),
       });
 
@@ -847,7 +918,7 @@ async function handleApi(req, res, pathname, query) {
       stateA.y = 388;
       stateA.dir = 'left';
       stateA.lastUpdate = Date.now();
-      notifyMapUpdate(testMap, {
+      notifyMapUpdate(testServer, testMap, {
         type: 'move',
         playerId: 'selftest:A',
         x: 512, y: 388, dir: 'left',
@@ -875,8 +946,8 @@ async function handleApi(req, res, pathname, query) {
       // 清理：兩人離開地圖
       mapState.delete('selftest:A');
       mapState.delete('selftest:B');
-      notifyMapUpdate(testMap, { type: 'leave', playerId: 'selftest:A', time: Date.now() });
-      notifyMapUpdate(testMap, { type: 'leave', playerId: 'selftest:B', time: Date.now() });
+      notifyMapUpdate(testServer, testMap, { type: 'leave', playerId: 'selftest:A', time: Date.now() });
+      notifyMapUpdate(testServer, testMap, { type: 'leave', playerId: 'selftest:B', time: Date.now() });
       if (mapState.size === 0) mpMapStates.delete(testMap);
 
       const pass = receivedMove && moveX === 512 && moveY === 388 && moveDir === 'left';
@@ -2305,11 +2376,67 @@ const wsServer = createWsServer(server);
 // 讓 ws 模組能用 verifyToken
 global._wsVerifyToken = verifyToken;
 
-// v2.7.2：注入伺服器 AI 設定提供者（WS 第一次有人進地圖時按設定生成 AI）
-wsServer.setServerAIConfigProvider((serverId) => {
-  // 同步讀取可能有問題，用快取；簡單起見直接回傳預設
-  // 真正的設定從 db 非同步讀，但第一次進入時先給預設，GM 後續修改會即時生效
-  return { aiCount: 8, initLevel: 1 };
+// v2.7.3：注入 long-poll AI 廣播回調（AI 變動時喚醒 poll waiters）
+wsServer.setLPAIBroadcast((serverId, mapId, ais) => {
+  const key = mpKey(serverId, mapId);
+  const waiters = mpPollWaiters.get(key);
+  if (!waiters || waiters.length === 0) return;
+  // 立即喚醒所有等待中的 poll，帶最新 AI 列表
+  const snapshot = [...ais];
+  const now = Date.now();
+  const bcasts = mpBroadcasts.filter(b => b.time > now - 5000);
+  while (waiters.length > 0) {
+    const w = waiters.shift();
+    try {
+      w.res.end(JSON.stringify({
+        ok: true,
+        events: [],
+        broadcasts: bcasts,
+        ais: snapshot,
+        time: now,
+        aiUpdated: true,
+      }));
+    } catch(e) {}
+  }
+});
+
+// v2.7.3：注入伺服器 AI 持久化函式（重啟後 AI 不變）
+wsServer.setAIPersistence({
+  load(serverId, mapId) {
+    const f = path.join(AI_DATA_DIR, `${serverId}_${mapId}.json`);
+    try {
+      if (fs.existsSync(f)) {
+        const data = JSON.parse(fs.readFileSync(f, 'utf8'));
+        if (Array.isArray(data)) return data;
+      }
+    } catch(e) { console.warn('[AI Persist] 載入失敗', serverId, mapId, e.message); }
+    return null;
+  },
+  save(serverId, mapId, aiList) {
+    const f = path.join(AI_DATA_DIR, `${serverId}_${mapId}.json`);
+    try {
+      fs.writeFileSync(f, JSON.stringify(aiList), 'utf8');
+    } catch(e) { console.warn('[AI Persist] 保存失敗', serverId, mapId, e.message); }
+  },
+  delete(serverId, mapId) {
+    const f = path.join(AI_DATA_DIR, `${serverId}_${mapId}.json`);
+    try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch(e) {}
+  }
+});
+
+// v2.7.3：注入伺服器 AI 設定提供者（從 DB 讀真實設定）
+wsServer.setServerAIConfigProvider(async (serverId) => {
+  try {
+    const srv = await db.getServer(serverId);
+    if (srv) {
+      return {
+        aiCount: srv.aiCount != null ? parseInt(srv.aiCount) : 8,
+        initLevel: srv.initLevel != null ? parseInt(srv.initLevel) : 1,
+        status: srv.status || 'open',
+      };
+    }
+  } catch(e) {}
+  return { aiCount: 8, initLevel: 1, status: 'open' };
 });
 
 server.on('upgrade', (req, socket, head) => {
@@ -2320,9 +2447,10 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-// ========== v2.7.2：伺服器級 AI（權威生成 + GM 聯動） ==========
+// ========== v2.7.3：伺服器級 AI（權威生成 + GM 聯動 + 持久化） ==========
 //  所有地圖的 AI 由伺服器統一管理，客戶端只負責渲染
-//  GM 修改 aiCount 後立即增減 AI 並廣播給在線玩家
+//  GM 修改 aiCount 後立即增減 AI 並廣播給在線玩家（WS + LP 雙通道）
+//  AI 狀態持久化到 data/ai/{serverId}_{mapId}.json，重啟不變
 
 /**
  * 根據伺服器設定調整 AI 數量（對所有已活躍地圖生效）
@@ -2402,7 +2530,7 @@ async function initGM() {
     console.log('  資產目錄: ' + ASSETS_DIR);
     console.log('  資產檔數: ' + assetCount + (assetCount < 100 ? '  [警告] 資產數過少，可能 assets 未正確部署' : ''));
     console.log('  資料後端: ' + db.getBackend() + ' (DB 初始化進行中，稍後會更新)');
-    console.log('  多人連線: WebSocket + Long-Poll 雙通道 (v2.7.2)');
+    console.log('  多人連線: WebSocket + Long-Poll 雙通道 (v2.7.3 AI 權威持久化)');
     console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
     if (GM_PASSWORD === '19811013') {
       console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');

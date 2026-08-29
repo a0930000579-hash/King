@@ -88,6 +88,9 @@
     get status() { return status; },
     get myId() { return myPlayerId; },
     get connected() { return status === STATUS.ONLINE; },
+    get serverId() { return currentServerId; },
+    get mapId() { return currentMapId; },
+    get transport() { return useWebSocket ? 'websocket' : (status === STATUS.ONLINE ? 'longpoll' : 'offline'); },
     STATUS: STATUS,
 
     getSavedServerUrl() {
@@ -208,8 +211,19 @@
       opts = opts || {};
       currentCharIdx = opts.charIdx ?? (GS.currentCharIdx ?? 0);
       const mapId = opts.mapId || GS.currentMap || 'village_01';
-      const serverId = opts.serverId || 'zeus';
+      // v2.7.3：優先從 opts 取，其次用已選伺服器（AuthSystem），最後才 fallback zeus
+      let serverId = opts.serverId;
+      if (!serverId && typeof AuthSystem !== 'undefined' && AuthSystem.getCurrentServer) {
+        const srv = AuthSystem.getCurrentServer();
+        if (srv && srv.id) serverId = srv.id;
+      }
+      if (!serverId && GS.currentServerId) serverId = GS.currentServerId;
+      if (!serverId) serverId = currentServerId || 'zeus';
       currentServerId = serverId;
+      // 在線模式先告訴 game.js 進入在線狀態，避免本地隨機生成 AI
+      if (typeof window.setServerOnline === 'function') {
+        window.setServerOnline(serverId, mapId);
+      }
       return apiPost('/api/mp/join', {
         mapId,
         serverId,
@@ -234,9 +248,13 @@
               }
             });
           }
-          // v2.7.2：同步伺服器級 AI 列表（權威）
-          if (data.ais && Array.isArray(data.ais) && typeof window.setServerAIs === 'function') {
-            window.setServerAIs(data.ais, serverId, mapId);
+          // v2.7.3：同步伺服器級 AI 列表（權威）—— 收到才標記在線
+          if (typeof window.setServerAIs === 'function') {
+            window.setServerAIs((data.ais && Array.isArray(data.ais)) ? data.ais : [], serverId, mapId);
+          }
+          // v2.7.3：回傳 instanceId 給客戶端診斷用
+          if (data.instanceId && typeof window._setServerInstanceId === 'function') {
+            window._setServerInstanceId(data.instanceId);
           }
           setStatus(STATUS.ONLINE);
           // v2.7.2：WS 模式下不啟動 long-poll（WS 已處理所有事件）
@@ -280,10 +298,11 @@
       // 清空遠端玩家
       clearAllRemotePlayers();
 
-      // 加入新地圖
+      // 加入新地圖（v2.7.3：serverId 用當前伺服器，不再寫死 zeus）
+      const sId = currentServerId || (typeof AuthSystem !== 'undefined' && AuthSystem.getCurrentServer && AuthSystem.getCurrentServer()?.id) || 'zeus';
       return apiPost('/api/mp/join', {
         mapId,
-        serverId: 'zeus',
+        serverId: sId,
         charIdx: currentCharIdx,
       }).then(data => {
         if (data.ok) {
@@ -668,6 +687,10 @@
     .then(data => {
       if (data && data.ok && data.events) {
         handlePollEvents(data.events);
+        // v2.7.3：long-poll 也推送 AI 快照（GM 調整 aiCount 時 LP 玩家同步生效）
+        if (data.ais && Array.isArray(data.ais) && typeof window.setServerAIs === 'function') {
+          window.setServerAIs(data.ais, currentServerId, currentMapId);
+        }
         if (data.broadcasts && data.broadcasts.length) {
           // 全服廣播處理
           data.broadcasts.forEach(b => {

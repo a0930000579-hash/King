@@ -12819,6 +12819,7 @@ function renderNPCs(map) {
     postman: 'npc_postman',
     trader: 'npc_merchant_new',
   };
+  window.NPC_SPRITE_MAP = npcSpriteMap;
   let npcIdx = 0;
   map.npcs.forEach(npc => {
     const elDiv = document.createElement('div');
@@ -12876,46 +12877,57 @@ function renderNPCs(map) {
       else if (npc.id === 'blacksmith') {
         const hasWeapon = GS.equipment.weapon;
         const cost = hasWeapon ? (GS.equipment.weapon.level || 0) * 500 + 200 : 0;
-        alert(`鐵匠鋪\n\n當前武器：${hasWeapon ? GS.equipment.weapon.name + ' +' + (GS.equipment.weapon.level || 0) : '未裝備'}\n強化費用：${cost} 金幣\n\n（強化功能即將開放）`);
+        uiAlert(`當前武器：${hasWeapon ? GS.equipment.weapon.name + ' +' + (GS.equipment.weapon.level || 0) : '未裝備'}\n強化費用：${cost} 金幣\n\n（強化功能即將開放）`, '鐵匠鋪', { npcId: 'blacksmith', npcName: '鐵匠', npcTitle: '鐵匠鋪掌櫃' });
       }
-      else if (npc.id === 'warehouse') openSidePage('bag');
+      else if (npc.id === 'warehouse') {
+        // v2.7.3：倉庫管理員 → 開啟倉庫面板（不是背包）
+        openWarehousePanel();
+      }
       else if (npc.id === 'quest') {
         if (GS.quest.current >= GS.quest.total) {
           const gold = 500, exp = 200;
-          if (confirm(`任務完成！\n擊殺哥布林 ${GS.quest.current}/${GS.quest.total}\n\n獎勵：${gold} 金幣、${exp} 經驗\n\n是否領取獎勵？`)) {
-            GS.resources.gold += gold;
-            GS.player.exp += exp;
-            GS.quest.current = 0; GS.quest.total = 5;
-            el.questCurrent.textContent = '0'; el.questTotal.textContent = '5';
-            addLog('system', `✓ 完成任務「${GS.quest.name}」，獲得 ${gold} 金幣、${exp} 經驗`);
-            updateUI();
-          }
+          uiConfirm(`擊殺哥布林 ${GS.quest.current}/${GS.quest.total}\n\n獎勵：${gold} 金幣、${exp} 經驗\n\n是否領取獎勵？`, '任務完成', { npcId: 'quest', npcName: '任務官', npcTitle: '米德加特派駐' }).then(ok => {
+            if (ok) {
+              GS.resources.gold += gold;
+              GS.player.exp += exp;
+              GS.quest.current = 0; GS.quest.total = 5;
+              if (el.questCurrent) el.questCurrent.textContent = '0';
+              if (el.questTotal) el.questTotal.textContent = '5';
+              addLog('system', `✓ 完成任務「${GS.quest.name}」，獲得 ${gold} 金幣、${exp} 經驗`);
+              updateUI();
+            }
+          });
         } else {
-          alert(`任務官：前往野外討伐 ${GS.quest.total} 隻哥布林吧！\n\n進度：${GS.quest.current}/${GS.quest.total}`);
+          uiAlert(`前往野外討伐 ${GS.quest.total} 隻哥布林吧！\n\n進度：${GS.quest.current}/${GS.quest.total}`, '任務', { npcId: 'quest', npcName: '任務官', npcTitle: '米德加特派駐' });
         }
       }
       else if (npc.id === 'premium_shop') {
-        alert(`高級商人\n\n這裡販售稀有裝備與高級消耗品\n（高級商店功能即將開放）`);
+        uiAlert(`這裡販售稀有裝備與高級消耗品\n（高級商店功能即將開放）`, '高級商人', { npcId: 'premium_shop', npcName: '高級商人', npcTitle: '珍寶閣掌櫃' });
       }
       else if (npc.id === 'inn') {
         if (GS.player.hp >= getTotalHpMax()) {
-          alert('旅館老板娘：你的體力飽滿，不需要休息哦~');
+          uiAlert('你的體力飽滿，不需要休息哦~', '旅館', { npcId: 'inn', npcName: '旅館老板娘', npcTitle: '小憩客棧' });
         } else if (GS.resources.gold < 100) {
-          alert('旅館老板娘：休息需要 100 金幣，你攜帶的金幣不足。');
-        } else if (confirm('旅館老板娘：休息一晚需要 100 金幣，是否要休息？')) {
-          GS.resources.gold -= 100;
-          GS.player.hp = getTotalHpMax();
-          GS.player.mp = (CLASSES[GS.player.classId]?.mpMax || 100);
-          addLog('system', '棧 在旅館休息，體力魔力完全恢復');
-          updateUI();
-          renderPlayer();
+          uiAlert('休息需要 100 金幣，你攜帶的金幣不足。', '旅館', { npcId: 'inn', npcName: '旅館老板娘', npcTitle: '小憩客棧' });
+        } else {
+          uiConfirm('休息一晚需要 100 金幣，是否要休息？', '旅館', { npcId: 'inn', npcName: '旅館老板娘', npcTitle: '小憩客棧' }).then(ok => {
+            if (ok) {
+              GS.resources.gold -= 100;
+              GS.player.hp = getTotalHpMax();
+              GS.player.mp = (CLASSES[GS.player.classId]?.mpMax || 100);
+              addLog('system', '棧 在旅館休息，體力魔力完全恢復');
+              updateUI();
+              renderPlayer();
+              showToast('體力魔力已完全恢復', 'success');
+            }
+          });
         }
       }
       else if (npc.id === 'bulletin') {
-        alert(`榜 村莊佈告欄\n\n• 米德加特原野出現大量哥布林，冒險者請注意安全\n• 鐵匠鋪現已開放強化業務\n• 公會招募中，詳情請至國家管理處查詢\n• 深淵蝙蝠王出沒幽暗洞窟，請高級冒險者前往討伐`);
+        uiAlert(`• 米德加特原野出現大量哥布林，冒險者請注意安全\n• 鐵匠鋪現已開放強化業務\n• 公會招募中，詳情請至國家管理處查詢\n• 深淵蝙蝠王出沒幽暗洞窟，請高級冒險者前往討伐`, '村莊佈告欄');
       }
       else if (npc.id === 'dungeon_master') {
-        alert(`鑰️ 副本管理員\n\n• 試煉之塔（Lv.20+）\n• 無限之塔（Lv.40+）\n• 夢幻之島（Lv.60+）\n\n（副本功能即將開放）`);
+        uiAlert(`• 試煉之塔（Lv.20+）\n• 無限之塔（Lv.40+）\n• 夢幻之島（Lv.60+）\n\n（副本功能即將開放）`, '副本管理員', { npcId: 'dungeon_master', npcName: '副本管理員', npcTitle: '冒險者公會' });
       }
       else if (npc.id === 'main_quest') {
         const mq = GS.mainQuest || { chapter: 1, step: 0 };
@@ -12934,15 +12946,18 @@ function renderNPCs(map) {
         const curTitle = titles[mq.chapter - 1] || titles[0];
         const curStep = steps[mq.step] || steps[steps.length - 1];
         if (mq.step === 0) {
-          if (confirm(`王 ${npc.name}：年輕的冒險者，你終於來了。\n\n【主線】${curTitle}\n目標：${curStep}\n\n是否接受這個神聖的使命？`)) {
-            GS.mainQuest = { chapter: 1, step: 1 };
-            addLog('system', `卷 接受主線任務：${curTitle}`);
-          }
+          uiConfirm(`年輕的冒險者，你終於來了。\n\n【主線】${curTitle}\n目標：${curStep}\n\n是否接受這個神聖的使命？`, '主線任務', { npcId: 'main_quest', npcName: npc.name, npcTitle: '神聖教會·大祭司' }).then(ok => {
+            if (ok) {
+              GS.mainQuest = { chapter: 1, step: 1 };
+              addLog('system', `卷 接受主線任務：${curTitle}`);
+              showToast('已接受主線任務：' + curTitle, 'success');
+            }
+          });
         } else {
-          alert(`主線進度：${curTitle}\n當前任務：${curStep}\n\n（主線任務系統逐步開放中）`);
+          uiAlert(`主線進度：${curTitle}\n當前任務：${curStep}\n\n（主線任務系統逐步開放中）`, '主線任務', { npcId: 'main_quest', npcName: npc.name, npcTitle: '神聖教會·大祭司' });
         }
       }
-      else alert(npc.name + '：你好，冒险者！');
+      else uiAlert('你好，冒險者！', npc.name, { npcId: npc.id, npcName: npc.name });
     });
     npcLayer.appendChild(elDiv);
   });
@@ -18982,18 +18997,34 @@ function useTransformTicket(tfId) {
 // 檢查變身是否到期
 // ==================== Buff 系統 ====================
 // v2.7.1: buff icon 全部替換為有色彩文字的圓角方塊（原 assetUrl 指向深灰佔位檔 → 顯示問號）
+// v2.7.3：buff icon 改用內聯 SVG，確保不依賴外部檔案、不會出現 ?
+function _buffSVG(color, symbol, symbol2) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.95"/><stop offset="100%" stop-color="${color}" stop-opacity="0.6"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="5" fill="url(#g)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/><text x="16" y="21" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff" font-family="Arial, sans-serif" style="text-shadow:0 1px 2px rgba(0,0,0,0.5)">${symbol}</text>${symbol2 ? `<text x="16" y="28" text-anchor="middle" font-size="8" fill="#fff" font-family="Arial" opacity="0.9">${symbol2}</text>` : ''}</svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+}
 const BUFF_ICONS = {
-  transform:  'assets/effect/buff_transform.png',
-  atkspd:     'assets/effect/buff_atkspd.png',
-  movespd:    'assets/effect/buff_movespd.png',
-  exp:        'assets/effect/buff_exp.png',
-  drop:       'assets/effect/buff_drop.png',
-  shield:     'assets/effect/buff_shield.png',
-  atkpot:     'assets/effect/buff_atkpot.png',
-  defpot:     'assets/effect/buff_defpot.png',
-  berserk:    'assets/effect/buff_berserk.png',
-  dodge:      'assets/effect/buff_dodge.png',
+  transform:  _buffSVG('#c03030', '变', '身'),
+  atkspd:     _buffSVG('#e09020', '攻', '速'),
+  movespd:    _buffSVG('#30b060', '移', '速'),
+  exp:        _buffSVG('#4080e0', '經', '驗'),
+  drop:       _buffSVG('#b060d0', '掉', '寶'),
+  shield:     _buffSVG('#60a0e0', '盾', ''),
+  atkpot:     _buffSVG('#d04040', '力', ''),
+  defpot:     _buffSVG('#4090d0', '防', ''),
+  berserk:    _buffSVG('#e04040', '狂', ''),
+  dodge:      _buffSVG('#40d0c0', '閃', ''),
+  hp:         _buffSVG('#e06060', '血', ''),
+  mp:         _buffSVG('#6080e0', '魔', ''),
+  atkPct:     _buffSVG('#d04040', '力', '%'),
+  defPct:     _buffSVG('#4090d0', '防', '%'),
+  crit:       _buffSVG('#e0a020', '暴', ''),
+  allStat:    _buffSVG('#c060e0', '全', ''),
+  warcry:     _buffSVG('#d06020', '吼', ''),
+  windwalk:   _buffSVG('#30b0a0', '風', ''),
+  ironwall:   _buffSVG('#6080a0', '鐵', ''),
 };
+// 找不到類型時的預設 icon
+const DEFAULT_BUFF_ICON = _buffSVG('#888888', '?', '');
 
 // 初始化 activeBuffs
 function initBuffs() {
@@ -19015,7 +19046,7 @@ function addBuff(type, name, desc, durationSec, stats) {
     GS.activeBuffs.push({
       id: 'buff_' + type + '_' + Date.now(),
       type, name, desc,
-      icon: BUFF_ICONS[type] || BUFF_ICONS.shield,
+      icon: BUFF_ICONS[type] || DEFAULT_BUFF_ICON,
       endTime,
       stats: stats || {},
     });
@@ -20393,10 +20424,7 @@ function renderBagPage() {
         }).join('')
       }
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-top:6px;border-top:1px solid rgba(240,192,64,0.2);background:rgba(20,14,8,0.4)">
-      <div style="font-size:10px;color:var(--parchment-dark)">
-        物品：${items.length}/${20 + Math.floor((GS.player.level || 1) * 0.5)} 格
-      </div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;padding:8px 10px;margin-top:6px;border-top:1px solid rgba(240,192,64,0.2);background:rgba(20,14,8,0.4)">
       <div style="display:flex;gap:6px">
         <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #608040, #3a5a20);border:1px solid #80a060;color:#d0ffb0;border-radius:4px;cursor:pointer;font-weight:600" data-one-click-equip>劍 一鍵穿戴</button>
         <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #8b6520, #5a3a10);border:1px solid var(--gold-dark);color:var(--gold-bright);border-radius:4px;cursor:pointer;font-weight:600">雷 一鍵使用</button>
@@ -26205,6 +26233,29 @@ let _serverAIActive = false;        // 目前是否使用伺服器 AI
 let _serverAIMap = new Map();       // aiId -> aiData（伺服器原格式）
 let _serverAICurrentMap = null;     // 當前地圖的伺服器 AI 列表
 let _offlineMode = false;           // 是否離線模式
+let _serverInstanceId = null;       // 伺服器實例 ID（診斷用）
+let _currentServerId = null;        // 當前連接的伺服器 ID
+
+/**
+ * v2.7.3：進入在線模式（在 join 發出時就調用，禁止本地生成 AI）
+ *  - 即使 join 還沒返回，也先把本地 AI 生成閘門關掉
+ *  - 若 join 失敗，會由 multiplayer 的狀態變更重新開啟離線模式
+ */
+window.setServerOnline = function(serverId, mapId) {
+  _serverAIActive = true;
+  _offlineMode = false;
+  _currentServerId = serverId || null;
+  // 清空本地活躍 AI（如果有的話）
+  if (GS && GS.aiPlayers) GS.aiPlayers = [];
+  if (typeof worldLayer !== 'undefined' && worldLayer) {
+    worldLayer.querySelectorAll('.world-unit.ai-player').forEach(el => el.remove());
+  }
+};
+
+window._setServerInstanceId = function(id) {
+  _serverInstanceId = id;
+  if (typeof updateConnectionIndicator === 'function') updateConnectionIndicator();
+};
 
 /**
  * 設定伺服器廣播的 AI 清單（來自 WebSocket 或 long-poll）
@@ -26343,5 +26394,615 @@ function updateServerAIs(dt) {
     }
   });
 }
+
+// ========== v2.7.3：倉庫系統（帳號共享） ==========
+//  資料存在 localStorage 中（以 accountId 為 key），同帳號不同角色互通
+//  有伺服器端時可升級為 API 同步
+(function() {
+  const WAREHOUSE_MAX_SLOTS = 100;
+  const _accountKey = function() {
+    try {
+      const tok = (window.AuthSystem && AuthSystem.getToken) ? AuthSystem.getToken() : '';
+      const acc = (window.AuthSystem && AuthSystem.getAccount) ? AuthSystem.getAccount() : {};
+      return 'wh_' + (acc.id || acc.username || tok.slice(0, 16) || 'guest');
+    } catch(e) { return 'wh_guest'; }
+  };
+
+  function getWarehouse() {
+    try {
+      const key = _accountKey();
+      const raw = localStorage.getItem(key);
+      if (raw) return JSON.parse(raw);
+    } catch(e) {}
+    return { items: [], gold: 0 };
+  }
+
+  function saveWarehouse(wh) {
+    try {
+      const key = _accountKey();
+      localStorage.setItem(key, JSON.stringify(wh));
+    } catch(e) { showToast('倉庫保存失敗', 'error'); }
+  }
+
+  function renderWarehousePanel() {
+    const wh = getWarehouse();
+    const items = wh.items || [];
+    const gridCols = 8;
+    const totalSlots = WAREHOUSE_MAX_SLOTS;
+    const slots = [];
+    for (let i = 0; i < totalSlots; i++) {
+      const item = items[i];
+      if (item) {
+        const iconUrl = item.itemType === 'equipment'
+          ? (typeof getEquipIcon === 'function' ? getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type) : '')
+          : (typeof getItemIconUrl === 'function' ? getItemIconUrl(item) : '');
+        const countStr = (item.count && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : '';
+        slots.push(`
+          <div class="bag-cell rarity-${item.rarity || 'common'}" data-wh-idx="${i}" style="aspect-ratio:1;position:relative;background:rgba(20,14,8,0.5);border:2px solid #8b6520;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">
+            <img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.style.display='none'"/>
+            ${countStr}
+          </div>`);
+      } else {
+        slots.push(`<div class="bag-cell" data-wh-idx="${i}" style="aspect-ratio:1;background:rgba(20,14,8,0.2);border:1px dashed rgba(139,101,32,0.3);border-radius:4px"></div>`);
+      }
+    }
+    return `
+      <div style="padding:10px 12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;color:#f0c040;font-weight:700">帳號倉庫</div>
+          <div style="font-size:11px;color:#d4af37">${items.length}/${totalSlots} 格</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(${gridCols},1fr);gap:4px">
+          ${slots.join('')}
+        </div>
+        <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.3);border-radius:4px;font-size:11px;color:#b0a080;line-height:1.5">
+          💡 點擊背包物品<b>存入</b>、點擊倉庫物品<b>取出</b><br/>
+          同帳號所有角色共享此倉庫（變身/英雄/守護不影響）
+        </div>
+      </div>
+    `;
+  }
+
+  function openWarehousePanel() {
+    // 用 modal 呈現倉庫（不是側邊頁）
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(2px);';
+    overlay.id = 'warehouse-modal-overlay';
+    
+    const panel = document.createElement('div');
+    panel.style.cssText = 'width:100%;max-width:480px;max-height:85vh;overflow-y:auto;background:linear-gradient(180deg,#3a2818,#1a1208);border:2px solid #8b6520;border-radius:8px;box-shadow:0 0 30px rgba(240,192,64,0.2);color:#e8d9b0;font-family:inherit;';
+    
+    // 標題列
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid rgba(240,192,64,0.3);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(90deg,rgba(240,192,64,0.1),transparent);';
+    header.innerHTML = '<div style="font-size:15px;font-weight:700;color:#f0c040;letter-spacing:1px">🏛 倉 庫</div>';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'background:none;border:none;color:#d4af37;font-size:16px;cursor:pointer;padding:2px 8px;';
+    closeBtn.onclick = () => overlay.remove();
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+    
+    // 內容區：背包（上）+ 倉庫（下），雙向操作
+    const content = document.createElement('div');
+    content.style.cssText = 'max-height:calc(85vh - 50px);overflow-y:auto;';
+    
+    function refresh() {
+      content.innerHTML = renderBagForWarehouse() + renderWarehousePanel();
+      bindWarehouseEvents(content);
+    }
+    
+    panel.appendChild(content);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    
+    refresh();
+  }
+
+  // 倉庫用的迷你背包（只顯示可存入的物品）
+  function renderBagForWarehouse() {
+    const items = (typeof GS !== 'undefined' && GS.inventory) ? GS.inventory.filter(it => it && !it.bound && !it.soulbound) : [];
+    const slots = [];
+    for (let i = 0; i < 30; i++) {
+      const item = items[i];
+      if (item) {
+        const iconUrl = item.itemType === 'equipment'
+          ? (typeof getEquipIcon === 'function' ? getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type) : '')
+          : (typeof getItemIconUrl === 'function' ? getItemIconUrl(item) : '');
+        const countStr = (item.count && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : '';
+        slots.push(`
+          <div class="bag-cell rarity-${item.rarity || 'common'}" data-bag-wh-idx="${i}" style="aspect-ratio:1;position:relative;background:rgba(20,14,8,0.5);border:2px solid #8b6520;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden" title="點擊存入：${item.name}">
+            <img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.style.display='none'"/>
+            ${countStr}
+          </div>`);
+      } else {
+        slots.push(`<div class="bag-cell" style="aspect-ratio:1;background:rgba(20,14,8,0.2);border:1px dashed rgba(139,101,32,0.3);border-radius:4px"></div>`);
+      }
+    }
+    return `
+      <div style="padding:10px 12px;border-bottom:1px solid rgba(240,192,64,0.2)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:12px;color:#b09060;font-weight:700">背包（點擊存入）</div>
+          <div style="font-size:10px;color:#8b6520">${items.length} 件可存</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px">
+          ${slots.join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function bindWarehouseEvents(container) {
+    // 從背包存入
+    container.querySelectorAll('[data-bag-wh-idx]').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const idx = parseInt(cell.dataset.bagWhIdx);
+        const unbound = (GS.inventory || []).filter(it => it && !it.bound && !it.soulbound);
+        const item = unbound[idx];
+        if (!item) return;
+        const wh = getWarehouse();
+        if (wh.items.length >= WAREHOUSE_MAX_SLOTS) { showToast('倉庫已滿', 'error'); return; }
+        // 從背包移除，加到倉庫
+        const realIdx = GS.inventory.indexOf(item);
+        if (realIdx >= 0) GS.inventory.splice(realIdx, 1);
+        wh.items.push(JSON.parse(JSON.stringify(item)));
+        saveWarehouse(wh);
+        showToast('已存入：' + item.name, 'success');
+        // 刷新介面
+        const overlay = document.getElementById('warehouse-modal-overlay');
+        if (overlay) {
+          const content = overlay.querySelector('div > div:nth-child(2)');
+          if (content) {
+            content.innerHTML = renderBagForWarehouse() + renderWarehousePanel();
+            bindWarehouseEvents(content);
+          }
+        }
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof renderBagPage === 'function' && el && el.pageContent && el.sidePage && el.sidePage.classList.contains('open')) {
+          // 若背包側頁開著也刷新
+        }
+      });
+    });
+    // 從倉庫取出
+    container.querySelectorAll('[data-wh-idx]').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const idx = parseInt(cell.dataset.whIdx);
+        const wh = getWarehouse();
+        const item = wh.items[idx];
+        if (!item) return;
+        // 加到背包
+        if (typeof addToInventory === 'function') {
+          const ok = addToInventory(item, item.count || 1);
+          if (!ok) { showToast('背包空間不足', 'error'); return; }
+        } else {
+          if (GS.inventory.length >= (GS.bagMaxSlots || 60)) { showToast('背包空間不足', 'error'); return; }
+          GS.inventory.push(item);
+        }
+        wh.items.splice(idx, 1);
+        saveWarehouse(wh);
+        showToast('已取出：' + item.name, 'success');
+        const overlay = document.getElementById('warehouse-modal-overlay');
+        if (overlay) {
+          const content = overlay.querySelector('div > div:nth-child(2)');
+          if (content) {
+            content.innerHTML = renderBagForWarehouse() + renderWarehousePanel();
+            bindWarehouseEvents(content);
+          }
+        }
+        if (typeof updateUI === 'function') updateUI();
+      });
+    });
+  }
+
+  window.openWarehousePanel = openWarehousePanel;
+  window._getWarehouse = getWarehouse;
+})();
+
+// ========== v2.7.3：Buff 點擊 tooltip（單個 buff 詳情） ==========
+(function() {
+  const _origRender = typeof renderBuffBar === 'function' ? renderBuffBar : null;
+  if (!_origRender) return;
+  // monkey-patch renderBuffBar 加上單獨點擊事件
+  window.renderBuffBar = function() {
+    _origRender();
+    if (!el || !el.buffBar) return;
+    el.buffBar.querySelectorAll('.buff-icon').forEach(icon => {
+      // 移除舊的（預設 showAllBuffsWindow 綁的）
+      const newIcon = icon.cloneNode(true);
+      icon.parentNode.replaceChild(newIcon, icon);
+      newIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const buffType = newIcon.dataset.buffType;
+        showBuffDetailTooltip(newIcon, buffType);
+      });
+    });
+  };
+
+  function showBuffDetailTooltip(anchorEl, buffType) {
+    // 先移除舊的
+    const old = document.getElementById('buff-detail-tooltip');
+    if (old) { old.remove(); }
+    const buffs = (GS && GS.activeBuffs) ? GS.activeBuffs.filter(b => b.type === buffType) : [];
+    if (buffs.length === 0) return;
+    const b = buffs[0];
+    const now = Date.now();
+    const remain = Math.max(0, b.endTime - now);
+    const mins = Math.floor(remain / 60000);
+    const secs = Math.floor((remain % 60000) / 1000);
+    const timeStr = remain >= 3600000
+      ? Math.floor(remain/3600000) + 'h' + Math.floor((remain%3600000)/60000) + 'm'
+      : mins + 'm' + secs + 's';
+    
+    const tip = document.createElement('div');
+    tip.id = 'buff-detail-tooltip';
+    tip.style.cssText = 'position:fixed;z-index:10002;padding:10px 12px;background:rgba(20,14,8,0.92);border:1px solid #8b6520;border-radius:6px;color:#e8d9b0;font-size:12px;line-height:1.5;min-width:160px;max-width:220px;box-shadow:0 4px 15px rgba(0,0,0,0.6);font-family:inherit;pointer-events:none;';
+    tip.innerHTML = `
+      <div style="font-weight:700;color:#f0c040;margin-bottom:4px;font-size:13px">${b.name || '增益效果'}</div>
+      <div style="color:#b09060;font-size:11px;margin-bottom:6px">${b.desc || ''}</div>
+      <div style="color:#a0e0a0;font-size:11px">效果：${b.effectText || b.valueText || '持續中'}</div>
+      <div style="margin-top:4px;color:#ffd070;font-size:11px">剩餘：${timeStr}</div>
+    `;
+    document.body.appendChild(tip);
+    
+    // 定位在 buff 圖示旁
+    const rect = anchorEl.getBoundingClientRect();
+    let left = rect.right + 8;
+    let top = rect.top;
+    if (left + 220 > window.innerWidth) left = rect.left - 228;
+    if (top + 100 > window.innerHeight) top = window.innerHeight - 110;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+    
+    // 點外部關閉
+    setTimeout(() => {
+      const closeHandler = (e) => {
+        if (!tip.contains(e.target) && !anchorEl.contains(e.target)) {
+          tip.remove();
+          document.removeEventListener('click', closeHandler);
+        }
+      };
+      document.addEventListener('click', closeHandler);
+    }, 10);
+  }
+})();
+
+// ========== v2.7.3：體驗券 icon 導正（用變身 portrait 當券圖） ==========
+(function() {
+  // 在遊戲啟動後補上體驗券的自訂 icon 對照
+  const _ticketIcons = {
+    ticket_death_knight: 'assets/transform/gold/true_death_knight/portrait.png',
+    ticket_death_mage: 'assets/transform/gold/true_death_mage/portrait.png',
+    ticket_death_archer: 'assets/transform/gold/true_death_archer/portrait.png',
+    ticket_death_assassin: 'assets/transform/gold/true_death_assassin/portrait.png',
+    ticket_death_warlock: 'assets/transform/gold/true_death_sorcerer/portrait.png',
+    ticket_death_holy: 'assets/transform/gold/true_fallen_paladin/portrait.png',
+  };
+
+  // patch getItemIconUrl 以支援體驗券
+  const _origGetItemIcon = typeof getItemIconUrl === 'function' ? getItemIconUrl : null;
+  if (_origGetItemIcon) {
+    window.getItemIconUrl = function(item) {
+      if (item && item.id && _ticketIcons[item.id]) {
+        return _ticketIcons[item.id];
+      }
+      if (item && item.effect && item.effect.useTransformTicket && item.effect.transformId) {
+        // 動態對照：用 transformId 找 portrait
+        const portraitPath = 'assets/transform/gold/' + (item.effect.transformId.replace(/^t_/, '')) + '/portrait.png';
+        return portraitPath;
+      }
+      return _origGetItemIcon(item);
+    };
+  }
+})();
+
+// ========== v2.7.3：全域原生 alert/confirm/prompt 攔截 ==========
+//  保險機制：任何漏網的原生呼叫都轉成 uiAlert/uiConfirm
+//  注意：confirm/prompt 原生是同步阻塞，轉成 modal 是異步，
+//  為避免破壞既有同步邏輯，只對已知不依賴返回值的 alert 做替換
+(function() {
+  const _origAlert = window.alert;
+  window.alert = function(msg) {
+    // 遊戲內用 uiAlert（非同步，不阻塞）
+    if (typeof window.uiAlert === 'function' && document.readyState !== 'loading') {
+      window.uiAlert(msg, '系統提示').catch(() => {});
+      return undefined;
+    }
+    return _origAlert.call(window, msg);
+  };
+})();
+
+// ========== v2.7.3：商店購買成敗 toast ==========
+(function() {
+  const _origBuy = typeof handleShopBuy === 'function' ? handleShopBuy : null;
+  if (!_origBuy) return;
+  window.handleShopBuy = function(id, tab, qty) {
+    // 記錄購買前的資源
+    const beforeGold = GS.resources.gold;
+    const beforeGem = GS.resources.gem;
+    const beforeInvCount = GS.inventory.length;
+    
+    // 呼叫原始函式
+    try {
+      _origBuy(id, tab, qty);
+    } catch(e) {
+      showToast('購買失敗：' + e.message, 'error');
+      return;
+    }
+    
+    // 根據資源變化判斷成敗（簡單啟發式）
+    // 實際成敗會在各 buy* 函式內部處理，這裡補 toast
+    const goldDiff = beforeGold - GS.resources.gold;
+    const gemDiff = beforeGem - GS.resources.gem;
+    if (goldDiff > 0 || gemDiff > 0) {
+      showToast(`購買成功 ×${qty || 1}`, 'success');
+    }
+  };
+  
+  // buyGemItem 補失敗 toast
+  const _origBuyGem = typeof buyGemItem === 'function' ? buyGemItem : null;
+  if (_origBuyGem) {
+    window.buyGemItem = function(cost, onSuccess) {
+      if (GS.resources.gem < cost) {
+        showToast('鑽石不足', 'error');
+        return false;
+      }
+      return _origBuyGem(cost, onSuccess);
+    };
+  }
+})();
+
+// ========== v2.7.3：連線指示器 ==========
+// 常駐顯示：傳輸方式 / serverId / mapId / AI 來源與數量
+(function() {
+  let indicator = null;
+
+  function ensureIndicator() {
+    if (indicator) return indicator;
+    indicator = document.createElement('div');
+    indicator.id = 'connection-indicator';
+    indicator.style.cssText = 'position:fixed;top:2px;right:4px;z-index:9998;padding:2px 8px;font-size:10px;color:#d4af37;background:rgba(20,14,8,0.75);border:1px solid rgba(240,192,64,0.4);border-radius:0 0 4px 4px;font-family:inherit;letter-spacing:0.5px;pointer-events:auto;cursor:pointer;';
+    indicator.title = '連線狀態（點擊查看詳情）';
+    document.body.appendChild(indicator);
+    return indicator;
+  }
+
+  function getTransportLabel() {
+    try {
+      if (window.MultiplayerClient) return MultiplayerClient.transport || 'offline';
+    } catch(e) {}
+    return 'offline';
+  }
+
+  function getTransportColor(tr) {
+    if (tr === 'websocket') return '#50ff80';
+    if (tr === 'longpoll') return '#ffd040';
+    return '#ff6060';
+  }
+
+  function update() {
+    const ind = ensureIndicator();
+    const tr = getTransportLabel();
+    const color = getTransportColor(tr);
+    let sid = '-', mid = '-', aiSrc = 'local', aiCount = 0;
+    try {
+      if (window.MultiplayerClient) {
+        sid = MultiplayerClient.serverId || '-';
+        mid = MultiplayerClient.mapId || '-';
+      }
+      if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
+        aiSrc = 'server';
+        aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
+      } else {
+        aiSrc = 'local';
+        aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
+      }
+    } catch(e) {}
+    const trLabel = tr === 'websocket' ? 'WS' : (tr === 'longpoll' ? 'LP' : 'OFF');
+    ind.innerHTML = '<span style="color:' + color + ';font-weight:700">' + trLabel + '</span> · ' + sid + '/' + mid + ' · AI:' + aiSrc + '(' + aiCount + ')';
+  }
+
+  window.updateConnectionIndicator = update;
+  setInterval(update, 2000);
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(update, 2000);
+  } else {
+    window.addEventListener('load', () => setTimeout(update, 2000));
+  }
+})();
+
+// ========== v2.7.3：遊戲風 Modal (uiAlert / uiConfirm / uiPrompt) ==========
+(function() {
+  let activeModal = null;
+
+  function createOverlay() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px);';
+    return overlay;
+  }
+
+  function showModal(title, contentHtml, buttons, opts) {
+    opts = opts || {};
+    if (activeModal) { activeModal.overlay.remove(); }
+    const overlay = createOverlay();
+    const panel = document.createElement('div');
+    panel.style.cssText = 'min-width:280px;max-width:90vw;max-height:80vh;overflow-y:auto;background:linear-gradient(180deg, #3a2818 0%, #2a1c10 50%, #1a1208 100%);border:2px solid #8b6520;border-radius:8px;box-shadow:0 0 30px rgba(240,192,64,0.2),inset 0 1px 0 rgba(255,220,120,0.15);color:#e8d9b0;font-family:inherit;';
+
+    // NPC 頭像區（有 npcId 時顯示）
+    if (opts.npcId && typeof window.SPRITE !== 'undefined') {
+      const npcMap = window.NPC_SPRITE_MAP || {
+        shop: 'npc_shop', blacksmith: 'npc_blacksmith', warehouse: 'npc_warehouse',
+        quest: 'npc_quest', premium_shop: 'npc_luxury', inn: 'npc_inn',
+        main_quest: 'npc_priest', dungeon_master: 'npc_dungeon', guard: 'npc_guard',
+        trader: 'npc_merchant_new', bulletin: 'npc_board', witch: 'npc_witch',
+        arena_master: 'npc_arena', healer: 'npc_healer', wizard: 'npc_wizard',
+        postman: 'npc_postman',
+      };
+      const spKey = npcMap[opts.npcId] || 'npc_shop';
+      const sp = window.SPRITE[spKey];
+      const headerRow = document.createElement('div');
+      headerRow.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(240,192,64,0.3);background:linear-gradient(90deg, rgba(240,192,64,0.08), transparent);';
+      const avatar = document.createElement('div');
+      avatar.style.cssText = 'width:48px;height:48px;border:2px solid #8b6520;border-radius:6px;overflow:hidden;background:rgba(20,14,8,0.6);flex-shrink:0;display:flex;align-items:center;justify-content:center;';
+      if (sp && sp.useImg && sp.idle) {
+        const img = document.createElement('img');
+        img.src = sp.idle;
+        img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.8));';
+        img.onerror = function() { this.style.display='none'; avatar.textContent='?'; avatar.style.color='#d4af37';avatar.style.fontSize='20px'; };
+        avatar.appendChild(img);
+      } else {
+        avatar.textContent = '?';
+        avatar.style.color = '#d4af37';
+        avatar.style.fontSize = '20px';
+      }
+      headerRow.appendChild(avatar);
+      const titleWrap = document.createElement('div');
+      titleWrap.style.cssText = 'flex:1';
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'font-size:15px;font-weight:700;color:#f0c040;text-shadow:0 1px 2px #000;letter-spacing:1px;';
+      titleEl.textContent = title || opts.npcName || 'NPC';
+      titleWrap.appendChild(titleEl);
+      if (opts.npcTitle) {
+        const sub = document.createElement('div');
+        sub.style.cssText = 'font-size:10px;color:#b09060;margin-top:2px;';
+        sub.textContent = opts.npcTitle;
+        titleWrap.appendChild(sub);
+      }
+      headerRow.appendChild(titleWrap);
+      panel.appendChild(headerRow);
+    } else if (title) {
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'padding:12px 16px;border-bottom:1px solid rgba(240,192,64,0.3);font-size:16px;font-weight:700;color:#f0c040;text-shadow:0 1px 2px #000;letter-spacing:1px;background:linear-gradient(90deg, rgba(240,192,64,0.1), transparent);';
+      titleEl.textContent = title;
+      panel.appendChild(titleEl);
+    }
+
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:16px;font-size:14px;line-height:1.6;';
+    if (typeof contentHtml === 'string') {
+      body.innerHTML = contentHtml.replace(/\n/g, '<br/>');
+    } else {
+      body.appendChild(contentHtml);
+    }
+    panel.appendChild(body);
+
+    const btnBar = document.createElement('div');
+    btnBar.style.cssText = 'display:flex;gap:10px;justify-content:center;padding:12px 16px;border-top:1px solid rgba(240,192,64,0.2);background:rgba(0,0,0,0.2);';
+
+    buttons.forEach(btn => {
+      const b = document.createElement('button');
+      b.textContent = btn.text;
+      const isPrimary = btn.primary;
+      const isDanger = btn.danger;
+      let bg = 'linear-gradient(180deg, #5a4020, #3a2810)';
+      let bc = '#8b6520';
+      let color = '#e8d9b0';
+      if (isPrimary) { bg = 'linear-gradient(180deg, #c89630, #8b6520)'; bc = '#f0c040'; color = '#1a1208'; }
+      if (isDanger) { bg = 'linear-gradient(180deg, #a03030, #601818)'; bc = '#d04040'; color = '#ffe0e0'; }
+      b.style.cssText = 'padding:8px 20px;font-size:13px;font-weight:700;background:' + bg + ';border:2px solid ' + bc + ';color:' + color + ';border-radius:4px;cursor:pointer;font-family:inherit;letter-spacing:1px;min-width:80px;transition:all 0.15s;';
+      b.addEventListener('mouseenter', () => { b.style.transform = 'translateY(-1px)'; b.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)'; });
+      b.addEventListener('mouseleave', () => { b.style.transform = ''; b.style.boxShadow = ''; });
+      b.addEventListener('click', () => { if (btn.onClick) btn.onClick(); });
+      btnBar.appendChild(b);
+    });
+    panel.appendChild(btnBar);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    activeModal = { overlay, panel };
+
+    setTimeout(() => {
+      const firstBtn = panel.querySelector('button');
+      if (firstBtn) firstBtn.focus();
+    }, 10);
+
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        const cancelBtn = buttons.find(b => !b.primary);
+        if (cancelBtn && cancelBtn.onClick) cancelBtn.onClick();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  function closeModal() {
+    if (activeModal) { activeModal.overlay.remove(); activeModal = null; }
+  }
+
+  window.uiAlert = function(message, title, opts) {
+    return new Promise((resolve) => {
+      showModal(title || '系統提示', String(message), [
+        { text: '確定', primary: true, onClick: () => { closeModal(); resolve(true); } }
+      ], opts);
+    });
+  };
+
+  window.uiConfirm = function(message, title, opts) {
+    return new Promise((resolve) => {
+      showModal(title || '確認', String(message), [
+        { text: '取消', onClick: () => { closeModal(); resolve(false); } },
+        { text: '確定', primary: true, onClick: () => { closeModal(); resolve(true); } }
+      ], opts);
+    });
+  };
+
+  window.uiPrompt = function(message, defaultValue, title) {
+    return new Promise((resolve) => {
+      const wrapper = document.createElement('div');
+      const safeDefault = (defaultValue != null ? String(defaultValue) : '').replace(/"/g, '&quot;');
+      wrapper.innerHTML = '<div style="margin-bottom:10px;">' + String(message).replace(/\n/g, '<br/>') + '</div>' +
+        '<input type="text" id="game-modal-input" value="' + safeDefault + '" style="width:100%;padding:8px 10px;font-size:14px;background:#1a1208;color:#e8d9b0;border:1px solid #8b6520;border-radius:4px;font-family:inherit;outline:none;"/>';
+      showModal(title || '輸入', wrapper, [
+        { text: '取消', onClick: () => { closeModal(); resolve(null); } },
+        { text: '確定', primary: true, onClick: () => {
+          const input = wrapper.querySelector('#game-modal-input');
+          const val = input ? input.value : '';
+          closeModal();
+          resolve(val);
+        }}
+      ]);
+      setTimeout(() => {
+        const input = wrapper.querySelector('#game-modal-input');
+        if (input) { input.focus(); input.select(); }
+      }, 10);
+    });
+  };
+})();
+
+// ========== v2.7.3：遊戲風 Toast ==========
+(function() {
+  let container = null;
+  function ensureContainer() {
+    if (container) return container;
+    container = document.createElement('div');
+    container.id = 'game-toast-container';
+    container.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;display:flex;flex-direction:column;gap:6px;pointer-events:none;';
+    document.body.appendChild(container);
+    return container;
+  }
+
+  window.showToast = function(message, type) {
+    const c = ensureContainer();
+    const t = document.createElement('div');
+    t.style.cssText = 'padding:8px 16px;font-size:13px;color:#e8d9b0;background:rgba(20,14,8,0.9);border:1px solid #8b6520;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,0.5);font-family:inherit;letter-spacing:0.5px;white-space:nowrap;opacity:0;transform:translateY(-10px);transition:all 0.3s;';
+    if (type === 'success') { t.style.borderColor = '#50a050'; t.style.color = '#a0e0a0'; }
+    else if (type === 'error') { t.style.borderColor = '#c04040'; t.style.color = '#ff9090'; }
+    else if (type === 'warn') { t.style.borderColor = '#c09030'; t.style.color = '#ffd070'; }
+    t.textContent = message;
+    c.appendChild(t);
+    requestAnimationFrame(() => {
+      t.style.opacity = '1';
+      t.style.transform = 'translateY(0)';
+    });
+    setTimeout(() => {
+      t.style.opacity = '0';
+      t.style.transform = 'translateY(-10px)';
+      setTimeout(() => t.remove(), 300);
+    }, 2200);
+  };
+})();
 
 })();

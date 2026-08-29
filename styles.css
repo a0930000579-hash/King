@@ -719,16 +719,10 @@ img { display: block; pointer-events: none; }
 .world-unit .unit-sprite-wrap {
   position: relative;
 }
+/* v2.7.1: 移除世界層精靈的暗色圓形混層（卡牌底框元兇），世界層只渲染去背透明本體 */
 .world-unit .unit-sprite-wrap::after {
   content: '';
-  position: absolute;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.3) 100%);
-  border-radius: 50% 50% 50% 50% / 30% 30% 70% 70%;
-  pointer-events: none;
-  mix-blend-mode: multiply;
-  opacity: 0.6;
+  display: none;
 }
 .sprite-frame-idle { display: block; }
 .sprite-frame-walk { display: none; }
@@ -1585,15 +1579,12 @@ img { display: block; pointer-events: none; }
 }
 .world-unit.summon .unit-shadow { width: 26px; height: 6px; bottom: -1px; }
 .world-unit.enemy .unit-shadow { width: 28px; height: 7px; }
+/* v2.7.1: 世界層所有單位統一腳下橢圓半透明黑色接觸陰影（英雄也不例外） */
 .world-unit.hero .unit-shadow {
-  width: 36px; height: 9px;
-  background: radial-gradient(ellipse at center, rgba(240,192,64,0.35) 0%, rgba(0,0,0,0.45) 55%, transparent 80%);
-  animation: heroGlow 2.4s ease-in-out infinite;
+  width: 40px; height: 10px;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.3) 50%, transparent 75%);
   filter: blur(1.5px);
-}
-@keyframes heroGlow {
-  0%,100% { opacity: 0.75; transform: translateX(-50%) scale(1); }
-  50% { opacity: 1; transform: translateX(-50%) scale(1.15); }
+  animation: none;  /* 靜止時陰影不跳動 */
 }
 
 /* 行走时阴影微小缩放，增强立体感 */
@@ -12451,4 +12442,131 @@ img { display: block; pointer-events: none; }
   0%   { transform: rotate(0deg) scale(1); opacity: 1; }
   30%  { transform: rotate(15deg) scale(0.92); opacity: 0.85; }
   100% { transform: rotate(85deg) scale(0.7); opacity: 0; }
+}
+
+/* =================================================================
+   v2.7.1 變身特效強化：金變=金焰+黑煙+閃電；紫變=紫焰+紫煙+紫閃
+   全部在精靈背後呈現（transform-aura z-index: -1）
+   ================================================================= */
+
+/* 通用：火焰粒子容器（新增，在 aura-smoke 之上更密的火焰） */
+.transform-aura .aura-flames {
+  position: absolute;
+  left: 50%;
+  bottom: 5%;
+  width: 60px;
+  height: 75%;
+  margin-left: -30px;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 0;
+}
+.aura-flames span {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 18px;
+  height: 24px;
+  margin-left: -9px;
+  border-radius: 50% 50% 50% 50% / 70% 70% 30% 30%;
+  pointer-events: none;
+  animation: flame-rise 1.6s ease-out infinite;
+  filter: blur(1px);
+  opacity: 0;
+}
+
+/* 8 道火焰，不同位置/延遲/大小 */
+.aura-flames span:nth-child(1) { left: 25%; animation-delay: 0s;    width: 16px; height: 22px; }
+.aura-flames span:nth-child(2) { left: 55%; animation-delay: 0.2s;  width: 20px; height: 28px; }
+.aura-flames span:nth-child(3) { left: 38%; animation-delay: 0.4s;  width: 14px; height: 20px; }
+.aura-flames span:nth-child(4) { left: 68%; animation-delay: 0.6s;  width: 18px; height: 24px; }
+.aura-flames span:nth-child(5) { left: 48%; animation-delay: 0.8s;  width: 22px; height: 30px; }
+.aura-flames span:nth-child(6) { left: 30%; animation-delay: 1.0s;  width: 15px; height: 21px; }
+.aura-flames span:nth-child(7) { left: 62%; animation-delay: 1.2s;  width: 17px; height: 25px; }
+.aura-flames span:nth-child(8) { left: 42%; animation-delay: 1.4s;  width: 19px; height: 26px; }
+
+@keyframes flame-rise {
+  0%   { opacity: 0;   transform: translateY(0)    scale(0.4) skewX(0deg); }
+  20%  { opacity: 1;   transform: translateY(-8px) scale(1)   skewX(3deg); }
+  50%  { opacity: 0.8; transform: translateY(-25px) scale(1.1) skewX(-2deg); }
+  75%  { opacity: 0.5; transform: translateY(-40px) scale(0.9) skewX(2deg); }
+  100% { opacity: 0;   transform: translateY(-55px) scale(0.6) skewX(-3deg); }
+}
+
+/* 黑煙粒子（金變用）— 比普通煙霧更暗、上升更慢、更大 */
+.world-unit.hero.transform-rarity-gold .aura-smoke span {
+  background: radial-gradient(circle, rgba(30,20,10,0.8), rgba(10,5,0,0.5) 50%, transparent 100%) !important;
+  width: 22px !important;
+  height: 22px !important;
+  animation: gold-smoke-rise 3.5s ease-out infinite !important;
+  filter: blur(6px) !important;
+}
+@keyframes gold-smoke-rise {
+  0%   { opacity: 0;   transform: translateY(0)    scale(0.5); }
+  15%  { opacity: 0.7; }
+  50%  { opacity: 0.5; }
+  100% { opacity: 0;   transform: translateY(-75px) scale(1.8); }
+}
+
+/* 金變火焰：金黃→橙紅漸層 */
+.world-unit.hero.transform-rarity-gold .aura-flames span {
+  background: radial-gradient(ellipse at 50% 70%, 
+    #fff5a0 0%, 
+    #ffd040 25%, 
+    #ff8820 55%, 
+    #cc3300 85%, 
+    transparent 100%);
+  box-shadow: 0 0 12px rgba(255,200,60,0.8),
+              0 0 24px rgba(255,140,20,0.5);
+}
+
+/* 紫變火焰：白紫→紫→深紫 */
+.world-unit.hero.transform-rarity-purple .aura-flames span {
+  background: radial-gradient(ellipse at 50% 70%, 
+    #f0d0ff 0%, 
+    #c060ff 25%, 
+    #8820dd 55%, 
+    #441088 85%, 
+    transparent 100%);
+  box-shadow: 0 0 12px rgba(200,100,255,0.8),
+              0 0 24px rgba(140,40,220,0.5);
+}
+
+/* 紫變煙霧：淡紫色 */
+.world-unit.hero.transform-rarity-purple .aura-smoke span {
+  background: radial-gradient(circle, rgba(180,120,255,0.7), rgba(100,40,180,0.45) 50%, transparent 100%) !important;
+  animation-duration: 3.0s !important;
+}
+
+/* 紅變火焰：深紅 */
+.world-unit.hero.transform-rarity-red .aura-flames span {
+  background: radial-gradient(ellipse at 50% 70%, 
+    #ffaaaa 0%, 
+    #ff4040 25%, 
+    #cc1020 55%, 
+    #660010 85%, 
+    transparent 100%);
+  box-shadow: 0 0 12px rgba(255,60,60,0.7);
+}
+
+/* 藍變火焰：冰藍 */
+.world-unit.hero.transform-rarity-blue .aura-flames span {
+  background: radial-gradient(ellipse at 50% 70%, 
+    #d0f0ff 0%, 
+    #50a0ff 25%, 
+    #2060cc 55%, 
+    #102066 85%, 
+    transparent 100%);
+  box-shadow: 0 0 12px rgba(80,160,255,0.7);
+}
+
+/* 綠變火焰：翠綠 */
+.world-unit.hero.transform-rarity-green .aura-flames span {
+  background: radial-gradient(ellipse at 50% 70%, 
+    #d0ffd0 0%, 
+    #50dd50 25%, 
+    #20aa30 55%, 
+    #105520 85%, 
+    transparent 100%);
+  box-shadow: 0 0 12px rgba(80,220,80,0.7);
 }
