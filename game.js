@@ -5665,7 +5665,7 @@ const AUTO_ITEMS_CATALOG = [
 ];
 
 const ITEM_ICONS = {
-  // 藥水（v2.4.0：新語意路徑 assets/item/icon_*.jpg）
+  // 藥水（v2.7.4：暗黑風獨立圖標）
   hp1: assetUrl('item/icon_potion_hp.jpg'),
   hp2: assetUrl('item/icon_potion_hp.jpg'),
   hp3: assetUrl('item/icon_potion_hp.jpg'),
@@ -5680,36 +5680,58 @@ const ITEM_ICONS = {
   atk_potion: assetUrl('item/icon_potion_orange.jpg'),
   def_potion: assetUrl('item/icon_potion_green.jpg'),
   crit_potion: assetUrl('item/icon_potion_orange.jpg'),
-  mgem: assetUrl('item/icon_gem_ruby.jpg'),
-  teleport: assetUrl('item/icon_scroll.jpg'),
-  enhance_ticket: assetUrl('item/icon_scroll.jpg'),
-  chest: assetUrl('item/icon_gold_coin.jpg'),
+  mgem: assetUrl('item/icon_soul_gem.jpg'),
+  teleport: assetUrl('item/icon_teleport_scroll.jpg'),
+  enhance_ticket: assetUrl('item/icon_enhance_stone.jpg'),
+  chest: assetUrl('item/icon_chest.jpg'),
   tscroll: assetUrl('item/icon_scroll.jpg'),
-  revive_scroll: assetUrl('item/icon_scroll.jpg'),
-  escape_scroll: assetUrl('item/icon_scroll.jpg'),
-  enhance_stone: assetUrl('item/icon_gem_ruby.jpg'),
-  bless_stone: assetUrl('item/icon_gem_ruby.jpg'),
-  crystal_frag: assetUrl('item/icon_gem_ruby.jpg'),
+  revive_scroll: assetUrl('item/icon_revive_scroll.jpg'),
+  escape_scroll: assetUrl('item/icon_teleport_scroll.jpg'),
+  enhance_stone: assetUrl('item/icon_enhance_stone.jpg'),
+  bless_stone: assetUrl('item/icon_bless_stone.jpg'),
+  crystal_frag: assetUrl('item/icon_crystal_shard.jpg'),
   gold_coin: assetUrl('item/icon_gold_coin.jpg'),
-  gem_bag: assetUrl('item/icon_gem_ruby.jpg'),
-  dungeon_key: assetUrl('item/icon_scroll.jpg'),
-  treasure_key: assetUrl('item/icon_gem_ruby.jpg'),
-  quest_scroll: assetUrl('item/icon_scroll.jpg'),
-  bag_expand_scroll: assetUrl('item/icon_scroll.jpg'),
-  ancient_book: assetUrl('item/icon_scroll.jpg'),
-  monster_eye: assetUrl('item/icon_gem_ruby.jpg'),
-  dragon_scale: assetUrl('item/icon_gem_ruby.jpg'),
-  // 裝備類型（v2.4.0：新語意路徑 assets/equip/icon_*.jpg）
-  weapon: assetUrl('equip/icon_sword.jpg'),
-  armor: assetUrl('equip/icon_armor.jpg'),
-  helmet: assetUrl('equip/icon_helmet.jpg'),
-  boots: assetUrl('equip/icon_boots.jpg'),
-  gloves: assetUrl('equip/icon_armor.jpg'),
-  shield: assetUrl('equip/icon_shield.jpg'),
-  ring: assetUrl('equip/icon_ring.jpg'),
-  bow: assetUrl('equip/icon_bow.jpg'),
-  staff: assetUrl('equip/icon_staff.jpg'),
+  gem_bag: assetUrl('item/icon_soul_gem.jpg'),
+  dungeon_key: assetUrl('item/icon_dungeon_key.jpg'),
+  treasure_key: assetUrl('item/icon_dungeon_key.jpg'),
+  quest_scroll: assetUrl('item/icon_quest_scroll.jpg'),
+  bag_expand_scroll: assetUrl('item/icon_bag_scroll.jpg'),
+  ancient_book: assetUrl('item/icon_ancient_book.jpg'),
+  monster_eye: assetUrl('item/icon_monster_eye.jpg'),
+  dragon_scale: assetUrl('item/icon_dragon_scale.jpg'),
+  // 裝備類型 fallback（v2.7.4：按品質選圖，此為白色預設）
+  weapon: assetUrl('equip/icon_sword_white.jpg'),
+  armor: assetUrl('equip/icon_armor_white.jpg'),
+  helmet: assetUrl('equip/icon_helmet_white.jpg'),
+  boots: assetUrl('equip/icon_boots_white.jpg'),
+  gloves: assetUrl('equip/icon_gloves_white.jpg'),
+  belt: assetUrl('equip/icon_belt_white.jpg'),
+  cape: assetUrl('equip/icon_cape_white.jpg'),
+  pants: assetUrl('equip/icon_pants_white.jpg'),
+  necklace: assetUrl('equip/icon_necklace_white.jpg'),
+  shield: assetUrl('equip/icon_shield_white.jpg'),
+  ring: assetUrl('equip/icon_ring_white.jpg'),
+  ring1: assetUrl('equip/icon_ring_white.jpg'),
+  ring2: assetUrl('equip/icon_ring_white.jpg'),
+  accessory: assetUrl('equip/icon_ring_white.jpg'),
+  bow: assetUrl('equip/icon_sword_white.jpg'),
+  staff: assetUrl('equip/icon_sword_white.jpg'),
   gem: assetUrl('item/icon_gem_ruby.jpg'),
+};
+
+// v2.7.4：裝備品質圖標（部位 × 6 品質）
+const EQUIP_RARITY_ICONS = {
+  sword:    { white: assetUrl('equip/icon_sword_white.jpg'),    green: assetUrl('equip/icon_sword_green.jpg'),    blue: assetUrl('equip/icon_sword_blue.jpg'),    red: assetUrl('equip/icon_sword_red.jpg'),    purple: assetUrl('equip/icon_sword_purple.jpg'),    gold: assetUrl('equip/icon_sword_gold.jpg') },
+  armor:    { white: assetUrl('equip/icon_armor_white.jpg'),    green: assetUrl('equip/icon_armor_green.jpg'),    blue: assetUrl('equip/icon_armor_blue.jpg'),    red: assetUrl('equip/icon_armor_red.jpg'),    purple: assetUrl('equip/icon_armor_purple.jpg'),    gold: assetUrl('equip/icon_armor_gold.jpg') },
+  helmet:   { white: assetUrl('equip/icon_helmet_white.jpg'),   green: assetUrl('equip/icon_helmet_green.jpg'),   blue: assetUrl('equip/icon_helmet_blue.jpg'),   red: assetUrl('equip/icon_helmet_red.jpg'),   purple: assetUrl('equip/icon_helmet_purple.jpg'),   gold: assetUrl('equip/icon_helmet_gold.jpg') },
+  boots:    { white: assetUrl('equip/icon_boots_white.jpg'),    green: assetUrl('equip/icon_boots_green.jpg'),    blue: assetUrl('equip/icon_boots_blue.jpg'),    red: assetUrl('equip/icon_boots_red.jpg'),    purple: assetUrl('equip/icon_boots_purple.jpg'),    gold: assetUrl('equip/icon_boots_gold.jpg') },
+  gloves:   { white: assetUrl('equip/icon_gloves_white.jpg'),   green: assetUrl('equip/icon_gloves_green.jpg'),   blue: assetUrl('equip/icon_gloves_blue.jpg'),   red: assetUrl('equip/icon_gloves_red.jpg'),   purple: assetUrl('equip/icon_gloves_purple.jpg'),   gold: assetUrl('equip/icon_gloves_gold.jpg') },
+  belt:     { white: assetUrl('equip/icon_belt_white.jpg'),     green: assetUrl('equip/icon_belt_green.jpg'),     blue: assetUrl('equip/icon_belt_blue.jpg'),     red: assetUrl('equip/icon_belt_red.jpg'),     purple: assetUrl('equip/icon_belt_purple.jpg'),     gold: assetUrl('equip/icon_belt_gold.jpg') },
+  cape:     { white: assetUrl('equip/icon_cape_white.jpg'),     green: assetUrl('equip/icon_cape_green.jpg'),     blue: assetUrl('equip/icon_cape_blue.jpg'),     red: assetUrl('equip/icon_cape_red.jpg'),     purple: assetUrl('equip/icon_cape_purple.jpg'),     gold: assetUrl('equip/icon_cape_gold.jpg') },
+  pants:    { white: assetUrl('equip/icon_pants_white.jpg'),    green: assetUrl('equip/icon_pants_green.jpg'),    blue: assetUrl('equip/icon_pants_blue.jpg'),    red: assetUrl('equip/icon_pants_red.jpg'),    purple: assetUrl('equip/icon_pants_purple.jpg'),    gold: assetUrl('equip/icon_pants_gold.jpg') },
+  ring:     { white: assetUrl('equip/icon_ring_white.jpg'),     green: assetUrl('equip/icon_ring_green.jpg'),     blue: assetUrl('equip/icon_ring_blue.jpg'),     red: assetUrl('equip/icon_ring_red.jpg'),     purple: assetUrl('equip/icon_ring_purple.jpg'),     gold: assetUrl('equip/icon_ring_gold.jpg') },
+  necklace: { white: assetUrl('equip/icon_necklace_white.jpg'), green: assetUrl('equip/icon_necklace_green.jpg'), blue: assetUrl('equip/icon_necklace_blue.jpg'), red: assetUrl('equip/icon_necklace_red.jpg'), purple: assetUrl('equip/icon_necklace_purple.jpg'), gold: assetUrl('equip/icon_necklace_gold.jpg') },
+  shield:   { white: assetUrl('equip/icon_shield_white.jpg'),   green: assetUrl('equip/icon_shield_green.jpg'),   blue: assetUrl('equip/icon_shield_blue.jpg'),   red: assetUrl('equip/icon_shield_red.jpg'),   purple: assetUrl('equip/icon_shield_purple.jpg'),   gold: assetUrl('equip/icon_shield_gold.jpg') },
 };
 
 // 獲取道具圖資 URL（道具ID優先，裝備按類型回落）
@@ -5721,6 +5743,17 @@ function getItemIconUrl(item) {
   if (item.type && ITEM_ICONS[item.type]) return ITEM_ICONS[item.type];
   if (item.itemType === 'consumable') return ITEM_ICONS.hp2;
   return ITEM_ICONS.chest;
+}
+
+// v2.7.4：按部位+品質取裝備圖標
+function getEquipRarityIcon(type, rarity) {
+  const slotMap = { weapon:'sword', armor:'armor', helmet:'helmet', boots:'boots',
+    gloves:'gloves', belt:'belt', cape:'cape', pants:'pants', ring:'ring',
+    ring1:'ring', ring2:'ring', necklace:'necklace', shield:'shield',
+    accessory:'ring', bow:'sword', staff:'sword' };
+  const slot = slotMap[type] || 'sword';
+  const r = rarity || 'white';
+  return EQUIP_RARITY_ICONS[slot]?.[r] || EQUIP_RARITY_ICONS.sword.white;
 }
 
 // ==================== 裝備配置 ====================
@@ -5738,23 +5771,24 @@ const EQUIP_SLOTS = [
   { id: 'boots',   name: '靴子',   pos: 'feet' },
 ];
 
-// 裝備部位對應圖標（v2.4.0：新語意路徑 assets/equip/icon_*.jpg）
+// 裝備部位對應圖標（v2.7.4：白色品質為預設，帶品質請用 getEquipRarityIcon）
 const EQUIP_ICON_MAP = {
-  helmet:   assetUrl('equip/icon_helmet.jpg'),
-  armor:    assetUrl('equip/icon_armor.jpg'),
-  weapon:   assetUrl('equip/icon_sword.jpg'),
-  necklace: assetUrl('equip/icon_ring.jpg'),
-  ring:     assetUrl('equip/icon_ring.jpg'),
-  ring1:    assetUrl('equip/icon_ring.jpg'),
-  ring2:    assetUrl('equip/icon_ring.jpg'),
-  boots:    assetUrl('equip/icon_boots.jpg'),
-  gloves:   assetUrl('equip/icon_armor.jpg'),
-  belt:     assetUrl('equip/icon_armor.jpg'),
-  cape:     assetUrl('equip/icon_armor.jpg'),
-  pants:    assetUrl('equip/icon_armor.jpg'),
-  shield:   assetUrl('equip/icon_shield.jpg'),
-  bow:      assetUrl('equip/icon_bow.jpg'),
-  staff:    assetUrl('equip/icon_staff.jpg'),
+  helmet:   assetUrl('equip/icon_helmet_white.jpg'),
+  armor:    assetUrl('equip/icon_armor_white.jpg'),
+  weapon:   assetUrl('equip/icon_sword_white.jpg'),
+  necklace: assetUrl('equip/icon_necklace_white.jpg'),
+  ring:     assetUrl('equip/icon_ring_white.jpg'),
+  ring1:    assetUrl('equip/icon_ring_white.jpg'),
+  ring2:    assetUrl('equip/icon_ring_white.jpg'),
+  boots:    assetUrl('equip/icon_boots_white.jpg'),
+  gloves:   assetUrl('equip/icon_gloves_white.jpg'),
+  belt:     assetUrl('equip/icon_belt_white.jpg'),
+  cape:     assetUrl('equip/icon_cape_white.jpg'),
+  pants:    assetUrl('equip/icon_pants_white.jpg'),
+  shield:   assetUrl('equip/icon_shield_white.jpg'),
+  bow:      assetUrl('equip/icon_sword_white.jpg'),
+  staff:    assetUrl('equip/icon_sword_white.jpg'),
+  accessory:assetUrl('equip/icon_ring_white.jpg'),
 };
 
 // 道具/消耗品圖標（v2.4.0：新語意路徑 assets/item/icon_*.jpg）
@@ -5769,7 +5803,7 @@ const ITEM_ICON_MAP = {
   default:   assetUrl('item/icon_gem_ruby.jpg'),
 };
 
-// 取得裝備圖標 URL（按類型）
+// 取得裝備圖標 URL（按類型，白色品質預設；推薦使用 getEquipRarityIcon(type, rarity)）
 function getEquipIcon(type) {
   return EQUIP_ICON_MAP[type] || EQUIP_ICON_MAP.weapon;
 }
@@ -7842,7 +7876,7 @@ function renderTradeSlots() {
     cell.style.cssText = 'width:100%;aspect-ratio:1;background:rgba(0,0,0,0.4);border:1px solid #604020;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer';
     const item = tradeState.myItems[i];
     if (item) {
-      const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+      const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
       const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
       cell.style.borderColor = rc.color;
       cell.innerHTML = `
@@ -7863,7 +7897,7 @@ function renderTradeSlots() {
     cell.style.cssText = 'width:100%;aspect-ratio:1;background:rgba(0,0,0,0.4);border:1px solid #604020;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative';
     const item = tradeState.partnerItems[i];
     if (item) {
-      const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+      const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
       const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
       cell.style.borderColor = rc.color;
       cell.innerHTML = `
@@ -7898,7 +7932,7 @@ function showTradeItemPicker(slotIndex) {
       </div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
         ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
-          const iconUrl = it.itemType === 'equipment' ? getEquipIcon(it.type) : getItemIconUrl(it);
+          const iconUrl = it.itemType === 'equipment' ? getEquipRarityIcon(it.type, it.rarity) : getItemIconUrl(it);
           const rc = RARITY_CONFIG[it.rarity] || RARITY_CONFIG.white;
           return `
             <div class="trade-picker-item" data-idx="${idx}" style="aspect-ratio:1;border:2px solid ${rc.color};border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,0.4);position:relative" title="${it.name}${it.count > 1 ? ' ×' + it.count : ''}">
@@ -8342,7 +8376,7 @@ function renderAuctionBrowse(container) {
 }
 
 function renderAuctionItemRow(item, mode) {
-  const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+  const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
   const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
   const currencyIcon = item.currency === 'gem' ? '鑽' : '金';
   const tax = Math.floor(item.price * AUCTION_TAX_RATE);
@@ -8447,7 +8481,7 @@ function renderAuctionSell(container) {
     <div style="font-size:12px;color:#ffd080;margin-bottom:6px">選擇要掛售的物品：</div>
     <div class="auction-sell-grid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px;max-height:200px;overflow:auto;padding:6px;background:rgba(0,0,0,0.25);border-radius:6px;border:1px solid #402810">
       ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
-        const iconUrl = it.itemType === 'equipment' ? getEquipIcon(it.type) : getItemIconUrl(it);
+        const iconUrl = it.itemType === 'equipment' ? getEquipRarityIcon(it.type, it.rarity) : getItemIconUrl(it);
         const rc = RARITY_CONFIG[it.rarity] || RARITY_CONFIG.white;
         return `
           <div class="auction-sell-item" data-idx="${idx}" style="aspect-ratio:1;border:2px solid ${rc.color};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,0.4);position:relative" title="${it.name}${it.count > 1 ? ' ×' + it.count : ''}">
@@ -8475,7 +8509,7 @@ function showAuctionSellForm(item) {
   const detail = document.getElementById('auction-sell-detail');
   if (!detail) return;
   const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
-  const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
+  const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
   const maxCount = item.count || 1;
   detail.innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
@@ -20398,7 +20432,7 @@ function renderBagPage() {
           const isEquip = item.itemType === 'equipment';
           let iconHtml = '';
           if (isEquip) {
-            const iconUrl = getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type);
+            const iconUrl = getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity);
             iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px"/>`;
           } else if (item.itemType === 'consumable') {
             const iconUrl = getItemIconUrl(item);
@@ -20563,7 +20597,7 @@ function renderEnhancePage() {
 
   const renderEquipIcon = (eq) => {
     const lvl = eq.enhanceLevel || 0;
-    const iconUrl = getEquipIcon(eq.type === 'accessory' ? 'ring1' : eq.type) || ITEM_ICON_MAP.default;
+    const iconUrl = getEquipRarityIcon(eq.type === 'accessory' ? 'ring1' : eq.type, eq.rarity) || ITEM_ICON_MAP.default;
     return `
       <div style="width:56px;height:56px;position:relative;border:2px solid ${RARITY_CONFIG[eq.rarity]?.color || '#999'};border-radius:8px;background:linear-gradient(180deg,rgba(30,20,10,0.9),rgba(15,10,5,0.95));display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px ${RARITY_CONFIG[eq.rarity]?.color || '#999'}44">
         <img src="${iconUrl}" style="width:70%;height:70%;object-fit:contain;display:block"/>
@@ -26434,7 +26468,7 @@ function updateServerAIs(dt) {
       const item = items[i];
       if (item) {
         const iconUrl = item.itemType === 'equipment'
-          ? (typeof getEquipIcon === 'function' ? getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type) : '')
+          ? (typeof getEquipIcon === 'function' ? getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity) : '')
           : (typeof getItemIconUrl === 'function' ? getItemIconUrl(item) : '');
         const countStr = (item.count && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : '';
         slots.push(`
@@ -26511,7 +26545,7 @@ function updateServerAIs(dt) {
       const item = items[i];
       if (item) {
         const iconUrl = item.itemType === 'equipment'
-          ? (typeof getEquipIcon === 'function' ? getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type) : '')
+          ? (typeof getEquipIcon === 'function' ? getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity) : '')
           : (typeof getItemIconUrl === 'function' ? getItemIconUrl(item) : '');
         const countStr = (item.count && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : '';
         slots.push(`
