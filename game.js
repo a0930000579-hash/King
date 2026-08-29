@@ -1674,14 +1674,14 @@ const SPRITE = {
     color: '#442266', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   bat: {
-    idle: assetUrl('R5ucsLb0nY'),
-    walk: assetUrl('R5ucsLb0nY'),
-    walk2: assetUrl('ZMSh5JkLuI'),
-    walk3: assetUrl('7FtGCbQrYd'),
-    walk4: assetUrl('9pQ6wjsVuN'),
-    attack: assetUrl('WrjJT3OobX'),
-    attack2: assetUrl('DQeqQ0d043'),
-    hit: assetUrl('k3ide5hCRw'),
+    idle: 'assets/monster/forest_bat_idle.png',
+    walk: 'assets/monster/forest_bat_idle.png',
+    walk2: 'assets/monster/forest_bat_walk.png',
+    walk3: 'assets/monster/forest_bat_walk2.png',
+    walk4: 'assets/monster/forest_bat_walk3.png',
+    attack: 'assets/monster/forest_bat_attack.png',
+    attack2: 'assets/monster/forest_bat_attack2.png',
+    hit: 'assets/monster/forest_bat_hit.png',
     color: '#442222', glow: '#ff2222', useImg: true, multiFrame: true, coverMode: true,
   },
   ghost: {
@@ -5601,6 +5601,15 @@ function doTransformGacha(mode) {
     }
   }
   updateUI();
+  // v2.7.2：抽完變身立即存檔並同步到伺服器，確保中獎入帳、重登仍在
+  if (typeof saveGame === 'function') {
+    try { saveGame(); } catch(e) { console.warn('[TransformGacha] 存檔失敗:', e); }
+  }
+  if (typeof syncAccountSharedFromLocal === 'function') {
+    syncAccountSharedFromLocal().catch(e =>
+      console.warn('[TransformGacha] 同步伺服器失敗:', e)
+    );
+  }
   // 史詩以上全服公告
   announceGachaResults(results, '變身');
   return results;
@@ -6659,6 +6668,24 @@ function showInitError(err) {
 }
 
 function _initCore() {
+  // v2.7.2：角色為 null 時不要 init，明確導回選角頁
+  if (!GS.player || !GS.player.classId) {
+    console.error('[Init] 嚴重：GS.player 不存在或無 classId，跳過 init 並嘗試導回選角');
+    // 嘗試從伺服器重新載入角色列表並回到選角頁
+    try {
+      const overlay = document.getElementById('auth-overlay');
+      const gameRoot = document.getElementById('game-root');
+      if (gameRoot) gameRoot.classList.add('game-hidden');
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        // 觸發 auth.js 的角色列表刷新
+        if (window.AuthSystem && typeof window.AuthSystem.refreshCharList === 'function') {
+          window.AuthSystem.refreshCharList();
+        }
+      }
+    } catch(e) { console.warn('[Init] 導回選角失敗:', e); }
+    throw new Error('角色資料缺失，請重新選擇角色');
+  }
   // v2.4.0：啟動時非同步載入 assets-manifest（失敗也不影響，走 fallback）
   loadAssetsManifest().then(manifest => {
     if (manifest) {
@@ -7024,6 +7051,12 @@ function shuffle(arr) {
 }
 
 function initGlobalAIPool() {
+  // v2.7.2：線上模式（伺服器 AI 權威）不做本地隨機生成
+  if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
+    console.log('[AI] 線上模式：跳過本地 AI 池初始化，由伺服器廣播');
+    _aiPoolInitDone = true;
+    return;
+  }
   // 防重复创建：已达到上限或已初始化完成则直接返回
   if (_aiPoolInitDone || GLOBAL_AI_POOL.length >= MAX_AI_PLAYERS) return;
   // 正在初始化中，避免重入
@@ -7500,6 +7533,11 @@ function assignActiveAIToCurrentMap() {
 
 function spawnAIPlayers() {
   try {
+    // v2.7.2：線上模式跳過本地 AI 生成，由伺服器廣播
+    if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
+      console.log('[AI] 線上模式：跳過本地 spawnAIPlayers，使用伺服器 AI');
+      return;
+    }
     // 確保全AI池已初始化
     initGlobalAIPool();
     // 等待AI池初始化完成（異步情況下延遲生成）
@@ -10953,7 +10991,16 @@ function checkMonsterRespawn(dt) {
 
 
 function initClass() {
+  // v2.7.2：防衛——若 player 或 classId 為空，直接返回避免崩潰
+  if (!GS.player || !GS.player.classId) {
+    console.warn('[initClass] 跳過：player.classId 不存在，player=', GS.player);
+    return;
+  }
   const cls = CLASSES[GS.player.classId];
+  if (!cls) {
+    console.warn('[initClass] 跳過：職業', GS.player.classId, '不存在於 CLASSES');
+    return;
+  }
   // 应用职业基础屬性
   for (const k in cls.baseStats) {
     if (k === 'hpMax') GS.player.hpMax = cls.baseStats.hpMax;
@@ -11361,7 +11408,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <div class="unit-name"></div>
         <div class="unit-level-tag"></div>
       </div>
-      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}${dirClass}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
+      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}${dirClass}" style="width:${size.w}px;height:${size.h}px;background:transparent;">
         ${hasDir ? '' : `<img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>`}
         ${dirLayerHTML}
         <div class="unit-sprite-tomb" style="display:none"></div>
@@ -11391,7 +11438,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
       <div class="unit-name"></div>
       <div class="unit-level-tag"></div>
     </div>
-    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''} ${s.singleFrame ? 'sprite-single-frame' : ''}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
+    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''} ${s.singleFrame ? 'sprite-single-frame' : ''}" style="width:${size.w}px;height:${size.h}px;background:transparent;">
       ${isImg ? `
         <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" onerror="${onErrorHide}"/>
         <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
@@ -11411,6 +11458,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
     <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:-1;overflow:visible">
       <div class="aura-glow-outer"></div>
       <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="aura-flames"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <div class="aura-lightning">
         <div class="bolt bolt-1" style="clip-path: polygon(50% 0%, 70% 25%, 45% 38%, 80% 62%, 55% 75%, 88% 100%, 30% 100%, 45% 79%, 20% 62%, 55% 42%, 25% 25%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
         <div class="bolt bolt-2" style="clip-path: polygon(45% 0%, 75% 21%, 50% 33%, 88% 54%, 60% 67%, 95% 100%, 25% 100%, 38% 75%, 12% 58%, 50% 40%, 20% 21%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
@@ -12059,6 +12107,31 @@ function confirmCC2CharCreate() {
         // v2.5.0：記錄當前角色索引，確保存檔寫對槽位
         GS.currentCharIdx = result.idx != null ? result.idx : 0;
         try { localStorage.setItem('mmo_char_idx', String(GS.currentCharIdx)); } catch(e) {}
+        // v2.7.2：以伺服器回傳的角色資料為權威，確保 GS.player.classId 與 name 正確
+        //  避免創角後 selectedChar 為 null 導致 initClass 崩潰
+        if (!GS.player) GS.player = {};
+        if (result.character) {
+          // 優先使用伺服器回傳的完整角色物件
+          const ch = result.character;
+          GS.player.name = ch.name || name;
+          GS.player.classId = ch.classId || cid;
+          GS.player.level = ch.level || 1;
+          if (ch.hp != null) GS.player.hp = ch.hp;
+          if (ch.hpMax != null) GS.player.hpMax = ch.hpMax;
+        } else {
+          // 舊版相容：只有 name/classId
+          GS.player.name = name;
+          GS.player.classId = cid;
+          GS.player.level = GS.player.level || 1;
+        }
+        // 寫入本機快取（給 onAuthReady 讀）
+        try {
+          localStorage.setItem('mmo_new_char', JSON.stringify({
+            name: GS.player.name,
+            classId: GS.player.classId,
+            level: GS.player.level,
+          }));
+        } catch(e) {}
         enterWorld();
       } else {
         // server 回 ok:false 或非預期格式，顯示具體錯誤
@@ -12358,6 +12431,7 @@ function updatePlayerSprite() {
         <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;overflow:visible">
           <div class="aura-glow-outer"></div>
           <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="aura-flames"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
           <div class="aura-lightning">
             <div class="bolt bolt-1" style="clip-path: polygon(50% 0%, 70% 25%, 45% 38%, 80% 62%, 55% 75%, 88% 100%, 30% 100%, 45% 79%, 20% 62%, 55% 42%, 25% 25%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
             <div class="bolt bolt-2" style="clip-path: polygon(45% 0%, 75% 21%, 50% 33%, 88% 54%, 60% 67%, 95% 100%, 25% 100%, 38% 75%, 12% 58%, 50% 40%, 20% 21%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
@@ -13690,7 +13764,7 @@ function updatePlayer(dt) {
   const dx = p.targetX - p.x;
   const dy = p.targetY - p.y;
   const dist = Math.hypot(dx, dy);
-  let speed = 85;
+  let speed = 106;  // v2.7.1: 基礎移速 +25% (85 → 106)，走動更順暢
   // 計算移動速度加成（v2.6.0 統一函數）
   const moveSpdBonus = getTotalWalkSpeedPct();
   if (moveSpdBonus > 0) speed *= (1 + moveSpdBonus / 100);
@@ -14780,6 +14854,7 @@ function updateMonsters(dt, ts) {
   const p = GS.player;
   GS.monsters.forEach(m => {
     if (m.hp <= 0) return;
+    const el = m.el;  // v2.7.1: 修復未定義 el 導致 ReferenceError 中斷全怪物 AI
     // 攻城战建筑不参与怪物AI（由 updateSiege 处理）
     if (m.isSiegeStructure) {
       if (m.hitTimer > 0) m.hitTimer -= dt;
@@ -17367,6 +17442,15 @@ function doGacha(pool, count, mode) {
   });
   updateUI();
   updateSlotDisplay();
+  // v2.7.2：抽完英雄/寵物立即存檔並同步到伺服器，確保入帳
+  if (typeof saveGame === 'function') {
+    try { saveGame(); } catch(e) { console.warn('[Gacha] 存檔失敗:', e); }
+  }
+  if (typeof syncAccountSharedFromLocal === 'function') {
+    syncAccountSharedFromLocal().catch(e =>
+      console.warn('[Gacha] 同步伺服器失敗:', e)
+    );
+  }
   // 史詩以上全服公告
   announceGachaResults(results, pool === SUMMON_POOL ? '英雄' : '寵物');
   return results;
@@ -17392,6 +17476,12 @@ function addCardToCollection(card, poolType) {
     const newCard = { ...card, count: 1, level: card.level || 1 };
     ownedList.push(newCard);
     console.log(`[addCardToCollection] END 新卡：${card.name}，owned=true，count=1（${poolType}）`);
+    // v2.7.2：新卡入帳後非同步同步到伺服器，確保重登後仍在
+    if (typeof syncAccountSharedFromLocal === 'function') {
+      syncAccountSharedFromLocal().catch(e =>
+        console.warn('[addCardToCollection] 同步伺服器失敗:', e)
+      );
+    }
     return { card: newCard, isNew: true };
   }
 }
@@ -18891,17 +18981,18 @@ function useTransformTicket(tfId) {
 
 // 檢查變身是否到期
 // ==================== Buff 系統 ====================
+// v2.7.1: buff icon 全部替換為有色彩文字的圓角方塊（原 assetUrl 指向深灰佔位檔 → 顯示問號）
 const BUFF_ICONS = {
-  transform:  assetUrl('aadkrgnianeeg_ve_miaoda'),
-  atkspd:     assetUrl('aadkrgyn27sli_ve_miaoda'),
-  movespd:    assetUrl('aadkrgx6ejygg_ve_miaoda'),
-  exp:        assetUrl('aadkrgyumjgag_ve_miaoda'),
-  drop:       assetUrl('aadkrg2chcolq_ve_miaoda'),
-  shield:     assetUrl('aadkrg5b5ssco_ve_miaoda'),
-  atkpot:     assetUrl('aadkrgyrnfyci_ve_miaoda'),
-  defpot:     assetUrl('aadkrgzhmdgdg_ve_miaoda'),
-  berserk:    assetUrl('aadkrg42s6ggo_ve_miaoda'),
-  dodge:      assetUrl('aadkrgxgcxmcg_ve_miaoda'),
+  transform:  'assets/effect/buff_transform.png',
+  atkspd:     'assets/effect/buff_atkspd.png',
+  movespd:    'assets/effect/buff_movespd.png',
+  exp:        'assets/effect/buff_exp.png',
+  drop:       'assets/effect/buff_drop.png',
+  shield:     'assets/effect/buff_shield.png',
+  atkpot:     'assets/effect/buff_atkpot.png',
+  defpot:     'assets/effect/buff_defpot.png',
+  berserk:    'assets/effect/buff_berserk.png',
+  dodge:      'assets/effect/buff_dodge.png',
 };
 
 // 初始化 activeBuffs
@@ -24915,6 +25006,8 @@ function gameLoop(ts) {
     if (window.MultiplayerClient && MultiplayerClient.connected) {
       try { MultiplayerClient.tick(dt); } catch (e) { console.error('multiplayer tick error:', e); }
     }
+    // v2.7.2：伺服器級 AI 插值更新（權威）
+    try { updateServerAIs(dt); } catch (e) { console.error('serverAI tick error:', e); }
     try { renderPlayer(); } catch (e) { console.error('renderPlayer error:', e); }
 
     // 攻城战更新（城堡地圖内进行）
@@ -26103,5 +26196,152 @@ window.hideCharCreate = function() {
   const screen = $('char-create-screen');
   if (screen) screen.classList.add('hidden');
 };
+
+// ===== v2.7.2：伺服器級 AI 橋接 =====
+//  線上模式：伺服器為權威，本地只渲染與插值；不隨機生成
+//  離線模式：維持客戶端本地生成（WS + long-poll 都失敗時）
+
+let _serverAIActive = false;        // 目前是否使用伺服器 AI
+let _serverAIMap = new Map();       // aiId -> aiData（伺服器原格式）
+let _serverAICurrentMap = null;     // 當前地圖的伺服器 AI 列表
+let _offlineMode = false;           // 是否離線模式
+
+/**
+ * 設定伺服器廣播的 AI 清單（來自 WebSocket 或 long-poll）
+ *  - 以 ai.id 為主鍵做增量更新
+ *  - 本地只做渲染與移動插值，不做邏輯/隨機生成
+ */
+window.setServerAIs = function(ais, serverId, mapId) {
+  if (!ais || !Array.isArray(ais)) return;
+  _serverAIActive = true;
+  _offlineMode = false;
+
+  // 更新快取
+  _serverAICurrentMap = { serverId, mapId, ais: [...ais] };
+  ais.forEach(ai => { _serverAIMap.set(ai.id, ai); });
+
+  // 若未進入遊戲，先延遲
+  if (!GS || !worldLayer) return;
+  if (mapId && GS.currentMap && mapId !== GS.currentMap) {
+    // 不是當前地圖，先快取，切圖再用
+    return;
+  }
+  renderServerAIsToWorld(ais);
+};
+
+/**
+ * 把伺服器 AI 清單渲染到 worldLayer
+ *  只與本地 GLOBAL_AI_POOL 做最小差異比對，避免全部重建
+ */
+function renderServerAIsToWorld(ais) {
+  if (!worldLayer) return;
+
+  // 把現有的 ai-player DOM 全部清掉（舊的本地 AI）
+  const oldAIs = worldLayer.querySelectorAll('.world-unit.ai-player');
+  oldAIs.forEach(el => el.remove());
+
+  // 清空本地活躍 AI 標記（避免舊程式繼續驅動）
+  if (GS.aiPlayers) GS.aiPlayers = [];
+
+  // 建立伺服器 AI 的精靈（包裝成 createAISprite 可接受的格式）
+  const wrapped = ais.map(sai => wrapServerAI(sai));
+  GS.aiPlayers = wrapped;
+
+  // 分幀建立 DOM
+  let idx = 0;
+  const BATCH = 10;
+  function spawnBatch() {
+    const end = Math.min(idx + BATCH, wrapped.length);
+    for (; idx < end; idx++) {
+      try { createAISprite(wrapped[idx]); } catch(e) {}
+    }
+    if (idx < wrapped.length) requestAnimationFrame(spawnBatch);
+  }
+  spawnBatch();
+}
+
+/** 把伺服器 AI 格式轉換為 createAISprite 可吃的格式 */
+function wrapServerAI(sai) {
+  const clsId = sai.classId || 'warrior';
+  const cls = CLASSES[clsId] || CLASSES.warrior;
+  return {
+    uid: sai.id,                 // 伺服器 id 直接當 uid 用（確保同 id 客戶端一致）
+    name: sai.name || 'AI',
+    level: sai.level || 1,
+    classId: clsId,
+    nation: sai.nation || 'liang',
+    hp: sai.hp != null ? sai.hp : 100,
+    hpMax: sai.maxHp || sai.hpMax || 100,
+    x: sai.x || 500,
+    y: sai.y || 500,
+    dir: sai.dir || 'down',
+    isAI: true,
+    isServerAI: true,            // 標記為伺服器 AI
+    mapId: sai.mapId || GS.currentMap,
+    state: 'idle',
+    sprite: cls?.sprite || null,
+    el: null,
+    targetX: sai.x || 500,
+    targetY: sai.y || 500,
+    _lastServerX: sai.x || 500,
+    _lastServerY: sai.y || 500,
+    _interpStart: 0,
+  };
+}
+
+/** 標示離線模式（WS + long-poll 都失敗時） */
+window.setOfflineMode = function(isOffline) {
+  _offlineMode = !!isOffline;
+  if (isOffline) {
+    _serverAIActive = false;
+    // UI 標示：離線模式小標籤
+    let tag = document.getElementById('offline-mode-tag');
+    if (!tag) {
+      tag = document.createElement('div');
+      tag.id = 'offline-mode-tag';
+      tag.style.cssText = 'position:fixed;top:4px;left:50%;transform:translateX(-50%);z-index:9999;padding:2px 10px;background:#5a3020;color:#ffc080;font-size:10px;border:1px solid #804020;border-radius:0 0 6px 6px;font-family:inherit;letter-spacing:2px;';
+      tag.textContent = '離 線 模 式';
+      document.body.appendChild(tag);
+    }
+    tag.style.display = 'block';
+  } else {
+    const tag = document.getElementById('offline-mode-tag');
+    if (tag) tag.style.display = 'none';
+  }
+};
+
+/**
+ * 伺服器 AI 插值更新（在 gameLoop 中呼叫）
+ *  與本地 AI 的 walk/move 邏輯解耦，純粹依伺服器座標插值
+ */
+function updateServerAIs(dt) {
+  if (!_serverAIActive || !GS.aiPlayers || GS.aiPlayers.length === 0) return;
+  const now = Date.now();
+  GS.aiPlayers.forEach(ai => {
+    if (!ai.isServerAI || !ai.el) return;
+    if (ai.targetX == null) return;
+    const dx = ai.targetX - ai.x;
+    const dy = ai.targetY - ai.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < 1) return;
+    const speed = 120; // px/s（與玩家接近）
+    const step = Math.min(dist, speed * dt / 1000);
+    ai.x += (dx / dist) * step;
+    ai.y += (dy / dist) * step;
+    // 更新 DOM 位置
+    if (typeof window.positionUnit === 'function') {
+      try { positionUnit(ai.el, ai.x, ai.y, 'ai'); } catch(e) {}
+    } else {
+      ai.el.style.left = (ai.x - 32) + 'px';
+      ai.el.style.bottom = ai.y + 'px';
+    }
+    // 方向
+    if (Math.abs(dx) > Math.abs(dy)) {
+      ai.dir = dx > 0 ? 'right' : 'left';
+    } else {
+      ai.dir = dy > 0 ? 'up' : 'down';
+    }
+  });
+}
 
 })();

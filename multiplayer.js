@@ -22,9 +22,17 @@
   let authToken = '';
   let myPlayerId = null;
   let currentMapId = null;
+  let currentServerId = 'zeus';
   let currentCharIdx = 0;
   let currentWorldW = 2496;
   let currentWorldH = 1664;
+
+  // v2.7.2：WebSocket 狀態
+  let ws = null;
+  let wsConnected = false;
+  let wsReconnectDelay = 1000;
+  let wsReconnectTimer = null;
+  let useWebSocket = false; // 是否成功切換到 WS
 
   const remotePlayers = new Map();
   let pollAbortController = null;
@@ -116,18 +124,36 @@
         try { pollAbortController.abort(); } catch(e) {}
         pollAbortController = null;
       }
+      if (ws) {
+        try { ws.close(); } catch(e) {}
+        ws = null;
+        wsConnected = false;
+      }
       clearAllRemotePlayers();
       myPlayerId = null;
       reconnectDelay = 1000;
+      wsReconnectDelay = 1000;
+      useWebSocket = false;
       setStatus(STATUS.CONNECTING);
 
-      // 用 health 檢查伺服器是否活著
+      // 用 health 檢查伺服器是否活著，並決定是否用 WS
       return fetch(serverUrl + '/api/health')
         .then(r => r.json())
         .then(data => {
           if (data && data.status === 'online') {
             setStatus(STATUS.ONLINE);
-            console.info('[Multi] 伺服器連線成功:', data.version);
+            console.info('[Multi] 伺服器連線成功:', data.version, 'WS=', data.webSocket || data.socketIo);
+            // v2.7.2：若伺服器支援 WebSocket，優先連 WS（失敗自動 fallback long-poll）
+            if (data.webSocket || data.socketIo) {
+              tryWebSocket().catch(e => {
+                console.warn('[Multi] WebSocket 連線失敗，降級 long-poll:', e.message);
+                useWebSocket = false;
+                startPollLoop();
+              });
+            } else {
+              // 沒有 WS 支援，直接 long-poll
+              startPollLoop();
+            }
             // 若已有玩家資料，自動 join
             if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
               return MultiplayerClient.joinWorld();
@@ -148,7 +174,11 @@
     disconnect() {
       if (currentMapId) {
         try {
-          apiPost('/api/mp/leave', { mapId: currentMapId, charIdx: currentCharIdx });
+          if (ws && wsConnected) {
+            wsSend({ type: 'leave_map' });
+          } else {
+            apiPost('/api/mp/leave', { mapId: currentMapId, charIdx: currentCharIdx });
+          }
         } catch(e) {}
       }
       if (pollAbortController) {
@@ -156,25 +186,39 @@
         pollAbortController = null;
       }
       pollRunning = false;
+      if (ws) {
+        try { ws.close(); } catch(e) {}
+        ws = null;
+        wsConnected = false;
+      }
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
       clearAllRemotePlayers();
       myPlayerId = null;
       currentMapId = null;
+      useWebSocket = false;
       setStatus(STATUS.OFFLINE);
     },
 
+    // 加入世界（從 auth token 推斷帳號）
     // 加入世界（從 auth token 推斷帳號）
     joinWorld(opts) {
       opts = opts || {};
       currentCharIdx = opts.charIdx ?? (GS.currentCharIdx ?? 0);
       const mapId = opts.mapId || GS.currentMap || 'village_01';
+      const serverId = opts.serverId || 'zeus';
+      currentServerId = serverId;
       return apiPost('/api/mp/join', {
         mapId,
-        serverId: opts.serverId || 'zeus',
+        serverId,
         charIdx: currentCharIdx,
       }).then(data => {
         if (data.ok) {
           myPlayerId = data.playerId;
           currentMapId = mapId;
+          currentServerId = serverId;
           // 初始化遠端玩家列表
           if (data.others && Array.isArray(data.others)) {
             data.others.forEach(p => {
@@ -190,8 +234,28 @@
               }
             });
           }
+          // v2.7.2：同步伺服器級 AI 列表（權威）
+          if (data.ais && Array.isArray(data.ais) && typeof window.setServerAIs === 'function') {
+            window.setServerAIs(data.ais, serverId, mapId);
+          }
           setStatus(STATUS.ONLINE);
-          startPollLoop();
+          // v2.7.2：WS 模式下不啟動 long-poll（WS 已處理所有事件）
+          if (!useWebSocket) {
+            startPollLoop();
+          }
+          // 若 WS 已連線，也 join_map
+          if (ws && wsConnected) {
+            wsSend({
+              type: 'join_map',
+              serverId,
+              mapId,
+              playerId: myPlayerId,
+              name: GS.player?.name || 'Player',
+              classId: GS.player?.classId || 'warrior',
+              level: GS.player?.level || 1,
+              charIdx: currentCharIdx,
+            });
+          }
           console.info('[Multi] 加入地圖 ' + mapId + '，在線 ' + ((data.others||[]).length+1) + ' 人');
           return data;
         } else {
@@ -252,39 +316,59 @@
       if (now - lastUpdateTime < UPDATE_THROTTLE) return;
       lastUpdateTime = now;
       const sPos = worldToServer(x, y);
-      apiPost('/api/mp/update', {
-        mapId: currentMapId,
-        charIdx: currentCharIdx,
-        x: sPos.x,
-        y: sPos.y,
-        dir: dir,
-      }).catch(() => {
-        // 失敗不影響
-      });
+      // v2.7.2：優先走 WebSocket
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({
+          type: 'move',
+          x: sPos.x, y: sPos.y, dir: dir,
+        });
+      } else {
+        apiPost('/api/mp/update', {
+          mapId: currentMapId,
+          charIdx: currentCharIdx,
+          x: sPos.x,
+          y: sPos.y,
+          dir: dir,
+        }).catch(() => {
+          // 失敗不影響
+        });
+      }
     },
 
     // 回報血量變化
     reportHp(hp, maxHp) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
-      apiPost('/api/mp/update', {
-        mapId: currentMapId,
-        charIdx: currentCharIdx,
-        hp, maxHp,
-      }).catch(() => {});
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'hp', hp, maxHp });
+      } else {
+        apiPost('/api/mp/update', {
+          mapId: currentMapId,
+          charIdx: currentCharIdx,
+          hp, maxHp,
+        }).catch(() => {});
+      }
     },
 
     // 回報變身變化
     reportTransform(transformId) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
-      apiPost('/api/mp/update', {
-        mapId: currentMapId,
-        charIdx: currentCharIdx,
-        transformId,
-      }).catch(() => {});
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'update_profile', transformId });
+      } else {
+        apiPost('/api/mp/update', {
+          mapId: currentMapId,
+          charIdx: currentCharIdx,
+          transformId,
+        }).catch(() => {});
+      }
     },
 
     sendChat(text, channel) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'chat', text, channel: channel || 'map' });
+        return Promise.resolve({ ok: true });
+      }
       return apiPost('/api/mp/chat', {
         mapId: currentMapId,
         charIdx: currentCharIdx,
@@ -311,7 +395,249 @@
     },
 
     _getRemotePlayers() { return remotePlayers; },
+    _getWebSocket() { return ws; },
+    get isWebSocket() { return useWebSocket; },
   };
+
+  // ========== v2.7.2：WebSocket 連線（優先通道，失敗降級 long-poll） ==========
+  function wsSend(msg) {
+    if (!ws || ws.readyState !== 1) return false;
+    try {
+      ws.send(JSON.stringify(msg));
+      return true;
+    } catch(e) { return false; }
+  }
+
+  function tryWebSocket() {
+    return new Promise((resolve, reject) => {
+      if (typeof WebSocket === 'undefined') {
+        reject(new Error('瀏覽器不支援 WebSocket'));
+        return;
+      }
+      const wsUrl = serverUrl.replace(/^http/, 'ws') + '/';
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch(e) {
+        reject(e);
+        return;
+      }
+
+      let resolved = false;
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          reject(new Error('WebSocket 連線逾時'));
+        }
+      }, 5000);
+
+      ws.onopen = () => {
+        console.log('[WS] 已連接，發送 auth...');
+        wsSend({
+          type: 'auth',
+          token: authToken,
+          name: GS?.player?.name || 'Player',
+          classId: GS?.player?.classId || 'warrior',
+          level: GS?.player?.level || 1,
+        });
+      };
+
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch(e) { return; }
+        if (!msg || !msg.type) return;
+
+        if (msg.type === 'auth_ok') {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            useWebSocket = true;
+            wsConnected = true;
+            wsReconnectDelay = 1000;
+            console.log('[WS] 認證成功，account=', msg.account);
+            resolve(msg);
+          }
+          // 若已經在地圖中，重新 join
+          if (currentMapId && myPlayerId) {
+            wsSend({
+              type: 'join_map',
+              serverId: currentServerId,
+              mapId: currentMapId,
+              playerId: myPlayerId,
+              name: GS?.player?.name || 'Player',
+              classId: GS?.player?.classId || 'warrior',
+              level: GS?.player?.level || 1,
+              charIdx: currentCharIdx,
+            });
+          }
+          return;
+        }
+
+        if (msg.type === 'auth_fail') {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            reject(new Error(msg.error || '認證失敗'));
+          }
+          return;
+        }
+
+        // 其他事件走統一處理
+        handleWsMessage(msg);
+      };
+
+      ws.onerror = (err) => {
+        console.warn('[WS] 錯誤');
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(new Error('WebSocket 連線錯誤'));
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('[WS] 連線關閉');
+        wsConnected = false;
+        if (useWebSocket && status === STATUS.ONLINE) {
+          // 意外斷線：嘗試重連，或降級 long-poll
+          console.warn('[WS] 線中斷，降級 long-poll 並嘗試重連');
+          useWebSocket = false;
+          startPollLoop();
+          scheduleWsReconnect();
+        }
+      };
+    });
+  }
+
+  function scheduleWsReconnect() {
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = setTimeout(() => {
+      if (status !== STATUS.ONLINE) return;
+      tryWebSocket()
+        .then(() => {
+          console.log('[WS] 重連成功');
+          // 重新加入地圖
+          if (currentMapId && myPlayerId) {
+            wsSend({
+              type: 'join_map',
+              serverId: currentServerId,
+              mapId: currentMapId,
+              playerId: myPlayerId,
+              name: GS?.player?.name || 'Player',
+              classId: GS?.player?.classId || 'warrior',
+              level: GS?.player?.level || 1,
+              charIdx: currentCharIdx,
+            });
+          }
+          // 切回 WS 模式，停止 long-poll
+          useWebSocket = true;
+          if (pollAbortController) {
+            try { pollAbortController.abort(); } catch(e) {}
+            pollAbortController = null;
+          }
+          pollRunning = false;
+        })
+        .catch(() => {
+          wsReconnectDelay = Math.min(wsReconnectDelay * 2, 15000);
+          scheduleWsReconnect();
+        });
+    }, wsReconnectDelay);
+  }
+
+  function handleWsMessage(msg) {
+    switch (msg.type) {
+      case 'player_join':
+        if (msg.playerId !== myPlayerId) {
+          addOrUpdateRemotePlayer({
+            id: msg.playerId,
+            name: msg.name,
+            class: msg.classId,
+            level: msg.level,
+            x: msg.x, y: msg.y, dir: msg.dir,
+            transform: msg.transformId,
+          });
+        }
+        break;
+      case 'player_leave':
+        if (msg.playerId !== myPlayerId) {
+          removeRemotePlayer(msg.playerId);
+        }
+        break;
+      case 'player_move':
+        if (msg.playerId !== myPlayerId) {
+          handlePlayerMove({
+            id: msg.playerId,
+            x: msg.x, y: msg.y, dir: msg.dir,
+            moving: true,
+          });
+        }
+        break;
+      case 'player_profile':
+        if (msg.playerId !== myPlayerId) {
+          const p = remotePlayers.get(msg.playerId);
+          if (p) {
+            if (msg.name != null) p.name = msg.name;
+            if (msg.level != null) p.level = msg.level;
+            if (msg.transformId != null) p.transform = msg.transformId;
+          }
+        }
+        break;
+      case 'map_state':
+        // 進入地圖時的初始狀態
+        if (msg.players && Array.isArray(msg.players)) {
+          msg.players.forEach(p => {
+            if (p.playerId !== myPlayerId) {
+              addOrUpdateRemotePlayer({
+                id: p.playerId || p.wsId,
+                name: p.name,
+                class: p.classId,
+                level: p.level,
+                x: p.x, y: p.y, dir: p.dir,
+                transform: p.transformId,
+              });
+            }
+          });
+        }
+        // v2.7.2：同步伺服器級 AI
+        if (msg.ais && Array.isArray(msg.ais) && typeof window.setServerAIs === 'function') {
+          window.setServerAIs(msg.ais, msg.serverId, msg.mapId);
+        }
+        break;
+      case 'ai_snapshot':
+      case 'ai_update':
+        if (msg.ais && Array.isArray(msg.ais) && typeof window.setServerAIs === 'function') {
+          window.setServerAIs(msg.ais, msg.serverId, msg.mapId);
+        }
+        break;
+      case 'chat':
+        if (onChatMessage && msg.playerId !== myPlayerId) {
+          try {
+            onChatMessage({
+              name: msg.name,
+              text: msg.text,
+              channel: msg.channel || 'map',
+              playerId: msg.playerId,
+            });
+          } catch(e) {}
+        }
+        break;
+      case 'gm_broadcast':
+        if (onChatMessage) {
+          try {
+            onChatMessage({
+              name: '【系統公告】',
+              text: msg.text || '',
+              channel: 'system',
+              system: true,
+            });
+          } catch(e) {}
+        }
+        break;
+      case 'pong':
+        break;
+      default:
+        break;
+    }
+  }
 
   // ========== Long-Poll 循環 ==========
   function startPollLoop() {

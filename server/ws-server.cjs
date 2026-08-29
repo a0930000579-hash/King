@@ -1,0 +1,557 @@
+/**
+ * v2.7.2：零依賴 WebSocket 伺服器（RFC 6455）
+ * 用 Node 原生 http + crypto，不需要 socket.io / ws 套件，避免 npm install 佔空間
+ *
+ * 功能：
+ *  - 多人 presence / 移動 / 聊天（按 serverId:mapId 隔離）
+ *  - 伺服器級 AI 廣播（權威生成、GM 調整數量即時生效）
+ *  - GM 廣播與設定推送
+ */
+
+const crypto = require('crypto');
+
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+
+function createWsServer(httpServer) {
+  const clients = new Map(); // wsId -> { socket, account, name, serverId, mapId, playerId, ... }
+  let nextWsId = 1;
+
+  // 地圖狀態：key = "serverId:mapId" -> Map(wsId -> client)
+  const mapStates = new Map();
+  // AI 狀態：key = "serverId:mapId" -> Map(aiId -> aiData)
+  const aiStates = new Map();
+
+  function mapKey(serverId, mapId) {
+    return (serverId || 'zeus') + ':' + (mapId || 'default');
+  }
+
+  function getMapState(serverId, mapId) {
+    const k = mapKey(serverId, mapId);
+    if (!mapStates.has(k)) mapStates.set(k, new Map());
+    return mapStates.get(k);
+  }
+
+  function getAIState(serverId, mapId) {
+    const k = mapKey(serverId, mapId);
+    if (!aiStates.has(k)) aiStates.set(k, new Map());
+    return aiStates.get(k);
+  }
+
+  // 廣播到指定地圖
+  function broadcastToMap(serverId, mapId, message, exceptWsId) {
+    const mapState = getMapState(serverId, mapId);
+    for (const [wsId, client] of mapState) {
+      if (wsId === exceptWsId) continue;
+      sendJson(client.socket, message);
+    }
+  }
+
+  // 廣播 AI 快照到地圖內所有人
+  function broadcastAISnapshot(serverId, mapId) {
+    const aiState = getAIState(serverId, mapId);
+    const snapshot = Array.from(aiState.values());
+    const msg = { type: 'ai_snapshot', serverId, mapId, ais: snapshot, time: Date.now() };
+    broadcastToMap(serverId, mapId, msg);
+  }
+
+  // ========== AI 權威生成 ==========
+  // 根據伺服器設定的 aiCount，在指定地圖生成/銷毀 AI
+  function adjustAICount(serverId, mapId, targetCount, opts = {}) {
+    const aiState = getAIState(serverId, mapId);
+    const current = aiState.size;
+
+    if (targetCount < current) {
+      // 刪除多餘的 AI（從後往前刪）
+      let toRemove = current - targetCount;
+      const ids = Array.from(aiState.keys()).reverse();
+      for (const id of ids) {
+        if (toRemove <= 0) break;
+        aiState.delete(id);
+        toRemove--;
+      }
+    } else if (targetCount > current) {
+      // 生成新 AI
+      const classes = ['warrior', 'mage', 'archer', 'rogue', 'paladin', 'warlock'];
+      const names = ['艾倫', '麗娜', '索爾', '凱特', '布萊恩', '索菲', '雷克斯',
+                     '艾琳', '馬克', '珍妮', '湯姆', '凱文', '蘿西', '迪克'];
+      let aiId = current + 1;
+      for (let i = current; i < targetCount; i++) {
+        const id = `ai_${serverId}_${mapId}_${aiId}`;
+        const ai = {
+          id,
+          name: names[Math.floor(Math.random() * names.length)] + '·AI',
+          classId: classes[Math.floor(Math.random() * classes.length)],
+          level: opts.initLevel || 1 + Math.floor(Math.random() * 5),
+          x: 200 + Math.floor(Math.random() * 1600),
+          y: 200 + Math.floor(Math.random() * 1000),
+          dir: 'down',
+          hp: 100,
+          maxHp: 100,
+          isAI: true,
+          serverId,
+          mapId,
+          createdAt: Date.now(),
+        };
+        aiState.set(id, ai);
+        aiId++;
+      }
+    }
+
+    // 廣播給當前地圖玩家
+    broadcastAISnapshot(serverId, mapId);
+    return aiState.size;
+  }
+
+  // AI 簡單移動（每 3 秒更新一次位置）
+  setInterval(() => {
+    for (const [key, aiState] of aiStates) {
+      const [serverId, mapId] = key.split(':');
+      let changed = false;
+      for (const ai of aiState.values()) {
+        if (Math.random() < 0.3) {
+          ai.x += (Math.random() - 0.5) * 60;
+          ai.y += (Math.random() - 0.5) * 60;
+          ai.x = Math.max(50, Math.min(2400, ai.x));
+          ai.y = Math.max(50, Math.min(1600, ai.y));
+          changed = true;
+        }
+      }
+      if (changed) {
+        // 增量推送（只有變動的 AI）
+        const updates = Array.from(aiState.values());
+        broadcastToMap(serverId, mapId, {
+          type: 'ai_update',
+          serverId, mapId,
+          ais: updates,
+          time: Date.now(),
+        });
+      }
+    }
+  }, 3000);
+
+  // ========== WebSocket 協議 ==========
+  function acceptUpgrade(req, socket, head) {
+    const key = req.headers['sec-websocket-key'];
+    if (!key) {
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const accept = crypto.createHash('sha1')
+      .update(key + WS_GUID)
+      .digest('base64');
+
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      'Sec-WebSocket-Accept: ' + accept + '\r\n' +
+      '\r\n'
+    );
+
+    const wsId = nextWsId++;
+    const client = {
+      wsId,
+      socket,
+      account: null,
+      playerId: null,
+      name: 'Player',
+      serverId: null,
+      mapId: null,
+      classId: 'warrior',
+      level: 1,
+      buffer: Buffer.alloc(0),
+      authenticated: false,
+    };
+    clients.set(wsId, client);
+
+    socket.on('data', (chunk) => {
+      client.buffer = Buffer.concat([client.buffer, chunk]);
+      processWsBuffer(client);
+    });
+
+    socket.on('close', () => {
+      handleDisconnect(client);
+    });
+
+    socket.on('error', () => {
+      handleDisconnect(client);
+    });
+  }
+
+  function processWsBuffer(client) {
+    while (client.buffer.length >= 2) {
+      const buf = client.buffer;
+      const opcode = buf[0] & 0x0F;
+      const masked = (buf[1] & 0x80) !== 0;
+      let payloadLen = buf[1] & 0x7F;
+      let offset = 2;
+
+      if (payloadLen === 126) {
+        if (buf.length < 4) return;
+        payloadLen = buf.readUInt16BE(2);
+        offset = 4;
+      } else if (payloadLen === 127) {
+        if (buf.length < 10) return;
+        payloadLen = Number(buf.readBigUInt64BE(2));
+        offset = 10;
+      }
+
+      let maskKey = null;
+      if (masked) {
+        if (buf.length < offset + 4) return;
+        maskKey = buf.slice(offset, offset + 4);
+        offset += 4;
+      }
+
+      if (buf.length < offset + payloadLen) return;
+
+      const payload = buf.slice(offset, offset + payloadLen);
+      let decoded = payload;
+      if (masked && maskKey) {
+        decoded = Buffer.alloc(payloadLen);
+        for (let i = 0; i < payloadLen; i++) {
+          decoded[i] = payload[i] ^ maskKey[i % 4];
+        }
+      }
+
+      client.buffer = buf.slice(offset + payloadLen);
+
+      // 0x8 = close, 0x9 = ping, 0xA = pong, 0x1 = text
+      if (opcode === 0x8) {
+        sendFrame(client.socket, 0x8, Buffer.alloc(0));
+        client.socket.end();
+        return;
+      } else if (opcode === 0x9) {
+        sendFrame(client.socket, 0xA, decoded);
+        continue;
+      } else if (opcode === 0x1) {
+        let msg;
+        try {
+          msg = JSON.parse(decoded.toString('utf8'));
+        } catch (e) {
+          continue;
+        }
+        handleMessage(client, msg);
+      }
+    }
+  }
+
+  function sendFrame(socket, opcode, payload) {
+    const len = payload.length;
+    let header;
+    if (len < 126) {
+      header = Buffer.alloc(2);
+      header[0] = 0x80 | opcode;
+      header[1] = len;
+    } else if (len < 65536) {
+      header = Buffer.alloc(4);
+      header[0] = 0x80 | opcode;
+      header[1] = 126;
+      header.writeUInt16BE(len, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x80 | opcode;
+      header[1] = 127;
+      header.writeBigUInt64BE(BigInt(len), 2);
+    }
+    try {
+      socket.write(Buffer.concat([header, payload]));
+    } catch (e) {}
+  }
+
+  function sendJson(socket, obj) {
+    const data = Buffer.from(JSON.stringify(obj), 'utf8');
+    sendFrame(socket, 0x1, data);
+  }
+
+  // ========== 訊息處理 ==========
+  function handleMessage(client, msg) {
+    if (!msg || typeof msg !== 'object' || !msg.type) return;
+
+    switch (msg.type) {
+      case 'auth':
+        handleAuth(client, msg);
+        break;
+      case 'join_map':
+        handleJoinMap(client, msg);
+        break;
+      case 'move':
+        handleMove(client, msg);
+        break;
+      case 'chat':
+        handleChat(client, msg);
+        break;
+      case 'update_profile':
+        handleUpdateProfile(client, msg);
+        break;
+      case 'ping':
+        sendJson(client.socket, { type: 'pong', time: Date.now() });
+        break;
+      default:
+        break;
+    }
+  }
+
+  function handleAuth(client, msg) {
+    // 簡單 token 校驗（與 long-poll 共用 verifyToken）
+    const token = msg.token || '';
+    const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
+    if (account) {
+      client.account = account;
+      client.authenticated = true;
+      client.name = msg.name || account;
+      client.classId = msg.classId || 'warrior';
+      client.level = msg.level || 1;
+      sendJson(client.socket, { type: 'auth_ok', account, wsId: client.wsId });
+    } else {
+      sendJson(client.socket, { type: 'auth_fail', error: 'token 無效' });
+    }
+  }
+
+  function handleJoinMap(client, msg) {
+    if (!client.authenticated) return;
+    const serverId = msg.serverId || 'zeus';
+    const mapId = msg.mapId || 'village_01';
+
+    // 離開舊地圖
+    if (client.mapId && client.serverId) {
+      const oldKey = mapKey(client.serverId, client.mapId);
+      const oldState = mapStates.get(oldKey);
+      if (oldState) {
+        oldState.delete(client.wsId);
+        broadcastToMap(client.serverId, client.mapId, {
+          type: 'player_leave',
+          wsId: client.wsId,
+          playerId: client.playerId,
+          time: Date.now(),
+        });
+      }
+    }
+
+    client.serverId = serverId;
+    client.mapId = mapId;
+    client.playerId = msg.playerId || (client.account + ':' + (msg.charIdx || 0));
+
+    const mapState = getMapState(serverId, mapId);
+    mapState.set(client.wsId, client);
+
+    // v2.7.2：第一次有人進地圖時，按伺服器設定生成 AI（權威）
+    const aiState = getAIState(serverId, mapId);
+    if (aiState.size === 0 && _serverAIConfigProvider) {
+      try {
+        const cfg = _serverAIConfigProvider(serverId) || {};
+        const cnt = cfg.aiCount != null ? parseInt(cfg.aiCount) : 8;
+        const lv = cfg.initLevel != null ? parseInt(cfg.initLevel) : 1;
+        if (cnt > 0) adjustAICount(serverId, mapId, cnt, { initLevel: lv });
+      } catch(e) { console.warn('[WS] 載入伺服器AI設定失敗:', e.message); }
+    }
+
+    // 回傳當前地圖玩家列表 + AI 快照
+    const others = [];
+    for (const [wid, c] of mapState) {
+      if (wid !== client.wsId) {
+        others.push({
+          wsId: wid,
+          playerId: c.playerId,
+          name: c.name,
+          classId: c.classId,
+          level: c.level,
+          x: c.x || 1024,
+          y: c.y || 1024,
+          dir: c.dir || 'down',
+        });
+      }
+    }
+
+    const ais = Array.from(aiState.values());
+
+    sendJson(client.socket, {
+      type: 'map_state',
+      serverId, mapId,
+      players: others,
+      ais,
+      time: Date.now(),
+    });
+
+    // 通知其他人有人加入
+    broadcastToMap(serverId, mapId, {
+      type: 'player_join',
+      wsId: client.wsId,
+      playerId: client.playerId,
+      name: client.name,
+      classId: client.classId,
+      level: client.level,
+      x: client.x || 1024,
+      y: client.y || 1024,
+      dir: client.dir || 'down',
+      time: Date.now(),
+    }, client.wsId);
+  }
+
+  function handleMove(client, msg) {
+    if (!client.authenticated || !client.mapId) return;
+    client.x = msg.x != null ? msg.x : client.x;
+    client.y = msg.y != null ? msg.y : client.y;
+    client.dir = msg.dir || client.dir;
+    // 廣播給同地圖其他人（節流在客戶端做）
+    broadcastToMap(client.serverId, client.mapId, {
+      type: 'player_move',
+      wsId: client.wsId,
+      playerId: client.playerId,
+      x: client.x,
+      y: client.y,
+      dir: client.dir,
+      time: Date.now(),
+    }, client.wsId);
+  }
+
+  function handleChat(client, msg) {
+    if (!client.authenticated || !client.mapId) return;
+    const text = String(msg.text || '').slice(0, 200);
+    if (!text) return;
+    const payload = {
+      type: 'chat',
+      wsId: client.wsId,
+      playerId: client.playerId,
+      name: client.name,
+      channel: msg.channel || 'map',
+      text,
+      time: Date.now(),
+    };
+    if (msg.channel === 'world') {
+      // 世界頻道：全服
+      for (const [wsId, c] of clients) {
+        if (c.serverId === client.serverId && c.authenticated) {
+          sendJson(c.socket, payload);
+        }
+      }
+    } else {
+      broadcastToMap(client.serverId, client.mapId, payload);
+    }
+  }
+
+  function handleUpdateProfile(client, msg) {
+    if (!client.authenticated) return;
+    if (msg.name != null) client.name = msg.name;
+    if (msg.classId != null) client.classId = msg.classId;
+    if (msg.level != null) client.level = msg.level;
+    if (msg.transformId !== undefined) client.transformId = msg.transformId || null;
+    if (client.mapId) {
+      broadcastToMap(client.serverId, client.mapId, {
+        type: 'player_profile',
+        wsId: client.wsId,
+        playerId: client.playerId,
+        name: client.name,
+        classId: client.classId,
+        level: client.level,
+        transformId: client.transformId,
+        time: Date.now(),
+      });
+    }
+  }
+
+  function handleDisconnect(client) {
+    clients.delete(client.wsId);
+    if (client.mapId && client.serverId) {
+      const mapState = getMapState(client.serverId, client.mapId);
+      mapState.delete(client.wsId);
+      broadcastToMap(client.serverId, client.mapId, {
+        type: 'player_leave',
+        wsId: client.wsId,
+        playerId: client.playerId,
+        time: Date.now(),
+      });
+    }
+  }
+
+  // GM 廣播
+  function gmBroadcast(text) {
+    const msg = { type: 'gm_broadcast', text, time: Date.now() };
+    for (const [wsId, c] of clients) {
+      if (c.authenticated) sendJson(c.socket, msg);
+    }
+  }
+
+  // GM 調整 AI 數量（對指定 server 的所有地圖生效，或指定 map）
+  function setAICountForServer(serverId, targetCount, opts = {}) {
+    const affected = [];
+    for (const [key, aiState] of aiStates) {
+      const [srv, map] = key.split(':');
+      if (srv !== serverId) continue;
+      if (opts.mapId && map !== opts.mapId) continue;
+      adjustAICount(serverId, map, targetCount, opts);
+      affected.push(map);
+    }
+    // 如果這伺服器還沒有任何地圖的 AI 狀態，預設為 village_01 生成
+    if (affected.length === 0 && !opts.mapId) {
+      adjustAICount(serverId, 'village_01', targetCount, opts);
+      affected.push('village_01');
+    }
+    return { affected, count: targetCount };
+  }
+
+  // 取得目前線上人數
+  function getOnlineCount() {
+    let n = 0;
+    for (const c of clients.values()) {
+      if (c.authenticated) n++;
+    }
+    return n;
+  }
+
+  function getOnlinePlayers() {
+    const list = [];
+    for (const c of clients.values()) {
+      if (c.authenticated) {
+        list.push({
+          wsId: c.wsId,
+          account: c.account,
+          name: c.name,
+          serverId: c.serverId,
+          mapId: c.mapId,
+          level: c.level,
+          transport: 'websocket',
+        });
+      }
+    }
+    return list;
+  }
+
+  // 玩家進入地圖時確保 AI 已生成（若該地圖從無人到有人）
+  let _serverAIConfigProvider = null; // (serverId) => { aiCount, initLevel }
+  function setServerAIConfigProvider(fn) { _serverAIConfigProvider = fn; }
+
+  function ensureAIForMap(serverId, mapId, aiCount, initLevel) {
+    const aiState = getAIState(serverId, mapId);
+    if (aiState.size === 0 && aiCount > 0) {
+      adjustAICount(serverId, mapId, aiCount, { initLevel });
+    }
+    // 同步 long-poll 的 AI 狀態
+    return aiState.size;
+  }
+
+  // 取得指定地圖的 AI 列表（給 long-poll 用）
+  function getAIList(serverId, mapId) {
+    const aiState = getAIState(serverId, mapId);
+    return Array.from(aiState.values());
+  }
+
+  return {
+    acceptUpgrade,
+    adjustAICount,
+    setAICountForServer,
+    gmBroadcast,
+    getOnlineCount,
+    getOnlinePlayers,
+    ensureAIForMap,
+    setServerAIConfigProvider,
+    getAIList,
+    broadcastToMap,
+    broadcastAISnapshot,
+    get clientCount() { return clients.size; },
+    get authenticatedCount() { return getOnlineCount(); },
+  };
+}
+
+module.exports = { createWsServer };

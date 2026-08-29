@@ -279,7 +279,19 @@ async function handleMpApi(req, res, pathname, query, account) {
       for (const [pid, s] of mapState) {
         if (pid !== playerId) others.push(s);
       }
-      sendJson(res, 200, { ok: true, playerId, others, mapId, serverId, time: Date.now() });
+      // v2.7.2：同時返回伺服器級 AI 列表（權威）
+      const ais = wsServer.getAIList(serverId, mapId);
+      // 若此伺服器此地圖還沒有 AI，按設定生成
+      if (ais.length === 0) {
+        db.getServer(serverId).then(srv => {
+          if (srv) {
+            const cnt = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
+            const lv = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
+            wsServer.ensureAIForMap(serverId, mapId, cnt, lv);
+          }
+        }).catch(() => {});
+      }
+      sendJson(res, 200, { ok: true, playerId, others, ais, mapId, serverId, time: Date.now() });
     } catch(e) {
       sendJson(res, 500, { error: e.message });
     }
@@ -618,11 +630,12 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.7.0',
-      build: '2.7.0-2608290200',
-      buildId: '2.7.0-2608290200',
+      version: '2.7.2',
+      build: '2.7.2-2608290600',
+      buildId: '2.7.2-2608290600',
       time: Date.now(),
-      socketIo: socketIoInstalled,
+      socketIo: true, // v2.7.2：WebSocket 原生實作（零依賴），對外兼容 socket.io 語義
+      webSocket: true,
       longPoll: true,
       dbBackend: backend,
       dbError: dbErr,
@@ -681,9 +694,9 @@ async function handleApi(req, res, pathname, query) {
     }
 
     return sendJson(res, 200, {
-      version: '2.7.0',
-      build: '2.5.8-2608281900',
-      buildId: '2.5.8-2608281900',
+      version: '2.7.1',
+      build: '2.7.1-2608290300',
+      buildId: '2.7.1-2608290300',
       cwd: process.cwd(),
       serverFile: __filename,
       rootDir: ROOT_DIR,
@@ -1354,6 +1367,22 @@ async function handleApi(req, res, pathname, query) {
     try {
       const srv = await db.updateServer(id, body);
       await db.logGMAction(gmAcc, null, 'server_update', { id, changes: Object.keys(body).filter(k => k !== 'id') });
+      // v2.7.2：修改 aiCount / initLevel 後立即套用並廣播給在線玩家
+      if (body.aiCount != null || body.initLevel != null) {
+        const aiCount = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
+        const initLevel = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
+        const result = wsServer.setAICountForServer(id, aiCount, { initLevel });
+        console.log(`[GM AI] 伺服器 ${id} AI 數量調整為 ${aiCount}，影響 ${result.affected.length} 張地圖`);
+      }
+      // v2.7.2：狀態改變時廣播給 WS 玩家
+      if (body.status) {
+        wsServer.broadcastToMap(id, null, {
+          type: 'server_status',
+          serverId: id,
+          status: body.status,
+          time: Date.now(),
+        });
+      }
       return sendJson(res, 200, { ok: true, server: srv });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
@@ -1825,10 +1854,8 @@ async function handleApi(req, res, pathname, query) {
       mpPollWaiters.set(mapId, []);
     }
 
-    // Socket.IO 也廣播
-    if (io) {
-      io.emit('gm_broadcast', broadcast);
-    }
+    // Socket.IO / WebSocket 也廣播（v2.7.2：wsServer 零依賴）
+    wsServer.gmBroadcast(broadcast.text, btype);
 
     console.log('[GM] 全服廣播: [' + btype + '] ' + text);
     return sendJson(res, 200, { ok: true, broadcast });
@@ -2271,168 +2298,59 @@ runTest();
   serveStatic(req, res, pathname);
 });
 
-// ========== Socket.IO 多人連線 ==========
-if (socketIoInstalled) {
-  try {
-    const { Server } = require('socket.io');
-    io = new Server(server, {
-      cors: { origin: '*', methods: ['GET', 'POST'] },
-      maxHttpBufferSize: 1e6,
-    });
+// ========== v2.7.2：零依賴 WebSocket 多人連線 ==========
+const { createWsServer } = require('./ws-server.cjs');
+const wsServer = createWsServer(server);
 
-    // 每張地圖的狀態（怪物位置等）
-    const mapStates = new Map(); // mapId -> { monsters: Map }
+// 讓 ws 模組能用 verifyToken
+global._wsVerifyToken = verifyToken;
 
-    io.on('connection', (socket) => {
-      console.log('[IO] 連線:', socket.id);
+// v2.7.2：注入伺服器 AI 設定提供者（WS 第一次有人進地圖時按設定生成 AI）
+wsServer.setServerAIConfigProvider((serverId) => {
+  // 同步讀取可能有問題，用快取；簡單起見直接回傳預設
+  // 真正的設定從 db 非同步讀，但第一次進入時先給預設，GM 後續修改會即時生效
+  return { aiCount: 8, initLevel: 1 };
+});
 
-      // 玩家資料
-      const player = {
-        socketId: socket.id,
-        account: null,
-        name: 'Player',
-        class: 'warrior',
-        level: 1,
-        serverId: null,
-        mapId: null,
-        channel: 0,
-        x: 1024, y: 1024, dir: 1,
-        transform: null,
-        country: null,
-      };
-
-      socket.on('join_world', (data) => {
-        player.name = data.name || 'Player';
-        player.class = data.class || 'warrior';
-        player.level = data.level || 1;
-        onlinePlayers.set(socket.id, player);
-        console.log('[IO] 加入世界:', player.name, socket.id);
-      });
-
-      socket.on('enter_map', (data) => {
-        // 離開舊地圖
-        if (player.mapId) {
-          socket.leave('map:' + player.mapId);
-          socket.to('map:' + player.mapId).emit('player_left', { socketId: socket.id });
-        }
-        player.mapId = data.mapId || 'village';
-        player.channel = data.channel || 0;
-        if (!player.serverId) player.serverId = 'zeus';
-        socket.join('map:' + player.mapId);
-
-        // 廣播給地圖內其他人
-        socket.to('map:' + player.mapId).emit('player_joined', {
-          socketId: socket.id,
-          name: player.name,
-          class: player.class,
-          level: player.level,
-          x: player.x, y: player.y, dir: player.dir,
-          transform: player.transform,
-          country: player.country,
-        });
-
-        // 把當前地圖內的玩家列表發送給新進者
-        const playersOnMap = [];
-        for (const [sid, p] of onlinePlayers) {
-          if (p.mapId === player.mapId && sid !== socket.id) {
-            playersOnMap.push({
-              socketId: sid,
-              name: p.name,
-              class: p.class,
-              level: p.level,
-              x: p.x, y: p.y, dir: p.dir,
-              transform: p.transform,
-              country: p.country,
-            });
-          }
-        }
-        socket.emit('map_state', { players: playersOnMap });
-        console.log('[IO] 進入地圖:', player.name, '→', player.mapId);
-      });
-
-      socket.on('move', (data) => {
-        if (!player.mapId) return;
-        player.x = data.x || 0;
-        player.y = data.y || 0;
-        player.dir = data.dir || 1;
-        // 廣播給同地圖其他玩家
-        socket.to('map:' + player.mapId).emit('player_move', {
-          socketId: socket.id,
-          x: player.x,
-          y: player.y,
-          dir: player.dir,
-        });
-      });
-
-      socket.on('update_profile', (data) => {
-        if (data.name != null) player.name = data.name;
-        if (data.class != null) player.class = data.class;
-        if (data.level != null) player.level = data.level;
-        if (data.transform !== undefined) player.transform = data.transform || null;
-        if (data.country !== undefined) player.country = data.country || null;
-        if (player.mapId) {
-          socket.to('map:' + player.mapId).emit('player_profile', {
-            socketId: socket.id,
-            name: player.name,
-            class: player.class,
-            level: player.level,
-            transform: player.transform,
-            country: player.country,
-          });
-        }
-      });
-
-      socket.on('chat', (data) => {
-        const text = String(data.text || '').slice(0, 200);
-        if (!text) return;
-        const channel = data.channel || 'world';
-        const payload = {
-          socketId: socket.id,
-          name: player.name,
-          level: player.level,
-          text,
-          channel,
-          time: Date.now(),
-        };
-        if (channel === 'world' || channel === 'map') {
-          // 世界頻道：廣播給所有線上玩家
-          if (channel === 'world') {
-            io.emit('chat', payload);
-          } else {
-            socket.to('map:' + player.mapId).emit('chat', payload);
-            socket.emit('chat', payload);
-          }
-        } else {
-          socket.emit('chat', payload);
-        }
-      });
-
-      socket.on('attack_monster', (data) => {
-        if (!player.mapId) return;
-        // 廣播給同地圖其他玩家（視覺同步）
-        socket.to('map:' + player.mapId).emit('monster_damage', {
-          socketId: socket.id,
-          monsterId: data.monsterId,
-          skillId: data.skillId,
-          damage: 0,
-        });
-      });
-
-      socket.on('disconnect', () => {
-        console.log('[IO] 斷線:', player.name, socket.id);
-        if (player.mapId) {
-          socket.to('map:' + player.mapId).emit('player_left', { socketId: socket.id });
-        }
-        onlinePlayers.delete(socket.id);
-      });
-    });
-
-    console.log('[Socket.IO] 多人連線伺服器就緒');
-  } catch (e) {
-    console.error('[Socket.IO] 初始化失敗:', e.message);
-    socketIoInstalled = false;
+server.on('upgrade', (req, socket, head) => {
+  if (req.headers['upgrade'] && req.headers['upgrade'].toLowerCase() === 'websocket') {
+    wsServer.acceptUpgrade(req, socket, head);
+  } else {
+    socket.destroy();
   }
+});
+
+// ========== v2.7.2：伺服器級 AI（權威生成 + GM 聯動） ==========
+//  所有地圖的 AI 由伺服器統一管理，客戶端只負責渲染
+//  GM 修改 aiCount 後立即增減 AI 並廣播給在線玩家
+
+/**
+ * 根據伺服器設定調整 AI 數量（對所有已活躍地圖生效）
+ */
+function applyServerAISettings(serverId) {
+  db.getServer(serverId).then(srv => {
+    if (!srv) return;
+    const aiCount = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
+    const initLevel = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
+    wsServer.setAICountForServer(serverId, aiCount, { initLevel });
+  }).catch(() => {});
 }
+
+// 新玩家 join 地圖時，若該地圖還沒有 AI 就生成
+const _origHandleMpApi = handleMpApi;
+async function handleMpApiWithAI(req, res, pathname, query, account) {
+  // 攔截 join：加入地圖前確保 AI 存在
+  if (req.method === 'POST' && pathname === '/api/mp/join') {
+    const serverId = query.serverId || 'zeus';
+    // 等 join 處理完再 ensure AI（先讓玩家加入，再同步 AI）
+    // 這裡用 wrap 的方式太複雜，改在 join API 內直接呼叫
+  }
+  return _origHandleMpApi(req, res, pathname, query, account);
+}
+// 暫時先不替換 handleMpApi，直接在 join 的 notify 後補 AI 廣播
+// 更簡單：在 /api/mp/join 的回傳裡加 ais 欄位
+
+// v2.7.2：WebSocket + 伺服器 AI 已在上方 ws-server.cjs 實作
 
 // ========== 初始化 GM 帳號 ==========
 async function initGM() {
@@ -2484,7 +2402,7 @@ async function initGM() {
     console.log('  資產目錄: ' + ASSETS_DIR);
     console.log('  資產檔數: ' + assetCount + (assetCount < 100 ? '  [警告] 資產數過少，可能 assets 未正確部署' : ''));
     console.log('  資料後端: ' + db.getBackend() + ' (DB 初始化進行中，稍後會更新)');
-    console.log('  多人連線: ' + (socketIoInstalled ? '已啟用 (Socket.IO)' : '未啟用 (單機模式)'));
+    console.log('  多人連線: WebSocket + Long-Poll 雙通道 (v2.7.2)');
     console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
     if (GM_PASSWORD === '19811013') {
       console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');
