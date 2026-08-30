@@ -210,7 +210,7 @@ function notifyMapUpdate(serverId, mapId, event) {
   const mapState = mpMapStates.get(key) || new Map();
   const players = [];
   for (const [pid, s] of mapState) players.push(s);
-  const remaining = [];
+  const stillWaiting = [];
   for (const w of waiters) {
     // 收集 since 之後的所有事件
     const since = w.since || 0;
@@ -221,19 +221,24 @@ function notifyMapUpdate(serverId, mapId, event) {
       if (q[i].playerId === w.playerId && q[i].type === 'move') continue;
       evts.unshift(q[i]);
     }
-    try {
-      w.res.end(JSON.stringify({
-        ok: true,
-        events: evts,
-        ais: currentAIs,
-        players,
-        broadcasts: bcasts,
-        time: now,
-        timeout: false,
-      }));
-    } catch(e) {}
+    if (evts.length > 0) {
+      // 有新事件，立即回應
+      try {
+        w.res.end(JSON.stringify({
+          ok: true,
+          events: evts,
+          ais: currentAIs,
+          players,
+          broadcasts: bcasts,
+          time: now,
+          timeout: false,
+        }));
+      } catch(e) {}
+    } else {
+      stillWaiting.push(w);
+    }
   }
-  mpPollWaiters.set(key, remaining);
+  mpPollWaiters.set(key, stillWaiting);
 }
 
 function mpCleanupIdle() {
@@ -356,6 +361,23 @@ async function handleMpApi(req, res, pathname, query, account) {
       });
       recomputeMpServerCounts();
       notifyMapUpdate(serverId, mapId, { type: 'join', playerId, state, time: Date.now() });
+      // v2.8.0：LP 玩家加入也通知 WS 玩家（雙通道同屏，修復兩機互看不見）
+      if (wsServer && wsServer.broadcastToMap) {
+        try {
+          wsServer.broadcastToMap(serverId, mapId, {
+            type: 'player_join',
+            playerId: playerId,
+            name: state.name,
+            classId: state.classId,
+            level: state.level,
+            x: state.x, y: state.y, dir: state.dir,
+            hp: state.hp, maxHp: state.maxHp,
+            transformId: state.transformId,
+            transport: 'longpoll',
+            time: Date.now(),
+          });
+        } catch(e) { console.warn('[LP→WS] join 廣播失敗:', e.message); }
+      }
       // 返回當前地圖所有玩家（不含自己）
       const others = [];
       for (const [pid, s] of mapState) {
@@ -381,7 +403,7 @@ async function handleMpApi(req, res, pathname, query, account) {
         console.warn('[Join] AI 初始化失敗:', e.message);
         ais = wsServer.getAIList(serverId, mapId);
       }
-      sendJson(res, 200, { ok: true, playerId, others, ais, mapId, serverId, instanceId: SERVER_INSTANCE_ID, time: Date.now() });
+      sendJson(res, 200, { ok: true, playerId, players: others, others, ais, mapId, serverId, instanceId: SERVER_INSTANCE_ID, time: Date.now() });
     } catch(e) {
       sendJson(res, 500, { error: e.message });
     }
@@ -399,6 +421,17 @@ async function handleMpApi(req, res, pathname, query, account) {
     if (mapId && mpMapStates.has(key)) {
       mpMapStates.get(key).delete(playerId);
       notifyMapUpdate(serverId, mapId, { type: 'leave', playerId, time: Date.now() });
+      // v2.8.0：LP 玩家離開也通知 WS 玩家（雙向同步）
+      if (wsServer && wsServer.broadcastToMap) {
+        try {
+          wsServer.broadcastToMap(serverId, mapId, {
+            type: 'player_leave',
+            playerId: playerId,
+            transport: 'longpoll',
+            time: Date.now(),
+          });
+        } catch(e) {}
+      }
     }
     // v2.7.0：從線上列表移除
     onlinePlayers.delete(playerId);
@@ -408,7 +441,8 @@ async function handleMpApi(req, res, pathname, query, account) {
   }
 
   // POST /api/mp/update 上傳自身狀態
-  if (req.method === 'POST' && pathname === '/api/mp/update') {
+  // v2.8.0：同時支援 /api/mp/move（客戶端約定別名）與 /api/mp/update
+  if (req.method === 'POST' && (pathname === '/api/mp/update' || pathname === '/api/mp/move')) {
     const body = await parseJsonBody(req);
     const mapId = body.mapId;
     const serverId = body.serverId || 'zeus';
@@ -458,8 +492,8 @@ async function handleMpApi(req, res, pathname, query, account) {
   // GET /api/mp/poll long-poll 拉取更新（按 serverId 隔離）
   // v2.7.9：事件佇列模型 — 以 since 為游標，回傳其後所有累積事件 + 完整快照
   if (req.method === 'GET' && pathname === '/api/mp/poll') {
-    const mapId = query.map;
-    const serverId = query.server || 'zeus';
+    const mapId = query.mapId || query.map;
+    const serverId = query.serverId || query.server || 'zeus';
     const charIdx = query.charIdx ? parseInt(query.charIdx) : 0;
     const playerId = account + ':' + charIdx;
     const since = query.since ? parseInt(query.since) : 0;
@@ -784,9 +818,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-version: '2.7.10',
-      build: '2.7.10-2608301500',
-      buildId: '2.7.10-2608301500',
+version: '2.8.0',
+      build: '2.8.0-2608301623',
+      buildId: '2.8.0-2608301623',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -889,9 +923,9 @@ version: '2.7.10',
       version: '2.7.3',
       build: '2.7.3-2608292300',
       buildId: '2.7.3-2608292300',
-       version: '2.7.10',
-       build: '2.7.10-2608301500',
-       buildId: '2.7.10-2608301500',
+       version: '2.8.0',
+       build: '2.8.0-2608301623',
+       buildId: '2.8.0-2608301623',
        instanceId: SERVER_INSTANCE_ID,
        startTime: SERVER_START_TIME,
        uptimeMs: uptime,

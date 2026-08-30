@@ -1,0 +1,22 @@
+[
+  {
+    "id": "zeus",
+    "name": "Zeus",
+    "status": "open",
+    "aiCount": 8,
+    "initLevel": 3,
+    "maxPlayers": 200,
+    "info": "希臘神王，開放中",
+    "createdAt": "2026-08-29T16:47:59.573Z"
+  },
+  {
+    "id": "cronus",
+    "name": "克洛諾斯",
+    "status": "preparing",
+    "aiCount": 6,
+    "initLevel": 1,
+    "maxPlayers": 200,
+    "info": "泰坦之王，準備中",
+    "createdAt": "2026-08-29T16:47:59.573Z"
+  }
+]

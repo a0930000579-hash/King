@@ -457,7 +457,54 @@ function handleImgError(img) {
 
   // 已經走過 CDN 還是失敗 → 最終 fallback
   // v2.4.0：不再隱藏圖片，改為顯示暗色漸層+文字兜底，絕不出現藍底問號或原生破圖
+  // v2.8.0：先嘗試 SVG 動態補圖（NPC/怪物/職業頭像），不行才用漸層兜底
   if (img.dataset.errFallback === 'cdn') {
+    // 嘗試 SVG 動態補圖
+    if (typeof window.PortraitGenerator !== 'undefined') {
+      const src = img.src || '';
+      const alt = img.alt || '';
+      let svgUrl = null;
+
+      // NPC 頭像
+      const npcMatch = src.match(/npc[_](\w+)/);
+      if (npcMatch) {
+        svgUrl = PortraitGenerator.npcPortraitToDataURL(npcMatch[1]);
+      }
+      // 怪物圖
+      if (!svgUrl) {
+        const mTypes = ['goblin','skeleton','orc','scorpion','bat','wolf','slime','ghost','spider',
+          'lizardman','ogre','stone_golem','demon','lich','cerberus','death_knight','dragon',
+          'bone_dragon','griffin','armored_bear','chimera','hydra','naga','lava_golem',
+          'direwolf','hellhound','braindevil','gargoyle','wraith','spider_queen',
+          'monster_direwolf','monster_scorpion','monster_hellhound','monster_braindevil',
+          'monster_gargoyle','monster_wraith'];
+        for (const mt of mTypes) {
+          if (src.indexOf(mt) !== -1) {
+            svgUrl = PortraitGenerator.monsterPortraitToDataURL(mt.replace('monster_', ''));
+            break;
+          }
+        }
+      }
+      // 職業頭像
+      if (!svgUrl) {
+        const cTypes = ['warrior','mage','archer','rogue','paladin','warlock',
+          'knight','sorcerer','assassin'];
+        for (const ct of cTypes) {
+          if (src.indexOf(ct) !== -1) {
+            svgUrl = PortraitGenerator.classPortraitToDataURL(ct);
+            break;
+          }
+        }
+      }
+
+      if (svgUrl) {
+        img.dataset.errFallback = 'svg';
+        img.style.visibility = 'visible';
+        img.style.opacity = '1';
+        img.src = svgUrl;
+        return;
+      }
+    }
     img.dataset.errFallback = 'fail';
     // 隱藏自身，但父層加上帶名稱的漸層占位
     img.style.visibility = 'hidden';
@@ -5746,8 +5793,9 @@ const ITEM_ICONS = {
   ring1: assetUrl('equip/icon_ring_white.jpg'),
   ring2: assetUrl('equip/icon_ring_white.jpg'),
   accessory: assetUrl('equip/icon_ring_white.jpg'),
-  bow: assetUrl('equip/icon_sword_white.jpg'),
-  staff: assetUrl('equip/icon_sword_white.jpg'),
+   bow: assetUrl('equip/icon_bow_white.jpg'),
+   staff: assetUrl('equip/icon_staff_white.jpg'),
+   dagger: assetUrl('equip/icon_dagger_white.jpg'),
   gem: assetUrl('item/icon_gem_ruby.jpg'),
 };
 
@@ -5764,6 +5812,11 @@ const EQUIP_RARITY_ICONS = {
   ring:     { white: assetUrl('equip/icon_ring_white.jpg'),     green: assetUrl('equip/icon_ring_green.jpg'),     blue: assetUrl('equip/icon_ring_blue.jpg'),     red: assetUrl('equip/icon_ring_red.jpg'),     purple: assetUrl('equip/icon_ring_purple.jpg'),     gold: assetUrl('equip/icon_ring_gold.jpg') },
   necklace: { white: assetUrl('equip/icon_necklace_white.jpg'), green: assetUrl('equip/icon_necklace_green.jpg'), blue: assetUrl('equip/icon_necklace_blue.jpg'), red: assetUrl('equip/icon_necklace_red.jpg'), purple: assetUrl('equip/icon_necklace_purple.jpg'), gold: assetUrl('equip/icon_necklace_gold.jpg') },
   shield:   { white: assetUrl('equip/icon_shield_white.jpg'),   green: assetUrl('equip/icon_shield_green.jpg'),   blue: assetUrl('equip/icon_shield_blue.jpg'),   red: assetUrl('equip/icon_shield_red.jpg'),   purple: assetUrl('equip/icon_shield_purple.jpg'),   gold: assetUrl('equip/icon_shield_gold.jpg') },
+  // v2.8.0：遠程/法系/刺客武器獨立圖標，不再共用劍
+  bow:      { white: assetUrl('equip/icon_bow_white.jpg'),      green: assetUrl('equip/icon_bow_green.jpg'),      blue: assetUrl('equip/icon_bow_blue.jpg'),      red: assetUrl('equip/icon_bow_red.jpg'),      purple: assetUrl('equip/icon_bow_purple.jpg'),      gold: assetUrl('equip/icon_bow_gold.jpg') },
+  staff:    { white: assetUrl('equip/icon_staff_white.jpg'),    green: assetUrl('equip/icon_staff_green.jpg'),    blue: assetUrl('equip/icon_staff_blue.jpg'),    red: assetUrl('equip/icon_staff_red.jpg'),    purple: assetUrl('equip/icon_staff_purple.jpg'),    gold: assetUrl('equip/icon_staff_gold.jpg') },
+  dagger:   { white: assetUrl('equip/icon_dagger_white.jpg'),   green: assetUrl('equip/icon_dagger_green.jpg'),   blue: assetUrl('equip/icon_dagger_blue.jpg'),   red: assetUrl('equip/icon_dagger_red.jpg'),   purple: assetUrl('equip/icon_dagger_purple.jpg'),   gold: assetUrl('equip/icon_dagger_gold.jpg') },
+  weapon:   { white: assetUrl('equip/icon_weapon_white.jpg'),   green: assetUrl('equip/icon_weapon_green.jpg'),   blue: assetUrl('equip/icon_weapon_blue.jpg'),   red: assetUrl('equip/icon_weapon_red.jpg'),   purple: assetUrl('equip/icon_weapon_purple.jpg'),   gold: assetUrl('equip/icon_weapon_gold.jpg') },
 };
 
 // 獲取道具圖資 URL（道具ID優先，裝備按類型回落）
@@ -12875,10 +12928,57 @@ function loadMap(mapId) {
   if (!Array.isArray(GS.aiPlayers)) GS.aiPlayers = [];
   if (!Array.isArray(GS.monsters)) GS.monsters = [];
 
+  // v2.8.0：完整換地圖清場 — 清除上圖所有世界DOM、精靈、計時器、動畫狀態、事件監聽
+  //  確保連續切 10+ 張圖後 DOM 節點數不增長、記憶體穩定
+  function fullMapCleanup() {
+    // 1. 特效層清空（傷害數字、打擊特效、投射物等）
+    if (el.effectLayer) el.effectLayer.innerHTML = '';
+    // 攻城特效層
+    if (el.siegeEffectLayer) el.siegeEffectLayer.innerHTML = '';
+
+    // 2. 世界層：移除所有非玩家單位（AI/怪物/召喚/NPC 由各自 render 重建，但這裡全清保險）
+    if (worldLayer) {
+      worldLayer.querySelectorAll('.world-unit:not(.player-sprite)').forEach(n => n.remove());
+    }
+
+    // 3. NPC 層清空（renderNPCs 會重建）
+    if (el.npcLayer) el.npcLayer.innerHTML = '';
+
+    // 4. 動畫狀態快取清空（避免舊圖怪物/AI 殘留狀態佔用記憶）
+    if (typeof unitAnimState === 'object' && unitAnimState instanceof Map) {
+      unitAnimState.clear();
+    }
+
+    // 5. 遠端玩家（多人連線）
+    if (window.MultiplayerClient && typeof MultiplayerClient._clearAll === 'function') {
+      try { MultiplayerClient._clearAll(); } catch(e) {}
+    }
+
+    // 6. 目標引用重置
+    if (typeof GS !== 'undefined') {
+      GS.targetAiUid = null;
+      GS.targetMonsterUid = null;
+      GS.targetPlayerUid = null;
+    }
+
+    // 7. 攻城戰相關（若在非攻城圖）
+    if (typeof cleanupCastleSiege === 'function') {
+      try { cleanupCastleSiege(); } catch(e) {}
+    }
+
+    // 8. 召喚物狀態
+    if (typeof summonedDemon !== 'undefined') summonedDemon = null;
+  }
+
   // 切出城堡地圖时清理攻城战状态和元素
   const curMap = allMaps[GS.currentMap];
   if (curMap?.type === 'castle_siege' && map.type !== 'castle_siege') {
     cleanupCastleSiege();
+  }
+
+  // v2.8.0：切圖前完整清場（確保 DOM/狀態不殘留）
+  if (GS.currentMap && GS.currentMap !== mapId) {
+    fullMapCleanup();
   }
 
   GS.currentMap = mapId;

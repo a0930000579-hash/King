@@ -500,7 +500,9 @@
       try { updateRemotePlayers(dt); } catch (e) { console.error('[Multi] tick error:', e); }
     },
 
+    getNearbyPlayerCount,
     _getRemotePlayers() { return remotePlayers; },
+    _clearAll() { clearAllRemotePlayers(); },
     _getWebSocket() { return ws; },
     get isWebSocket() { return useWebSocket; },
     get wsFailureReason() { return _wsFailureReason; },
@@ -732,20 +734,9 @@
         }
         break;
       case 'map_state':
-        // 進入地圖時的初始狀態
+        // 進入地圖時的初始狀態（WS 通道，包含 WS+LP 玩家快照）
         if (msg.players && Array.isArray(msg.players)) {
-          msg.players.forEach(p => {
-            if (p.playerId !== myPlayerId) {
-              addOrUpdateRemotePlayer({
-                id: p.playerId || p.wsId,
-                name: p.name,
-                class: p.classId,
-                level: p.level,
-                x: p.x, y: p.y, dir: p.dir,
-                transform: p.transformId,
-              });
-            }
-          });
+          handlePlayerSnapshot(msg.players);
         }
         // v2.7.2：同步伺服器級 AI
         if (msg.ais && Array.isArray(msg.ais) && typeof window.setServerAIs === 'function') {
@@ -798,6 +789,28 @@
     }
   }
 
+  // v2.8.0：LP 自適應輪詢間隔（閒置拉長、有事件快輪）
+  let _lpPollInterval = 50;     // 當前 poll 間隔
+  const LP_POLL_MIN = 50;       // 最快 50ms（有事件時）
+  const LP_POLL_MAX = 2000;     // 最慢 2s（完全閒置）
+  const LP_POLL_IDLE_STEPS = 5; // 連續 N 次空回應才拉長
+  let _lpIdleCount = 0;
+
+  function adjustPollInterval(hasEvents) {
+    if (hasEvents) {
+      // 有事件：回到最快
+      _lpIdleCount = 0;
+      _lpPollInterval = LP_POLL_MIN;
+    } else {
+      _lpIdleCount++;
+      if (_lpIdleCount >= LP_POLL_IDLE_STEPS) {
+        // 閒置太久：逐漸拉長
+        _lpPollInterval = Math.min(LP_POLL_MAX, _lpPollInterval * 1.5);
+        _lpIdleCount = 0;
+      }
+    }
+  }
+
   // ========== Long-Poll 循環 ==========
   function startPollLoop() {
     if (pollRunning) return;
@@ -827,6 +840,10 @@
     .then(data => {
       if (data && data.ok && data.events) {
         handlePollEvents(data.events);
+        // v2.8.0：處理 LP poll 返回的完整 players 快照（確保新加入/已離開玩家同步）
+        if (data.players && Array.isArray(data.players)) {
+          handlePlayerSnapshot(data.players);
+        }
         // v2.7.3：long-poll 也推送 AI 快照（GM 調整 aiCount 時 LP 玩家同步生效）
         if (data.ais && Array.isArray(data.ais) && typeof window.setServerAIs === 'function') {
           window.setServerAIs(data.ais, currentServerId, currentMapId);
@@ -847,9 +864,12 @@
           });
         }
       }
-      reconnectDelay = 1000; // 重置退避
-      // 繼續下一輪
-      if (pollRunning) setTimeout(pollLoop, 50);
+       reconnectDelay = 1000; // 重置退避
+        // v2.8.0：自適應輪詢 — 有事件則快輪，空回應則逐步拉長
+        const hasEvents = data.events && data.events.length > 0;
+        adjustPollInterval(hasEvents);
+        // 繼續下一輪
+        if (pollRunning) setTimeout(pollLoop, _lpPollInterval);
     })
     .catch(err => {
       if (err.name === 'AbortError') {
@@ -948,14 +968,40 @@
   }
 
   // ========== 工具：清空遠端玩家 ==========
-  function clearAllRemotePlayers() {
-    for (const [id, p] of remotePlayers) {
-      if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+  // v2.8.0：處理完整 players 快照（LP poll 返回或 WS map_state 返回）
+  //  用快照做為真相：新增、更新、移除不在快照中的玩家
+  function handlePlayerSnapshot(players) {
+    if (!players || !Array.isArray(players)) return;
+    const seen = new Set();
+    players.forEach(p => {
+      if (!p || !p.playerId) return;
+      if (p.playerId === myPlayerId) return;
+      seen.add(p.playerId);
+      addOrUpdateRemotePlayer({
+        id: p.playerId,
+        name: p.name,
+        class: p.classId,
+        level: p.level,
+        x: p.x, y: p.y, dir: p.dir,
+        transform: p.transformId,
+        country: p.nation,
+      });
+    });
+    // 移除不在快照中的玩家
+    for (const id of remotePlayers.keys()) {
+      if (!seen.has(id)) removeRemotePlayer(id);
     }
-    remotePlayers.clear();
   }
 
-  // ========== 遠端玩家管理 ==========
+  // v2.8.0：取得附近玩家數（給 UI 顯示「附近玩家:N」）
+  function getNearbyPlayerCount() {
+    let n = 0;
+    for (const p of remotePlayers.values()) {
+      if (p.el && !p.isBot) n++;
+    }
+    return n;
+  }
+
   function handleMapState(entities, monsters) {
     const seen = new Set();
     entities.forEach(ent => {
@@ -1064,9 +1110,10 @@
     if (!worldLayer) return;
 
     const elDiv = document.createElement('div');
-    elDiv.className = 'world-unit remote-player idle';
+    elDiv.className = 'world-unit remote-player mp-player idle';
     elDiv.dataset.id = 'mp_' + p.id;
     elDiv.dataset.remoteId = p.id;
+    elDiv.dataset.mpId = p.id;
 
     const s = getSpriteForRemote(p);
     const isImg = !!(s && s.useImg);

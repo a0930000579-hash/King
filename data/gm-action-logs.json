@@ -1,0 +1,130 @@
+[
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-30T06:29:36.278Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-30T06:29:35.974Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-30T06:29:35.670Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "name",
+        "status",
+        "aiCount",
+        "initLevel",
+        "maxPlayers"
+      ]
+    },
+    "createdAt": "2026-08-30T06:29:35.649Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-30T06:28:36.801Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-30T06:28:36.497Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-30T06:28:36.191Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "name",
+        "status",
+        "aiCount",
+        "initLevel",
+        "maxPlayers"
+      ]
+    },
+    "createdAt": "2026-08-30T06:28:36.166Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-29T16:47:59.784Z"
+  },
+  {
+    "gmAccount": "19811013",
+    "targetAccount": null,
+    "action": "server_update",
+    "detail": {
+      "id": "zeus",
+      "changes": [
+        "aiCount"
+      ]
+    },
+    "createdAt": "2026-08-29T16:47:59.628Z"
+  }
+]

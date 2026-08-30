@@ -707,21 +707,21 @@ img { display: block; pointer-events: none; }
   -webkit-mask-repeat: no-repeat;
           mask-repeat: no-repeat;
 }
-/* hero 較高（80px），橢圓比例跟著拉高 */
+/* hero 較高（80px），橢圓比例跟著拉高但保持柔和圓弧（v2.8.0：從 58%×50% 放寬到 62%×45%，避免上下過尖） */
 .world-unit.hero .unit-sprite-wrap {
   width: 64px !important;
   height: 80px !important;
   -webkit-mask-image:
-    radial-gradient(ellipse 58% 50% at 50% 50%, #000 62%, rgba(0,0,0,0.85) 78%, rgba(0,0,0,0.4) 90%, transparent 100%);
+    radial-gradient(ellipse 62% 45% at 50% 50%, #000 60%, rgba(0,0,0,0.88) 75%, rgba(0,0,0,0.5) 88%, transparent 100%);
           mask-image:
-    radial-gradient(ellipse 58% 50% at 50% 50%, #000 62%, rgba(0,0,0,0.85) 78%, rgba(0,0,0,0.4) 90%, transparent 100%);
+    radial-gradient(ellipse 62% 45% at 50% 50%, #000 60%, rgba(0,0,0,0.88) 75%, rgba(0,0,0,0.5) 88%, transparent 100%);
 }
-/* BOSS 單位更大，橢圓加寬 */
+/* BOSS 單位更大，橢圓加寬但保持柔和（v2.8.0：羽化區間拉長避免尖銳） */
 .world-unit.boss-unit .unit-sprite-wrap {
   -webkit-mask-image:
-    radial-gradient(ellipse 60% 48% at 50% 48%, #000 62%, rgba(0,0,0,0.85) 78%, rgba(0,0,0,0.4) 90%, transparent 100%);
+    radial-gradient(ellipse 60% 46% at 50% 48%, #000 60%, rgba(0,0,0,0.88) 76%, rgba(0,0,0,0.5) 88%, transparent 100%);
           mask-image:
-    radial-gradient(ellipse 60% 48% at 50% 48%, #000 62%, rgba(0,0,0,0.85) 78%, rgba(0,0,0,0.4) 90%, transparent 100%);
+    radial-gradient(ellipse 60% 46% at 50% 48%, #000 60%, rgba(0,0,0,0.88) 76%, rgba(0,0,0,0.5) 88%, transparent 100%);
 }
 
 /* 橢圓品質光暈（單位外圈的柔和發光邊，放在 ::before 做 radial 光環）*/
@@ -9366,42 +9366,51 @@ img { display: block; pointer-events: none; }
   100% { transform: translateX(100%) translateY(100%); }
 }
 
-/* ========== 變身光環分級 ========== */
+/* ========== 變身光環分級（v2.8.0：飽滿圓潤橢圓光暈）========== */
 .transform-aura {
   position: absolute;
-  inset: -6px;
+  left: 50%;
+  bottom: -4px;
+  transform: translateX(-50%);
+  width: 84px;
+  height: 30px;
   border-radius: 50%;
-  transform: scale(0.6);
-  transform-origin: center bottom;
   pointer-events: none;
   z-index: -1;
+  filter: blur(3px);
 }
 .transform-rarity-white .transform-aura {
-  box-shadow: 0 0 8px rgba(200,200,200,0.5);
+  box-shadow: 0 0 10px rgba(200,200,200,0.5), 0 0 20px rgba(200,200,200,0.2);
+  background: radial-gradient(ellipse 50% 40% at 50% 50%, rgba(255,255,255,0.4), rgba(200,200,200,0.15) 50%, transparent 75%);
 }
 .transform-rarity-green .transform-aura {
-  box-shadow: 0 0 10px rgba(80,220,120,0.6);
+  box-shadow: 0 0 14px rgba(80,220,120,0.7), 0 0 28px rgba(80,220,120,0.35);
+  background: radial-gradient(ellipse 55% 45% at 50% 50%, rgba(120,255,160,0.5), rgba(80,220,120,0.2) 55%, transparent 78%);
   animation: auraPulse 2.5s ease-in-out infinite;
 }
 .transform-rarity-blue .transform-aura {
-  box-shadow: 0 0 14px rgba(100,160,255,0.7);
+  box-shadow: 0 0 18px rgba(100,160,255,0.8), 0 0 36px rgba(100,160,255,0.4);
+  background: radial-gradient(ellipse 55% 45% at 50% 50%, rgba(140,200,255,0.55), rgba(100,160,255,0.25) 55%, transparent 78%);
   animation: auraPulse 2s ease-in-out infinite;
 }
 .transform-rarity-red .transform-aura {
-  box-shadow: 0 0 18px rgba(255,80,80,0.8);
+  box-shadow: 0 0 22px rgba(255,80,80,0.9), 0 0 44px rgba(255,80,80,0.45);
+  background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(255,120,100,0.6), rgba(255,80,80,0.3) 55%, transparent 78%);
   animation: auraPulse 1.8s ease-in-out infinite;
 }
 .transform-rarity-purple .transform-aura {
-  box-shadow: 0 0 22px rgba(200,100,255,0.9);
+  box-shadow: 0 0 26px rgba(200,100,255,1), 0 0 52px rgba(200,100,255,0.5);
+  background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(230,150,255,0.65), rgba(200,100,255,0.3) 55%, transparent 78%);
   animation: auraPulse 1.5s ease-in-out infinite;
 }
 .transform-rarity-gold .transform-aura {
-  box-shadow: 0 0 28px rgba(255,216,112,1.0), 0 0 40px rgba(255,180,60,0.5);
+  box-shadow: 0 0 32px rgba(255,216,112,1), 0 0 64px rgba(255,180,60,0.6), 0 0 96px rgba(255,150,30,0.3);
+  background: radial-gradient(ellipse 65% 55% at 50% 50%, rgba(255,240,180,0.75), rgba(255,216,112,0.4) 50%, rgba(255,180,60,0.15) 75%, transparent 85%);
   animation: auraPulse 1.2s ease-in-out infinite;
 }
 @keyframes auraPulse {
-  0%,100% { opacity: 0.6; transform: scale(1); }
-  50%     { opacity: 1.0; transform: scale(1.06); }
+  0%,100% { opacity: 0.65; transform: translateX(-50%) scale(1); }
+  50%     { opacity: 1.0;  transform: translateX(-50%) scale(1.1); }
 }
 
 /* ===== 精灵图圆角 + 透明背景 ===== */
