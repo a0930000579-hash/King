@@ -97,6 +97,7 @@
     get transport() { return useWebSocket ? 'websocket' : (status === STATUS.ONLINE ? 'longpoll' : 'offline'); },
     get wsFailureReason() { return _wsFailureReason || ''; },
     get wsLastCloseCode() { return _wsLastCloseCode || null; },
+    get wsLastCloseReason() { return _wsLastCloseReason || ''; },
     get serverId() { return currentServerId || null; },
     get mapId() { return currentMapId || null; },
     STATUS: STATUS,
@@ -454,6 +455,30 @@
         wsSend({ type: 'attack', ...body });
       } else {
         apiPost('/api/mp/attack', body).catch(() => {});
+      }
+    },
+
+    // v2.7.9：位置上報（LP 模式下讓其他玩家看到自己移動）
+    //  節流 100ms，避免過多 HTTP 請求；WS 模式下自動走 WS 通道
+    _lastMoveSend: 0,
+    sendPosition(x, y, dir, opts) {
+      if (status !== STATUS.ONLINE || !currentMapId) return;
+      const now = Date.now();
+      if (now - this._lastMoveSend < 100) return; // 100ms 節流（10Hz）
+      this._lastMoveSend = now;
+      const body = {
+        mapId: currentMapId,
+        serverId: currentServerId || 'zeus',
+        charIdx: currentCharIdx,
+        x, y, dir,
+        hp: opts?.hp != null ? opts.hp : undefined,
+        transformId: opts?.transformId || undefined,
+      };
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'move', ...body });
+      } else {
+        // LP 模式：fire and forget，非阻塞
+        apiPost('/api/mp/update', body).catch(() => {});
       }
     },
 

@@ -675,15 +675,21 @@ function createWsServer(httpServer) {
     const mapState = getMapState(serverId, mapId);
     mapState.set(client.wsId, client);
 
-    // v2.7.2：第一次有人進地圖時，按伺服器設定生成 AI（權威）
+    // v2.7.9：第一次有人進地圖時，依伺服器設定確保 AI 存在（持久化優先 + 舊格式遷移）
+    //  與 LP 的 ensureAIForMap 走同一套邏輯，避免 WS/LP 行為不一致
     const aiState = getAIState(serverId, mapId);
-    if (aiState.size === 0 && _serverAIConfigProvider) {
-      try {
-        const cfg = _serverAIConfigProvider(serverId) || {};
-        const cnt = cfg.aiCount != null ? parseInt(cfg.aiCount) : 8;
-        const lv = cfg.initLevel != null ? parseInt(cfg.initLevel) : 1;
-        if (cnt > 0) adjustAICount(serverId, mapId, cnt, { initLevel: lv });
-      } catch(e) { console.warn('[WS] 載入伺服器AI設定失敗:', e.message); }
+    if (aiState.size === 0) {
+      let cnt = 8, lv = 1;
+      if (_serverAIConfigProvider) {
+        try {
+          const cfg = _serverAIConfigProvider(serverId) || {};
+          cnt = cfg.aiCount != null ? parseInt(cfg.aiCount) : 8;
+          lv = cfg.initLevel != null ? parseInt(cfg.initLevel) : 1;
+        } catch(e) { console.warn('[WS] 載入伺服器AI設定失敗:', e.message); }
+      }
+      if (cnt > 0) {
+        ensureAIForMap(serverId, mapId, cnt, lv).catch(() => {});
+      }
     }
 
     // 回傳當前地圖玩家列表 + AI 快照
@@ -726,6 +732,24 @@ function createWsServer(httpServer) {
       dir: client.dir || 'down',
       time: Date.now(),
     }, client.wsId);
+    // v2.7.9：WS 玩家加入也通知 LP 玩家（雙通道同屏）
+    if (typeof _lpForwardEvent === 'function') {
+      try {
+        _lpForwardEvent(client.serverId, client.mapId, {
+          type: 'join',
+          playerId: client.playerId,
+          state: {
+            playerId: client.playerId,
+            name: client.name,
+            classId: client.classId,
+            level: client.level,
+            x: client.x, y: client.y, dir: client.dir,
+            transformId: client.transformId,
+          },
+          time: Date.now(),
+        });
+      } catch(e) {}
+    }
   }
 
   function handleMove(client, msg) {
@@ -733,16 +757,36 @@ function createWsServer(httpServer) {
     client.x = msg.x != null ? msg.x : client.x;
     client.y = msg.y != null ? msg.y : client.y;
     client.dir = msg.dir || client.dir;
-    // 廣播給同地圖其他人（節流在客戶端做）
+    if (msg.hp != null) client.hp = msg.hp;
+    if (msg.transformId !== undefined) client.transformId = msg.transformId || null;
+    // 廣播給同地圖 WS 玩家
     broadcastToMap(client.serverId, client.mapId, {
       type: 'player_move',
       wsId: client.wsId,
       playerId: client.playerId,
+      name: client.name,
+      classId: client.classId,
+      level: client.level,
       x: client.x,
       y: client.y,
       dir: client.dir,
+      hp: client.hp,
+      transformId: client.transformId,
       time: Date.now(),
     }, client.wsId);
+    // v2.7.9：也通知 LP 玩家（WS↔LP 雙通道同屏）
+    if (typeof _lpForwardEvent === 'function') {
+      try {
+        _lpForwardEvent(client.serverId, client.mapId, {
+          type: 'move',
+          playerId: client.playerId,
+          name: client.name,
+          x: client.x, y: client.y, dir: client.dir,
+          hp: client.hp, transformId: client.transformId,
+          time: Date.now(),
+        });
+      } catch(e) {}
+    }
   }
 
   function handleChat(client, msg) {
@@ -871,9 +915,49 @@ function createWsServer(httpServer) {
         const saved = aiPersistence.load(serverId, mapId);
         if (Array.isArray(saved) && saved.length > 0) {
           aiState.clear();
-          saved.forEach(ai => aiState.set(ai.id, ai));
+          saved.forEach(ai => {
+            // v2.7.9：舊版持久化格式遷移（補齊 hpMax/atk/def/speed/state 等新欄位）
+            //  舊版只有 maxHp 而無 hpMax，也缺 atk/def/speed/attackInterval 等
+            if (ai.maxHp != null && ai.hpMax == null) ai.hpMax = ai.maxHp;
+            if (ai.hpMax == null) ai.hpMax = 100;
+            if (ai.hp == null) ai.hp = ai.hpMax;
+            if (ai.atk == null || ai.def == null || ai.speed == null) {
+              const stats = calcBaseStats(ai.classId || 'warrior', ai.level || 1);
+              if (ai.atk == null) ai.atk = stats.atk;
+              if (ai.def == null) ai.def = stats.def;
+              if (ai.speed == null) ai.speed = stats.speed;
+              if (ai.hpMax == null || ai.hpMax < stats.hpMax) ai.hpMax = stats.hpMax;
+              if (ai.hp == null || ai.hp > ai.hpMax) ai.hp = ai.hpMax;
+            }
+            if (ai.maxHp == null) ai.maxHp = ai.hpMax; // 雙寫相容
+            if (ai.attackInterval == null) ai.attackInterval = 1.2 + Math.random() * 0.4;
+            if (ai.attackCooldown == null) ai.attackCooldown = 0;
+            if (ai.state == null) ai.state = 'wandering';
+            if (ai.targetX == null) ai.targetX = ai.x;
+            if (ai.targetY == null) ai.targetY = ai.y;
+            if (ai.wanderTimer == null) ai.wanderTimer = 2 + Math.random() * 3;
+            if (ai.dead == null) ai.dead = false;
+            if (ai.respawnTimer == null) ai.respawnTimer = 0;
+            if (ai.potions == null) ai.potions = { hp: 3, mp: 2 };
+            if (ai.kills == null) ai.kills = 0;
+            if (ai.gold == null) ai.gold = 50;
+            if (ai.exp == null) ai.exp = 0;
+            if (ai.expMax == null) ai.expMax = Math.floor(100 * Math.pow(1.3, (ai.level || 1) - 1));
+            if (ai.facing == null) ai.facing = 'right';
+            if (ai.uid == null) ai.uid = ai.id;
+            if (ai.guildId === undefined) ai.guildId = null;
+            if (ai.contribution == null) ai.contribution = 0;
+            aiState.set(ai.id, ai);
+          });
           aiLoaded.add(k);
-          console.log(`[AI] 從持久化載入 ${serverId}:${mapId}，共 ${saved.length} 個 AI`);
+          console.log(`[AI] 從持久化載入 ${serverId}:${mapId}，共 ${saved.length} 個 AI（已遷移至 v2.7.9 格式）`);
+          // v2.7.9：載入後仍按 GM 設定校準數量（載入不足則補、過多則刪）
+          //  避免舊持久化只有 5 隻、GM 設 8 隻，導致 AI:SVR(5) 而非預期值
+          if (aiCount > 0 && aiState.size !== aiCount) {
+            try {
+              adjustAICount(serverId, mapId, aiCount, { initLevel });
+            } catch(e) { console.warn('[AI] 載入後校準數量失敗:', e.message); }
+          }
           return aiState.size;
         }
       } catch(e) { console.warn('[AI] 持久化載入失敗:', e.message); }

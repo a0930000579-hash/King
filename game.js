@@ -5705,6 +5705,16 @@ const ITEM_ICONS = {
   mgem: assetUrl('item/icon_soul_gem.jpg'),
   teleport: assetUrl('item/icon_teleport_scroll.jpg'),
   enhance_ticket: assetUrl('item/icon_enhance_stone.jpg'),
+  // v2.7.9：強化卷/機率卷改用卷軸圖（非石頭/紅藥水）
+  enhance_scroll: assetUrl('item/icon_enhance_scroll.jpg'),
+  enhance_boost_scroll: assetUrl('item/icon_enhance_boost_scroll.jpg'),
+  // v2.7.9：6 種真死亡體驗券，各有可區分的券據圖（非紅藥水）
+  ticket_death_knight:  assetUrl('item/icon_ticket_death_knight.jpg'),
+  ticket_death_sorcerer: assetUrl('item/icon_ticket_death_sorcerer.jpg'),
+  ticket_death_archer:   assetUrl('item/icon_ticket_death_archer.jpg'),
+  ticket_death_assassin: assetUrl('item/icon_ticket_death_assassin.jpg'),
+  ticket_death_mage:     assetUrl('item/icon_ticket_death_mage.jpg'),
+  ticket_fallen_paladin: assetUrl('item/icon_ticket_fallen_paladin.jpg'),
   chest: assetUrl('item/icon_chest.jpg'),
   tscroll: assetUrl('item/icon_scroll.jpg'),
   revive_scroll: assetUrl('item/icon_revive_scroll.jpg'),
@@ -5851,8 +5861,8 @@ const ITEM_ICON_MAP = {
   bless_stone:        assetUrl('item/icon_bless_stone.jpg'),
   // 書籍 / 體驗券
   ancient_book:       assetUrl('item/icon_ancient_book.jpg'),
-  true_death_coupon:  assetUrl('item/icon_true_death_coupon.jpg'),
-  transform_coupon:   assetUrl('item/icon_true_death_coupon.jpg'),
+  true_death_coupon:  assetUrl('item/icon_ticket_death_knight.jpg'), // v2.7.9: 向後相容
+  transform_coupon:   assetUrl('item/icon_ticket_death_knight.jpg'), // v2.7.9: 向後相容
   // fallback
   default:            assetUrl('item/icon_gem_ruby.jpg'),
 };
@@ -13978,7 +13988,7 @@ function updatePlayer(dt) {
     p.facing = dx >= 0 ? 'right' : 'left';
     // ===== 多人連線：節流廣播移動 =====
     if (window.MultiplayerClient && MultiplayerClient.connected) {
-      try { MultiplayerClient.reportMove(p.x, p.y, p.facing); } catch (e) { /* ignore */ }
+      try { MultiplayerClient.sendPosition(p.x, p.y, p.facing, { hp: p.hp, transformId: GS.transformId || null }); } catch (e) { /* ignore */ }
     }
   } else {
     if (p.state === 'walking') p.state = 'idle';
@@ -15575,19 +15585,19 @@ function rollConsumableDrop(level, isBoss) {
     pool.push({ item: { id: 'mp2', name: '中型魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.mp2, effect: { mp: 100 } }, w: 20 });
     pool.push({ item: { id: 'move1', name: '行走加速藥水', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.move1, effect: { moveSpeed: 20, duration: 3600 } }, w: 8 });
     pool.push({ item: { id: 'town_scroll', name: '回城卷軸', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.teleport, effect: { teleport: 'town' } }, w: 5 });
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 12 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 12 });
   } else if (level < 45) {
     pool.push({ item: { id: 'hp4', name: '體力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.hp3, effect: { hp: 500 } }, w: 25 });
     pool.push({ item: { id: 'mp4', name: '高級魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.mp3, effect: { mp: 200 } }, w: 15 });
     pool.push({ item: { id: 'spd1', name: '加速藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.spd1, effect: { atkSpeed: 20, moveSpeed: 20, duration: 1800 } }, w: 10 });
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 15 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 15 });
     pool.push({ item: { id: 'mgem', name: '魔法寶石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.mgem, effect: {} }, w: 10 });
     pool.push({ item: { id: 'town_scroll', name: '回城卷軸', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.teleport, effect: { teleport: 'town' } }, w: 5 });
   } else {
     pool.push({ item: { id: 'hp4', name: '體力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.hp3, effect: { hp: 500 } }, w: 20 });
     pool.push({ item: { id: 'mp4', name: '高級魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.mp3, effect: { mp: 200 } }, w: 12 });
     pool.push({ item: { id: 'spd2', name: '狂暴藥水', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.spd2, effect: { atkSpeed: 30, moveSpeed: 30, duration: 1800 } }, w: 8 });
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 12 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 12 });
     pool.push({ item: { id: 'revive_scroll', name: '復活卷軸', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.revive_scroll, effect: { revive: true } }, w: 5 });
      pool.push({ item: { id: 'tscroll', name: '變身卷軸', type: 'consumable', itemType: 'consumable', rarity: 'purple', icon: ITEM_ICONS.tscroll, effect: {} }, w: 3 });
      pool.push({ item: { id: 'mgem', name: '魔法寶石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.mgem, effect: {} }, w: 10 });
@@ -15595,7 +15605,7 @@ function rollConsumableDrop(level, isBoss) {
    }
   // Boss加碼：增加高級道具權重
   if (isBoss) {
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 20 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 20 });
     pool.push({ item: { id: 'revive_scroll', name: '復活卷軸', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.revive_scroll, effect: { revive: true } }, w: 15 });
   }
   if (pool.length === 0) return null;
@@ -21380,7 +21390,7 @@ function renderShopPage() {
       { id: 'move1', name: '行走加速藥水', desc: '移動速度+20%，持續1小時', price: 200, icon: ITEM_ICONS.move1, currency: 'gold', rarity: 'green', effect: { moveSpeed: 20, duration: 3600 } },
       { id: 'mgem', name: '魔法寶石', desc: '強力技能必備消耗品', price: 1000, icon: ITEM_ICONS.mgem, currency: 'gold', rarity: 'blue', effect: {} },
       { id: 'town_scroll', name: '回城卷軸', desc: '立刻傳送回村莊', price: 500, icon: ITEM_ICONS.teleport, currency: 'gold', rarity: 'green', effect: { teleport: 'town' } },
-      { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_stone, currency: 'gold', rarity: 'green', type: 'enhance_scroll', effect: { enhanceScroll: true } },
+      { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, currency: 'gold', rarity: 'green', type: 'enhance_scroll', effect: { enhanceScroll: true } },
     ],
     gem: [
       { id: 'exp_potion', name: '經驗藥水', desc: '立刻獲得1000經驗', price: 120, icon: ITEM_ICONS.hp3, currency: 'gem' },
@@ -21392,7 +21402,7 @@ function renderShopPage() {
       { id: 'mystery_chest', name: '神秘寶箱', desc: '隨機開出道具或裝備', price: 100, icon: ITEM_ICONS.chest, currency: 'gem', type: 'consumable', effect: { mysteryChest: true } },
       { id: 'revive_gem', name: '復活卷軸', desc: '死亡後原地復活', price: 50, icon: ITEM_ICONS.revive_scroll, currency: 'gem', type: 'consumable', effect: { revive: true } },
       { id: 'bag_expand', name: '背包擴充卷', desc: '使用後背包容量+1格（最多200格）', price: 100, icon: ITEM_ICONS.quest_scroll, currency: 'gem', type: 'bag_expand' },
-      { id: 'enhance_boost_scroll', name: '強化機率提升卷', desc: '強化時使用，提升10%成功率（最多到90%）', price: ENHANCE_BOOST_SCROLL_PRICE, icon: ITEM_ICONS.bless_stone, currency: 'gem', rarity: 'blue', type: 'enhance_boost_scroll', effect: { enhanceBoost: true } },
+      { id: 'enhance_boost_scroll', name: '強化機率提升卷', desc: '強化時使用，提升10%成功率（最多到90%）', price: ENHANCE_BOOST_SCROLL_PRICE, icon: ITEM_ICONS.enhance_boost_scroll, currency: 'gem', rarity: 'blue', type: 'enhance_boost_scroll', effect: { enhanceBoost: true } },
       { id: 'true_death_pack', name: '真•死亡體驗包', desc: '內含6種真死亡金變體驗券各3張（共18張），使用後可體驗對應金變外觀與屬性4小時，不受職業限制。限購1次。', price: 3000, icon: ITEM_ICONS.chest, currency: 'gem', rarity: 'gold', type: 'true_death_pack', limitOnce: true },
     ],
     equip: [
@@ -22163,13 +22173,22 @@ function handleShopBuy(id, tab, qty = 1) {
           { id: 'ticket_death_holy', name: '真墮落聖執者體驗券', tfId: 't_true_fallen_paladin' },
         ];
         tickets.forEach(t => {
+          // v2.7.9：每種體驗券用各自的券據圖標（可區分，不再共用 quest_scroll）
+          const ticketIconMap = {
+            ticket_death_knight:   ITEM_ICONS.ticket_death_knight,
+            ticket_death_mage:     ITEM_ICONS.ticket_death_mage,
+            ticket_death_archer:   ITEM_ICONS.ticket_death_archer,
+            ticket_death_assassin: ITEM_ICONS.ticket_death_assassin,
+            ticket_death_warlock:  ITEM_ICONS.ticket_death_sorcerer,
+            ticket_death_holy:     ITEM_ICONS.ticket_fallen_paladin,
+          };
           addToInventory({
             id: t.id,
             name: t.name,
             type: 'transform_ticket',
             itemType: 'consumable',
             rarity: 'gold',
-            icon: ITEM_ICONS.quest_scroll,
+            icon: ticketIconMap[t.id] || ITEM_ICONS.ticket_death_knight,
             count: 3,
             bound: true,
             soulbound: true,
@@ -27094,13 +27113,14 @@ if (typeof dealDamageToAIPlayer === 'function') {
 // ========== v2.7.3：體驗券 icon 導正（用變身 portrait 當券圖） ==========
 (function() {
   // 在遊戲啟動後補上體驗券的自訂 icon 對照
+  // v2.7.9：優先使用券據圖標（ITEM_ICONS.ticket_death_*），portrait 作為 fallback
   const _ticketIcons = {
-    ticket_death_knight: 'assets/transform/gold/true_death_knight/portrait.png',
-    ticket_death_mage: 'assets/transform/gold/true_death_mage/portrait.png',
-    ticket_death_archer: 'assets/transform/gold/true_death_archer/portrait.png',
-    ticket_death_assassin: 'assets/transform/gold/true_death_assassin/portrait.png',
-    ticket_death_warlock: 'assets/transform/gold/true_death_sorcerer/portrait.png',
-    ticket_death_holy: 'assets/transform/gold/true_fallen_paladin/portrait.png',
+    ticket_death_knight:   ITEM_ICONS.ticket_death_knight,
+    ticket_death_mage:     ITEM_ICONS.ticket_death_mage,
+    ticket_death_archer:   ITEM_ICONS.ticket_death_archer,
+    ticket_death_assassin: ITEM_ICONS.ticket_death_assassin,
+    ticket_death_warlock:  ITEM_ICONS.ticket_death_sorcerer,
+    ticket_death_holy:     ITEM_ICONS.ticket_fallen_paladin,
   };
 
   // patch getItemIconUrl 以支援體驗券

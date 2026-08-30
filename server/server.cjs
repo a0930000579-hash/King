@@ -182,17 +182,55 @@ function getMapState(serverId, mapId) {
   return mpMapStates.get(key);
 }
 
+// v2.7.9：事件佇列模型，確保 long-poll 絕不漏事件
+//  - 每張 map 維護一個 events 陣列（append-only，定期裁掉 5 秒以上的舊事件）
+//  - notifyMapUpdate 改成 append 事件並喚醒所有 waiters
+//  - poll 回應時：drain queue（since 之後的所有事件）+ 完整 players/ais 快照
+//  - 客戶端以快照為真相、事件僅用於插值補償
+const mpEventQueues = new Map(); // key -> [{...event}]
+function getEventQueue(serverId, mapId) {
+  const key = mpKey(serverId, mapId);
+  let q = mpEventQueues.get(key);
+  if (!q) { q = []; mpEventQueues.set(key, q); }
+  return q;
+}
+
 function notifyMapUpdate(serverId, mapId, event) {
   const key = mpKey(serverId, mapId);
+  const q = getEventQueue(serverId, mapId);
+  q.push(event);
+  // 簡易裁減：超過 200 筆時刪掉舊的一半（避免記憶體無限長）
+  if (q.length > 200) q.splice(0, q.length - 200);
+  // 喚醒所有在此等待的 long-poll
   const waiters = mpPollWaiters.get(key) || [];
+  const currentAIs = wsServer.getAIList(serverId, mapId);
+  const now = Date.now();
+  const bcasts = mpBroadcasts.filter(b => b.time > now - 5000);
+  // 取得當前地圖所有玩家狀態（快照）
+  const mapState = mpMapStates.get(key) || new Map();
+  const players = [];
+  for (const [pid, s] of mapState) players.push(s);
   const remaining = [];
   for (const w of waiters) {
-    if (w.playerId === event.playerId && event.type === 'move') {
-      remaining.push(w); // 不給自己推自己的 move
-      continue;
+    // 收集 since 之後的所有事件
+    const since = w.since || 0;
+    const evts = [];
+    for (let i = q.length - 1; i >= 0; i--) {
+      if ((q[i].time || 0) <= since) break;
+      // 自己的 move 事件不推回給自己
+      if (q[i].playerId === w.playerId && q[i].type === 'move') continue;
+      evts.unshift(q[i]);
     }
     try {
-      w.res.end(JSON.stringify({ ok: true, events: [event], time: Date.now() }));
+      w.res.end(JSON.stringify({
+        ok: true,
+        events: evts,
+        ais: currentAIs,
+        players,
+        broadcasts: bcasts,
+        time: now,
+        timeout: false,
+      }));
     } catch(e) {}
   }
   mpPollWaiters.set(key, remaining);
@@ -325,23 +363,23 @@ async function handleMpApi(req, res, pathname, query, account) {
       }
       // v2.7.3：先確保 AI 已生成（同步等待，從持久化載入或按設定生成），再返回
       //  避免第一個玩家拿到空 AI、第二個玩家才有（偽線上症狀的主因）
-      let ais = wsServer.getAIList(serverId, mapId);
-      if (ais.length === 0) {
-        try {
-          const srv = await db.getServer(serverId);
-          if (srv) {
-            const cnt = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
-            const lv = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
-            await wsServer.ensureAIForMap(serverId, mapId, cnt, lv);
-            ais = wsServer.getAIList(serverId, mapId);
-          } else {
-            // 伺服器不存在（可能是新服），用預設值生成
-            await wsServer.ensureAIForMap(serverId, mapId, 8, 1);
-            ais = wsServer.getAIList(serverId, mapId);
-          }
-        } catch(e) {
-          console.warn('[Join] AI 初始化失敗:', e.message);
+      // v2.7.9：不論現有多少 AI，一律 ensureAIForMap 校準到 GM 設定的 aiCount
+      //  （舊版只有 ais.length===0 才呼叫，導致載入 5 隻就永遠補不到 8）
+      try {
+        const srv = await db.getServer(serverId);
+        let cnt = 8, lv = 1, source = 'default';
+        if (srv) {
+          cnt = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
+          lv = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
+          source = 'server_config';
         }
+        const before = wsServer.getAIList(serverId, mapId).length;
+        await wsServer.ensureAIForMap(serverId, mapId, cnt, lv);
+        ais = wsServer.getAIList(serverId, mapId);
+        console.log(`[Join-AI] ${serverId}:${mapId} aiCount=${cnt}（來源:${source}） 載入前=${before} → 載入後=${ais.length}`);
+      } catch(e) {
+        console.warn('[Join] AI 初始化失敗:', e.message);
+        ais = wsServer.getAIList(serverId, mapId);
       }
       sendJson(res, 200, { ok: true, playerId, others, ais, mapId, serverId, instanceId: SERVER_INSTANCE_ID, time: Date.now() });
     } catch(e) {
@@ -387,19 +425,38 @@ async function handleMpApi(req, res, pathname, query, account) {
     if (body.hp != null) state.hp = body.hp;
     if (body.transformId != null) state.transformId = body.transformId;
     state.lastUpdate = Date.now();
-    // 廣播給其他等待中的人
+    // 廣播給其他 LP 玩家
     notifyMapUpdate(serverId, mapId, {
       type: 'move',
       playerId,
+      name: state.name,
       x: state.x, y: state.y, dir: state.dir,
       hp: state.hp, transformId: state.transformId,
       time: Date.now(),
     });
+    // v2.7.9：也廣播給 WS 玩家（LP↔WS 雙通道同屏）
+    if (wsServer && wsServer.broadcastToMap) {
+      try {
+        wsServer.broadcastToMap(serverId, mapId, {
+          type: 'player_move',
+          playerId,
+          name: state.name,
+          classId: state.classId,
+          level: state.level,
+          x: state.x, y: state.y, dir: state.dir,
+          hp: state.hp,
+          transformId: state.transformId,
+          time: Date.now(),
+          transport: 'longpoll',
+        });
+      } catch(e) {}
+    }
     sendJson(res, 200, { ok: true, time: Date.now() });
     return;
   }
 
   // GET /api/mp/poll long-poll 拉取更新（按 serverId 隔離）
+  // v2.7.9：事件佇列模型 — 以 since 為游標，回傳其後所有累積事件 + 完整快照
   if (req.method === 'GET' && pathname === '/api/mp/poll') {
     const mapId = query.map;
     const serverId = query.server || 'zeus';
@@ -407,38 +464,66 @@ async function handleMpApi(req, res, pathname, query, account) {
     const playerId = account + ':' + charIdx;
     const since = query.since ? parseInt(query.since) : 0;
     if (!mapId) { sendJson(res, 400, { error: '缺少 map' }); return; }
-    const newBcasts = mpBroadcasts.filter(b => b.time > since);
-    // v2.7.3：每輪 poll 都帶最新 AI 快照（GM 改 aiCount 時 LP 玩家也同步）
-    const currentAIs = wsServer.getAIList(serverId, mapId);
     const key = mpKey(serverId, mapId);
-    if (!mpPollWaiters.has(key)) mpPollWaiters.set(key, []);
-    const waiters = mpPollWaiters.get(key);
-    const entry = { res, since, playerId, startTime: Date.now() };
-    waiters.push(entry);
-    const sendPollResponse = (events, timeout) => {
+
+    const buildResponse = (timeout) => {
+      const q = getEventQueue(serverId, mapId);
+      const now = Date.now();
+      const events = [];
+      // 收集 since 之後的所有事件（跳過自己的 move）
+      for (let i = 0; i < q.length; i++) {
+        const e = q[i];
+        if ((e.time || 0) <= since) continue;
+        if (e.playerId === playerId && e.type === 'move') continue;
+        events.push(e);
+      }
+      const bcasts = mpBroadcasts.filter(b => b.time > since);
+      const currentAIs = wsServer.getAIList(serverId, mapId);
+      const mapState = mpMapStates.get(key) || new Map();
+      const players = [];
+      for (const [pid, s] of mapState) {
+        if (pid !== playerId) players.push(s);
+      }
       try {
         res.end(JSON.stringify({
           ok: true,
-          events: events || [],
-          broadcasts: newBcasts,
+          events,
+          players,
           ais: currentAIs,
-          time: Date.now(),
+          broadcasts: bcasts,
+          time: now,
           timeout: !!timeout,
         }));
       } catch(e) {}
     };
+
+    const q = getEventQueue(serverId, mapId);
+    // 若已經有 since 之後的新事件，立即回傳不等待
+    const hasNew = q.some(e => (e.time || 0) > since && !(e.playerId === playerId && e.type === 'move'));
+    if (hasNew) {
+      buildResponse(false);
+      return;
+    }
+
+    // 否則進入等待佇列
+    if (!mpPollWaiters.has(key)) mpPollWaiters.set(key, []);
+    const waiters = mpPollWaiters.get(key);
+    const entry = { res, since, playerId, startTime: Date.now() };
+    waiters.push(entry);
+    // 超時回應（帶最新快照，讓客戶端保持同步）
     setTimeout(() => {
       const idx = waiters.indexOf(entry);
       if (idx >= 0) {
         waiters.splice(idx, 1);
-        sendPollResponse([], true);
+        buildResponse(true);
       }
     }, MP_POLL_TIMEOUT);
-    if (newBcasts.length > 0) {
+    // 有新廣播也立刻回
+    if (mpBroadcasts.some(b => b.time > since)) {
       const idx = waiters.indexOf(entry);
       if (idx >= 0) {
         waiters.splice(idx, 1);
-        sendPollResponse([], false);
+        buildResponse(false);
       }
     }
     return;
@@ -699,9 +784,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-version: '2.7.7',
-      build: '2.7.7-2608300500',
-      buildId: '2.7.7-2608300500',
+version: '2.7.9',
+      build: '2.7.9-2608301400',
+      buildId: '2.7.9-2608301400',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -804,9 +889,9 @@ version: '2.7.7',
       version: '2.7.3',
       build: '2.7.3-2608292300',
       buildId: '2.7.3-2608292300',
-      version: '2.7.7',
-      build: '2.7.7-2608300500',
-      buildId: '2.7.7-2608300500',
+      version: '2.7.9',
+      build: '2.7.9-2608301400',
+      buildId: '2.7.9-2608301400',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       uptimeMs: uptime,
