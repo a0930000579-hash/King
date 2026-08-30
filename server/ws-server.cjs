@@ -832,12 +832,12 @@ function createWsServer(httpServer) {
   // GM 調整 AI 數量（對指定 server 的所有地圖生效，或指定 map）
   function setAICountForServer(serverId, targetCount, opts = {}) {
     const affected = [];
-    for (const [key, aiState] of aiStates) {
-      const [srv, map] = key.split(':');
-      if (srv !== serverId) continue;
-      if (opts.mapId && map !== opts.mapId) continue;
-      adjustAICount(serverId, map, targetCount, opts);
-      affected.push(map);
+    // v2.8.1：從 aiEngine 拿真實地圖清單（ws-server 自己的 aiStates 已棄用，僅保留舊代碼引用）
+    const mapKeys = aiEngine.getAllMapKeys ? aiEngine.getAllMapKeys(serverId) : [];
+    for (const mapId of mapKeys) {
+      if (opts.mapId && mapId !== opts.mapId) continue;
+      adjustAICount(serverId, mapId, targetCount, opts);
+      affected.push(mapId);
     }
     // 如果這伺服器還沒有任何地圖的 AI 狀態，預設為 village 生成
     if (affected.length === 0 && !opts.mapId) {

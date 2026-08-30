@@ -1126,10 +1126,20 @@
     // 設定遊戲的伺服器位址（同源）
     if (window.MultiplayerClient && currentServer) {
       const serverUrl = window.location.origin;
-      // 連線到 socket.io（自動）
-      window.MultiplayerClient.connect(serverUrl, AuthSystem.getToken()).catch(() => {
-        console.warn('[Auth] 自動連線失敗，重新連線中');
-      });
+      // v2.8.1：切換帳號/角色時，先確保舊連線完全斷開再重新連
+      //  避免舊 token 下的 session 殘留導致狀態混亂
+      const doConnect = () => {
+        window.MultiplayerClient.connect(serverUrl, AuthSystem.getToken()).catch(() => {
+          console.warn('[Auth] 自動連線失敗，重新連線中');
+        });
+      };
+      if (MultiplayerClient.status !== 'offline') {
+        try { MultiplayerClient.disconnect(); } catch(e) {}
+        // 延遲一幀再連，確保 disconnect 清理完成
+        setTimeout(doConnect, 50);
+      } else {
+        doConnect();
+      }
     }
 
     // 通知 game.js 已登入

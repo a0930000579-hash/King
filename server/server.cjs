@@ -318,6 +318,9 @@ async function handleMpApi(req, res, pathname, query, account) {
     const mapId = body.mapId || 'village_01';
     const serverId = body.serverId || 'zeus';
     const charIdx = body.charIdx ?? 0;
+    // v2.8.1：確保 playerId 以 token 帳號為前綴（防止 token 被替換後冒用其他帳號的 playerId）
+    //  body 若有 playerId 僅作為 client 偵錯用，正式以 token + charIdx 為準
+    if (!account) { sendJson(res, 401, { error: '未登入' }); return; }
     try {
       // 校驗伺服器存在且狀態為 open
       const srv = await db.getServer(serverId);
@@ -818,9 +821,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-version: '2.8.0',
-      build: '2.8.0-2608301623',
-      buildId: '2.8.0-2608301623',
+version: '2.8.1',
+      build: '2.8.1-2608302000',
+      buildId: '2.8.1-2608302000',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -923,9 +926,9 @@ version: '2.8.0',
       version: '2.7.3',
       build: '2.7.3-2608292300',
       buildId: '2.7.3-2608292300',
-       version: '2.8.0',
-       build: '2.8.0-2608301623',
-       buildId: '2.8.0-2608301623',
+       version: '2.8.1',
+       build: '2.8.1-2608302000',
+       buildId: '2.8.1-2608302000',
        instanceId: SERVER_INSTANCE_ID,
        startTime: SERVER_START_TIME,
        uptimeMs: uptime,

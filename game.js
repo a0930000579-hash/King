@@ -4657,6 +4657,10 @@ const MONSTER_SPRITES = {
   eliteGoblin: SPRITE.goblin,
   royalScorpion: SPRITE.scorpion,
   goldenSlime: SPRITE.slime,
+  // v2.8.1：高級 Boss 類型 fallback（確保不顯示 ?，用相近精靈 + 大小/濾鏡區分）
+  death_knight: SPRITE.darkmage,
+  baphomet:     SPRITE.demon,
+  demon_lord:    SPRITE.demon,
 };
 
 // ==================== 國家/公会/城堡 ====================
@@ -5830,12 +5834,13 @@ function getItemIconUrl(item) {
   return ITEM_ICONS.chest;
 }
 
-// v2.7.4：按部位+品質取裝備圖標
+// v2.8.1：按部位+品質取裝備圖標，每件「部位×品質」單一圖標不拼貼
 function getEquipRarityIcon(type, rarity) {
   const slotMap = { weapon:'sword', armor:'armor', helmet:'helmet', boots:'boots',
     gloves:'gloves', belt:'belt', cape:'cape', pants:'pants', ring:'ring',
     ring1:'ring', ring2:'ring', necklace:'necklace', shield:'shield',
-    accessory:'ring', bow:'sword', staff:'sword' };
+    accessory:'ring', bow:'bow', staff:'staff', dagger:'dagger',
+    sword:'sword' };
   const slot = slotMap[type] || 'sword';
   const r = rarity || 'white';
   return EQUIP_RARITY_ICONS[slot]?.[r] || EQUIP_RARITY_ICONS.sword.white;
@@ -5871,8 +5876,11 @@ const EQUIP_ICON_MAP = {
   cape:     assetUrl('equip/icon_cape_white.jpg'),
   pants:    assetUrl('equip/icon_pants_white.jpg'),
   shield:   assetUrl('equip/icon_shield_white.jpg'),
-  bow:      assetUrl('equip/icon_sword_white.jpg'),
-  staff:    assetUrl('equip/icon_sword_white.jpg'),
+  // v2.8.1：遠程/法系/刺客武器獨立圖標，不再共用劍
+  sword:    assetUrl('equip/icon_sword_white.jpg'),
+  bow:      assetUrl('equip/icon_bow_white.jpg'),
+  staff:    assetUrl('equip/icon_staff_white.jpg'),
+  dagger:   assetUrl('equip/icon_dagger_white.jpg'),
   accessory:assetUrl('equip/icon_ring_white.jpg'),
 };
 
@@ -27362,6 +27370,7 @@ if (typeof dealDamageToAIPlayer === 'function') {
     } catch(e) {}
 
     // v2.7.7：一眼區分 — 傳輸協定(WS/LP/OFF) + 伺服器 + AI來源(server/local/offline) + AI數量
+    // v2.8.1：加上帳號名（多帳號並存時可辨識當前連線是誰）
     const trLabel = tr === 'websocket' ? 'WS' : (tr === 'longpoll' ? 'LP' : 'OFF');
     const trColor = color;
     // AI 來源顏色：server 綠 / local 黃 / offline 紅
@@ -27369,6 +27378,16 @@ if (typeof dealDamageToAIPlayer === 'function') {
     if (aiSrc === 'server') aiColor = '#50ff80';
     else if (aiSrc === 'offline') aiColor = '#ff6060';
     const aiLabel = aiSrc === 'server' ? 'AI:SVR' : (aiSrc === 'offline' ? 'AI:OFF' : 'AI:LOC');
+    // 當前帳號（最多 8 字）
+    let accName = '-';
+    try {
+      if (window.AuthSystem && AuthSystem.getCurrentAccount) {
+        accName = AuthSystem.getCurrentAccount() || '-';
+      } else if (typeof localStorage !== 'undefined') {
+        accName = localStorage.getItem('mmo_account') || '-';
+      }
+    } catch(e) {}
+    if (accName.length > 8) accName = accName.slice(0, 7) + '…';
 
     ind.innerHTML =
       '<span style="color:' + trColor + ';font-weight:700">' + trLabel + '</span>' +
@@ -27376,6 +27395,8 @@ if (typeof dealDamageToAIPlayer === 'function') {
       '<span style="color:#d4af37">' + serverLabel + '</span>' +
       '<span style="opacity:0.4">·</span>' +
       '<span style="color:' + aiColor + ';font-weight:600">' + aiLabel + '(' + aiCount + ')</span>' +
+      '<span style="opacity:0.4">·</span>' +
+      '<span style="opacity:0.7;font-size:10px">' + accName + '</span>' +
       '<span style="opacity:0.4">·</span>' +
       '<span style="opacity:0.6">' + iid + '</span>';
 

@@ -206,6 +206,7 @@ function createAIEngine(options = {}) {
   }
 
   // ===== 確保地圖有怪物（AI 首次進入時自動生成）=====
+  // v2.8.1：怪物類型按地圖等級階層匹配，全部類型與客戶端 MONSTER_SPRITES 一致
   const monstersSpawned = new Set(); // 已生成怪物的地圖 key
   function ensureMonsters(serverId, mapId) {
     const k = mapKey(serverId, mapId);
@@ -215,13 +216,21 @@ function createAIEngine(options = {}) {
     // 找出此圖的等級區間
     const tier = MAP_TIERS.find(t => t.map === mapId) || MAP_TIERS[1];
     const baseLv = Math.max(1, tier.levelMin);
+    // 按等級選怪物類型池（與客戶端 MONSTER_SPRITES 完全對應，避免顯示 ?）
+    let typePool;
+    if (baseLv <= 2) typePool = ['slime', 'wolf', 'goblin'];
+    else if (baseLv <= 5) typePool = ['goblin', 'skeleton', 'wolf', 'bat'];
+    else if (baseLv <= 15) typePool = ['goblin', 'skeleton', 'orc', 'spider', 'shaman', 'lizardman'];
+    else if (baseLv <= 30) typePool = ['skeleton', 'orc', 'zombie', 'ghost', 'lizardman', 'ogre'];
+    else if (baseLv <= 50) typePool = ['orc', 'scorpion', 'stone_golem', 'ogre', 'lizardman', 'bandit'];
+    else if (baseLv <= 70) typePool = ['stone_golem', 'troll', 'demon', 'darkmage', 'ogre'];
+    else typePool = ['dragon', 'bone_dragon', 'demon', 'troll', 'hydra', 'lich'];
     // 生成 15 隻怪，等級圍繞 baseLv 浮動
-    const monsterTypes = ['slime', 'wolf', 'goblin', 'skeleton', 'orc'];
     const count = 15;
     for (let i = 0; i < count; i++) {
-      const typeIdx = Math.floor(Math.random() * monsterTypes.length);
+      const typeIdx = Math.floor(Math.random() * typePool.length);
       const lv = Math.max(1, baseLv + Math.floor(Math.random() * 4) - 1);
-      const mon = createMonster(monsterTypes[typeIdx], lv, mapId, i + Math.floor(Math.random() * 10000));
+      const mon = createMonster(typePool[typeIdx], lv, mapId, i + Math.floor(Math.random() * 10000));
       monsterState.set(mon.id, mon);
     }
   }
@@ -682,6 +691,15 @@ function createAIEngine(options = {}) {
 
     getAIList(serverId, mapId) {
       return Array.from(getAIState(serverId, mapId).values());
+    },
+    // v2.8.1：取得指定 server 下所有有 AI 的地圖 id（給 GM 動態調 AI 數用）
+    getAllMapKeys(serverId) {
+      const result = [];
+      for (const key of aiStates.keys()) {
+        const [srv, map] = key.split(':');
+        if (srv === serverId) result.push(map);
+      }
+      return result;
     },
 
     // 玩家攻擊 AI

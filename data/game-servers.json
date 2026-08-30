@@ -1,13 +1,13 @@
 [
   {
     "id": "zeus",
-    "name": "Zeus",
+    "name": "宙斯",
     "status": "open",
     "aiCount": 8,
-    "initLevel": 3,
+    "initLevel": 1,
     "maxPlayers": 200,
     "info": "希臘神王，開放中",
-    "createdAt": "2026-08-29T16:47:59.573Z"
+    "createdAt": "2026-08-30T12:18:48.105Z"
   },
   {
     "id": "cronus",
@@ -17,6 +17,6 @@
     "initLevel": 1,
     "maxPlayers": 200,
     "info": "泰坦之王，準備中",
-    "createdAt": "2026-08-29T16:47:59.573Z"
+    "createdAt": "2026-08-30T12:18:48.105Z"
   }
 ]
