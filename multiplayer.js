@@ -95,6 +95,10 @@
     get serverId() { return currentServerId; },
     get mapId() { return currentMapId; },
     get transport() { return useWebSocket ? 'websocket' : (status === STATUS.ONLINE ? 'longpoll' : 'offline'); },
+    get wsFailureReason() { return _wsFailureReason || ''; },
+    get wsLastCloseCode() { return _wsLastCloseCode || null; },
+    get serverId() { return currentServerId || null; },
+    get mapId() { return currentMapId || null; },
     STATUS: STATUS,
 
     getSavedServerUrl() {
@@ -150,20 +154,43 @@
           if (data && data.status === 'online') {
             setStatus(STATUS.ONLINE);
             console.info('[Multi] 伺服器連線成功:', data.version, 'WS=', data.webSocket || data.socketIo);
+
+            // v2.7.7：伺服器在線就先把 AI 模式切到 server（防止本地 AI 偷生）
+            //  joinWorld 還沒完成、AI 還沒到也沒關係 — setServerAIs 會在後續到達時補渲染
+            if (typeof window.setServerOnline === 'function') {
+              // 此時 serverId 還沒確定（joinWorld 才會設），先傳佔位符
+              window.setServerOnline(currentServerId || 'pending', null);
+            }
+            if (typeof window.setOfflineMode === 'function') {
+              window.setOfflineMode(false);
+            }
+
             // v2.7.2：若伺服器支援 WebSocket，優先連 WS（失敗自動 fallback long-poll）
             if (data.webSocket || data.socketIo) {
               tryWebSocket().catch(e => {
                 console.warn('[Multi] WebSocket 連線失敗，降級 long-poll:', e.message);
                 useWebSocket = false;
+                // v2.7.7：WS 失敗仍然在線（走 LP），不切離線
                 startPollLoop();
               });
             } else {
               // 沒有 WS 支援，直接 long-poll
+              _wsFailureReason = '伺服器未啟用 WebSocket';
               startPollLoop();
             }
             // 若已有玩家資料，自動 join
             if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
-              return MultiplayerClient.joinWorld();
+              return MultiplayerClient.joinWorld().then(result => {
+                // v2.7.7：joinWorld 失敗才切離線模式（讓本地 AI 接管）
+                if (!result) {
+                  console.warn('[Multi] joinWorld 失敗，退回離線模式');
+                  setStatus(STATUS.ERROR);
+                  if (typeof window.setOfflineMode === 'function') {
+                    window.setOfflineMode(true);
+                  }
+                }
+                return result;
+              });
             }
             return null;
           } else {
@@ -548,21 +575,29 @@
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
+          // v2.7.7：錯誤時保留連線線索，給指示器 tooltip 顯示
           _wsFailureReason = '連線錯誤（網路或代理阻擋）';
-          reject(new Error('WebSocket 連線錯誤'));
+          reject(new Error('WebSocket 連線錯誤（' + (err?.message || 'network error') + '）'));
         }
       };
 
       ws.onclose = (ev) => {
         console.log('[WS] 連線關閉 code=' + ev.code + ' reason=' + (ev.reason || ''));
         wsConnected = false;
+        _wsLastCloseCode = ev.code;
+        _wsLastCloseReason = ev.reason || '';
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
           let reason = '連線被關閉';
-          if (ev.code === 1006) reason = '無法連接伺服器（code 1006，請檢查代理是否支援 WS Upgrade）';
+          if (ev.code === 1006) reason = '無法連接伺服器（code 1006，代理/防火牆可能不支援 WS Upgrade）';
           else if (ev.code === 1000) reason = '正常關閉';
-          else reason = '關閉 code=' + ev.code;
+          else if (ev.code === 1001) reason = '遠端離開（code 1001 Going Away）';
+          else if (ev.code === 1002) reason = '協定錯誤（code 1002 Protocol Error）';
+          else if (ev.code === 1003) reason = '伺服器拒絕資料類型（code 1003）';
+          else if (ev.code === 1008) reason = '政策違反（code 1008）';
+          else if (ev.code === 1011) reason = '伺服器內部錯誤（code 1011）';
+          else reason = '關閉 code=' + ev.code + (ev.reason ? '：' + ev.reason : '');
           _wsFailureReason = reason;
           reject(new Error(reason));
           return;
@@ -579,37 +614,35 @@
   }
 
   function scheduleWsReconnect() {
-    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    if (wsReconnectTimer) return;
+    wsReconnectDelay = Math.min(wsReconnectDelay * 2, 15000);
     wsReconnectTimer = setTimeout(() => {
-      if (status !== STATUS.ONLINE) return;
-      tryWebSocket()
-        .then(() => {
-          console.log('[WS] 重連成功');
-          // 重新加入地圖
-          if (currentMapId && myPlayerId) {
-            wsSend({
-              type: 'join_map',
-              serverId: currentServerId,
-              mapId: currentMapId,
-              playerId: myPlayerId,
-              name: GS?.player?.name || 'Player',
-              classId: GS?.player?.classId || 'warrior',
-              level: GS?.player?.level || 1,
-              charIdx: currentCharIdx,
-            });
-          }
-          // 切回 WS 模式，停止 long-poll
-          useWebSocket = true;
-          if (pollAbortController) {
-            try { pollAbortController.abort(); } catch(e) {}
-            pollAbortController = null;
-          }
-          pollRunning = false;
-        })
-        .catch(() => {
-          wsReconnectDelay = Math.min(wsReconnectDelay * 2, 15000);
-          scheduleWsReconnect();
-        });
+      wsReconnectTimer = null;
+      if (status !== STATUS.ONLINE && status !== STATUS.RECONNECTING) return;
+      console.log('[WS] 嘗試重連（delay=' + wsReconnectDelay + 'ms）...');
+      tryWebSocket().then(() => {
+        wsReconnectDelay = 1000;
+        _wsFailureReason = '';
+        console.log('[WS] 重連成功');
+        // 重新加入地圖
+        if (currentMapId && myPlayerId) {
+          wsSend({
+            type: 'join_map',
+            serverId: currentServerId,
+            mapId: currentMapId,
+            playerId: myPlayerId,
+            name: GS?.player?.name || 'Player',
+            classId: GS?.player?.classId || 'warrior',
+            level: GS?.player?.level || 1,
+            charIdx: currentCharIdx,
+          });
+        }
+      }).catch(e => {
+        console.warn('[WS] 重連失敗:', e.message);
+        // v2.7.7：保留最後失敗原因給指示器
+        _wsFailureReason = e.message || '重連失敗';
+        scheduleWsReconnect();
+      });
     }, wsReconnectDelay);
   }
 

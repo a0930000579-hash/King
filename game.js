@@ -1597,270 +1597,288 @@ const SPRITE = {
   },
 
   // ========== 怪物 ==========
+  // v2.7.7：核心怪物改為真實怪物圖（monster/ 目錄），其餘怪物 fallback 到 goblin 避免缺圖
   goblin: {
-    idle: assetUrl('monster/goblin/down'),
-    walk: assetUrl('monster/goblin/down'),
-    walk2: assetUrl('monster/goblin/side'),
-    walk3: assetUrl('monster/goblin/up'),
-    walk4: assetUrl('monster/goblin/side'),
+    idle: assetUrl('monster/goblin/idle'),
+    walk: assetUrl('monster/goblin/walk_1'),
+    walk2: assetUrl('monster/goblin/walk_2'),
+    walk3: assetUrl('monster/goblin/walk_3'),
+    walk4: assetUrl('monster/goblin/walk_4'),
     attack: assetUrl('monster/goblin/attack'),
     attack2: assetUrl('monster/goblin/attack'),
-    hit: assetUrl('monster/goblin/attack'),
+    hit: assetUrl('monster/goblin/hit'),
     color: '#508040', glow: '#80c060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0ff80',
+    // v2.7.7：4 幀 walk 動畫
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   skeleton: {
-    idle: assetUrl('Wzi9iVLdb2'),
-    walk: assetUrl('Wzi9iVLdb2'),
-    walk2: assetUrl('U9ed5silDc'),
-    walk3: assetUrl('wpc6V9qVDO'),
-    walk4: assetUrl('1x1j3NjhPH'),
-    attack: assetUrl('VfGgZRdHIL'),
-    attack2: assetUrl('YQCgkX79ZB'),
-    hit: assetUrl('6ifL3DgjCY'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#e0e0d0', glow: '#ffffff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0f0ff',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   orc: {
-    idle: assetUrl('7jZBWui3Db'),
-    walk: assetUrl('7jZBWui3Db'),
-    walk2: assetUrl('Zpc82edK6V'),
-    walk3: assetUrl('CewMfMo7tU'),
-    walk4: assetUrl('9Us5kQk4ie'),
-    attack: assetUrl('rvAT3NSnQB'),
-    attack2: assetUrl('5oTzfOrfzV'),
-    hit: assetUrl('Xc1HGJ1KGV'),
+    idle: assetUrl('monster/orc/idle'),
+    walk: assetUrl('monster/orc/idle'),
+    walk2: assetUrl('monster/orc/side'),
+    walk3: assetUrl('monster/orc/up'),
+    walk4: assetUrl('monster/orc/side'),
+    attack: assetUrl('monster/orc/attack'),
+    attack2: assetUrl('monster/orc/attack'),
+    hit: assetUrl('monster/orc/hit'),
     color: '#608040', glow: '#a0c060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#d0ffa0',
   },
   slime: {
-    idle: assetUrl('582Ij09o3K'),
-    walk: assetUrl('582Ij09o3K'),
-    walk2: assetUrl('hjTKkz0REl'),
-    walk3: assetUrl('uUcl6ZXFlt'),
-    walk4: assetUrl('naY3bow36j'),
-    attack: assetUrl('Wi8i3HuMPN'),
-    attack2: assetUrl('xWZWQAzLLU'),
-    hit: assetUrl('ULQRvB1CdS'),
+    idle: assetUrl('monster/slime/idle'),
+    walk: assetUrl('monster/slime/walk_1'),
+    walk2: assetUrl('monster/slime/walk_2'),
+    walk3: assetUrl('monster/slime/walk_3'),
+    walk4: assetUrl('monster/slime/walk_4'),
+    attack: assetUrl('monster/slime/attack'),
+    attack2: assetUrl('monster/slime/attack'),
+    hit: assetUrl('monster/slime/hit'),
     color: '#40a060', glow: '#80e0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ffc0',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   spider: {
-    idle: assetUrl('6AohjTIRnR'),
-    walk: assetUrl('6AohjTIRnR'),
-    walk2: assetUrl('AKCLMYp49L'),
-    walk3: assetUrl('2hMO5hilVu'),
-    walk4: assetUrl('L5TZ5ntmcZ'),
-    attack: assetUrl('P4IKJKFaPb'),
-    attack2: assetUrl('jrdjr24uAs'),
-    hit: assetUrl('IkB3kC0MLn'),
+    idle: assetUrl('monster/spider/idle'),
+    walk: assetUrl('monster/spider/walk_1'),
+    walk2: assetUrl('monster/spider/walk_2'),
+    walk3: assetUrl('monster/spider/walk_3'),
+    walk4: assetUrl('monster/spider/walk_4'),
+    attack: assetUrl('monster/spider/attack'),
+    attack2: assetUrl('monster/spider/attack'),
+    hit: assetUrl('monster/spider/hit'),
     color: '#402020', glow: '#804040', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff6060',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   scorpion: {
-    idle: assetUrl('sYDuOUW1hs'),
-    walk: assetUrl('sYDuOUW1hs'),
-    walk2: assetUrl('2diYDBGw40'),
-    walk3: assetUrl('1n2FHCF00k'),
-    walk4: assetUrl('jOmfjaAowT'),
-    attack: assetUrl('STUpj5gzz2'),
-    attack2: assetUrl('Mx7YOqVObn'),
-    hit: assetUrl('oi41e1Ciog'),
+    idle: assetUrl('monster/scorpion/idle'),
+    walk: assetUrl('monster/scorpion/walk_1'),
+    walk2: assetUrl('monster/scorpion/walk_2'),
+    walk3: assetUrl('monster/scorpion/walk_3'),
+    walk4: assetUrl('monster/scorpion/walk_4'),
+    attack: assetUrl('monster/scorpion/attack'),
+    attack2: assetUrl('monster/scorpion/attack'),
+    hit: assetUrl('monster/scorpion/hit'),
     color: '#442266', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   bat: {
-    idle: 'assets/monster/forest_bat_idle.png',
-    walk: 'assets/monster/forest_bat_idle.png',
-    walk2: 'assets/monster/forest_bat_walk.png',
-    walk3: 'assets/monster/forest_bat_walk2.png',
-    walk4: 'assets/monster/forest_bat_walk3.png',
-    attack: 'assets/monster/forest_bat_attack.png',
-    attack2: 'assets/monster/forest_bat_attack2.png',
-    hit: 'assets/monster/forest_bat_hit.png',
+    idle: assetUrl('monster/bat/idle'),
+    walk: assetUrl('monster/bat/walk_1'),
+    walk2: assetUrl('monster/bat/walk_2'),
+    walk3: assetUrl('monster/bat/walk_3'),
+    walk4: assetUrl('monster/bat/walk_4'),
+    attack: assetUrl('monster/bat/attack'),
+    attack2: assetUrl('monster/bat/attack'),
+    hit: assetUrl('monster/bat/hit'),
     color: '#442222', glow: '#ff2222', useImg: true, multiFrame: true, coverMode: true,
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   ghost: {
-    idle: assetUrl('e7D8utv94E'),
-    walk: assetUrl('e7D8utv94E'),
-    walk2: assetUrl('n93e7pZjIQ'),
-    walk3: assetUrl('DlrVUtEL4U'),
-    walk4: assetUrl('nSc7HUXdKk'),
-    attack: assetUrl('ulXEI5IJVn'),
-    attack2: assetUrl('vgIBoWl1gY'),
-    hit: assetUrl('VnCngAVE7l'),
-    color: '#44dddd', glow: '#88ffff', useImg: true, multiFrame: true, coverMode: true,
+    idle: assetUrl('monster/ghost/idle'),
+    walk: assetUrl('monster/ghost/walk_1'),
+    walk2: assetUrl('monster/ghost/walk_2'),
+    walk3: assetUrl('monster/ghost/walk_3'),
+    walk4: assetUrl('monster/ghost/walk_4'),
+    attack: assetUrl('monster/ghost/attack'),
+    attack2: assetUrl('monster/ghost/attack'),
+    hit: assetUrl('monster/ghost/hit'),
+    color: '#a0c0e0', glow: '#e0f0ff', useImg: true, multiFrame: true, coverMode: true,
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   troll: {
-    idle: assetUrl('6ykq8WkXGM'),
-    walk: assetUrl('6ykq8WkXGM'),
-    walk2: assetUrl('88UbrwO9KU'),
-    walk3: assetUrl('EgnBBCs2il'),
-    walk4: assetUrl('64CM6j4mMt'),
-    attack: assetUrl('SoVisJ5aYQ'),
-    attack2: assetUrl('6fn78tWYQr'),
-    hit: assetUrl('CvFbmbrRCF'),
+    idle: assetUrl('monster/orc/idle'),
+    walk: assetUrl('monster/orc/walk_1'),
+    walk2: assetUrl('monster/orc/walk_2'),
+    walk3: assetUrl('monster/orc/walk_3'),
+    walk4: assetUrl('monster/orc/walk_4'),
+    attack: assetUrl('monster/orc/attack'),
+    attack2: assetUrl('monster/orc/attack'),
+    hit: assetUrl('monster/orc/hit'),
     color: '#558833', glow: '#88aa44', useImg: true, multiFrame: true, coverMode: true,
   },
   demon: {
-    idle: assetUrl('ennzdff10h'),
-    walk: assetUrl('ennzdff10h'),
-    walk2: assetUrl('HHYnZL77dr'),
-    walk3: assetUrl('iA3sODRZZ1'),
-    walk4: assetUrl('iovh4nWNY3'),
-    attack: assetUrl('VvBW6MiFDv'),
-    attack2: assetUrl('GCjQ9UYJCa'),
-    hit: assetUrl('bOvayC2iOD'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/idle'),
+    walk2: assetUrl('monster/demon/side'),
+    walk3: assetUrl('monster/demon/up'),
+    walk4: assetUrl('monster/demon/side'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#c03030', glow: '#ff6040', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff5050',
   },
   // 中高階怪物 8 帧
   ogre: {
-    idle: assetUrl('6mcEV2Pgpy'),
-    walk: assetUrl('6mcEV2Pgpy'),
-    walk2: assetUrl('OlcaeodfWk'),
-    walk3: assetUrl('EfvFkRDFHo'),
-    walk4: assetUrl('8s0noOL4Yj'),
-    attack: assetUrl('WV9nboUyMl'),
-    attack2: assetUrl('YY8fAAd1go'),
-    hit: assetUrl('5vqHZHGQV5'),
+    idle: assetUrl('monster/orc/idle'),
+    walk: assetUrl('monster/orc/walk_1'),
+    walk2: assetUrl('monster/orc/walk_2'),
+    walk3: assetUrl('monster/orc/walk_3'),
+    walk4: assetUrl('monster/orc/walk_4'),
+    attack: assetUrl('monster/orc/attack'),
+    attack2: assetUrl('monster/orc/attack'),
+    hit: assetUrl('monster/orc/hit'),
     color: '#806040', glow: '#d0a060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffb060',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   lizardman: {
-    idle: assetUrl('TCEkPooI9E'),
-    walk: assetUrl('TCEkPooI9E'),
-    walk2: assetUrl('S4gNP4k3pT'),
-    walk3: assetUrl('AY9mkXA71v'),
-    walk4: assetUrl('HLDhc9wPmh'),
-    attack: assetUrl('w9OpsvrH9Z'),
-    attack2: assetUrl('3iG0uaSQjw'),
-    hit: assetUrl('rmIJxJ5Fpg'),
+    idle: assetUrl('monster/lizardman/idle'),
+    walk: assetUrl('monster/lizardman/idle'),
+    walk2: assetUrl('monster/lizardman/side'),
+    walk3: assetUrl('monster/lizardman/up'),
+    walk4: assetUrl('monster/lizardman/side'),
+    attack: assetUrl('monster/lizardman/attack'),
+    attack2: assetUrl('monster/lizardman/attack'),
+    hit: assetUrl('monster/lizardman/hit'),
     color: '#40a060', glow: '#80e0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ffc0',
   },
   stone_golem: {
-    idle: assetUrl('1djiUtrb2c'),
-    walk: assetUrl('1djiUtrb2c'),
-    walk2: assetUrl('znvzkueF2c'),
-    walk3: assetUrl('Ix5C2VbmyJ'),
-    walk4: assetUrl('pVW3CEoidZ'),
-    attack: assetUrl('38FuwV7gPw'),
-    attack2: assetUrl('BUQtrrYRAS'),
-    hit: assetUrl('paWYrtkpSB'),
+    idle: assetUrl('monster/stone_golem/idle'),
+    walk: assetUrl('monster/stone_golem/walk_1'),
+    walk2: assetUrl('monster/stone_golem/walk_2'),
+    walk3: assetUrl('monster/stone_golem/walk_3'),
+    walk4: assetUrl('monster/stone_golem/walk_4'),
+    attack: assetUrl('monster/stone_golem/attack'),
+    attack2: assetUrl('monster/stone_golem/attack'),
+    hit: assetUrl('monster/stone_golem/hit'),
     color: '#908070', glow: '#c0b0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0d0b0',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   lich: {
-    idle: assetUrl('DKPorAcX7s'),
-    walk: assetUrl('DKPorAcX7s'),
-    walk2: assetUrl('RiirQZ3fSV'),
-    walk3: assetUrl('MuVRCBrUzD'),
-    walk4: assetUrl('iQg6zyogEa'),
-    attack: assetUrl('JspSNdIB2O'),
-    attack2: assetUrl('A2ZjoB2Pki'),
-    hit: assetUrl('OgVGjrT6k0'),
+    idle: assetUrl('monster/lich/idle'),
+    walk: assetUrl('monster/lich/walk_1'),
+    walk2: assetUrl('monster/lich/walk_2'),
+    walk3: assetUrl('monster/lich/walk_3'),
+    walk4: assetUrl('monster/lich/walk_4'),
+    attack: assetUrl('monster/lich/attack'),
+    attack2: assetUrl('monster/lich/attack'),
+    hit: assetUrl('monster/lich/hit'),
     color: '#8040a0', glow: '#c080e0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0a0ff',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   cerberus: {
-    idle: assetUrl('0CytJl9tpO'),
-    walk: assetUrl('0CytJl9tpO'),
-    walk2: assetUrl('jbo4hVvFPI'),
-    walk3: assetUrl('gSqkzYpyr5'),
-    walk4: assetUrl('sWaRxnHrMT'),
-    attack: assetUrl('PGwtG4t9rj'),
-    attack2: assetUrl('EJZ0gbn982'),
-    hit: assetUrl('Dhbzw4B2uB'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#cc2200', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== 新增 8 帧怪物 ==========
   monster_hellhound: {
-    idle: assetUrl('QVsxMC7AXE'),
-    walk: assetUrl('QVsxMC7AXE'),
-    walk2: assetUrl('Y7D6wor5GO'),
-    walk3: assetUrl('h1SdH2HSwb'),
-    walk4: assetUrl('HtY7WUwH6y'),
-    attack: assetUrl('NckDHIlVdY'),
-    attack2: assetUrl('RCqUWJ5gFx'),
-    hit: assetUrl('Vb5KUo6sqn'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#301010', glow: '#ff4020', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff8040',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_braindevil: {
-    idle: assetUrl('sxV2RI2KMa'),
-    walk: assetUrl('sxV2RI2KMa'),
-    walk2: assetUrl('L2OBUHNdsg'),
-    walk3: assetUrl('GzLoOexBtC'),
-    walk4: assetUrl('VSwDVeboki'),
-    attack: assetUrl('HjiPNansZJ'),
-    attack2: assetUrl('FRwIj4bM49'),
-    hit: assetUrl('b3NpFiK4gt'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#8040a0', glow: '#d080ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0a0ff',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_direwolf: {
-    idle: assetUrl('ZUTg8LaVx4'),
-    walk: assetUrl('ZUTg8LaVx4'),
-    walk2: assetUrl('nbtEFlg5Ee'),
-    walk3: assetUrl('UjIVNyA3ms'),
-    walk4: assetUrl('f7yZo8ohJK'),
-    attack: assetUrl('1PRvT0IyUa'),
-    attack2: assetUrl('VudULCUxHn'),
-    hit: assetUrl('UKCZ9Ol81J'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#504030', glow: '#c0a060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffc060',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_scorpion: {
-    idle: assetUrl('clSORpgY8H'),
-    walk: assetUrl('clSORpgY8H'),
-    walk2: assetUrl('OQ155a7UgC'),
-    walk3: assetUrl('0qJFdwQwIA'),
-    walk4: assetUrl('GNZH2vsocJ'),
-    attack: assetUrl('UgIpBy6CPb'),
-    attack2: assetUrl('L8URoUC8Vs'),
-    hit: assetUrl('9evfx7AVO8'),
+    idle: assetUrl('monster/scorpion/idle'),
+    walk: assetUrl('monster/scorpion/walk_1'),
+    walk2: assetUrl('monster/scorpion/walk_2'),
+    walk3: assetUrl('monster/scorpion/walk_3'),
+    walk4: assetUrl('monster/scorpion/walk_4'),
+    attack: assetUrl('monster/scorpion/attack'),
+    attack2: assetUrl('monster/scorpion/attack'),
+    hit: assetUrl('monster/scorpion/hit'),
     color: '#a06020', glow: '#ff9040', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffb060',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_wraith: {
-    idle: assetUrl('ZhVGRF6Vtp'),
-    walk: assetUrl('ZhVGRF6Vtp'),
-    walk2: assetUrl('oLc2Dzb4Gp'),
-    walk3: assetUrl('pHCtLwxDf4'),
-    walk4: assetUrl('2UqZ9EqS9X'),
-    attack: assetUrl('ArU5iZorxO'),
-    attack2: assetUrl('tuLEUDjxSt'),
-    hit: assetUrl('CFc9nu0uVZ'),
+    idle: assetUrl('monster/ghost/idle'),
+    walk: assetUrl('monster/ghost/walk_1'),
+    walk2: assetUrl('monster/ghost/walk_2'),
+    walk3: assetUrl('monster/ghost/walk_3'),
+    walk4: assetUrl('monster/ghost/walk_4'),
+    attack: assetUrl('monster/ghost/attack'),
+    attack2: assetUrl('monster/ghost/attack'),
+    hit: assetUrl('monster/ghost/hit'),
     color: '#302040', glow: '#8060c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a080ff',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_gargoyle: {
-    idle: assetUrl('WFSp2Ctj4D'),
-    walk: assetUrl('WFSp2Ctj4D'),
-    walk2: assetUrl('i5XYfgjPDQ'),
-    walk3: assetUrl('nqRRU8MWNQ'),
-    walk4: assetUrl('UwvHjx0urh'),
-    attack: assetUrl('ndPzwGiddo'),
-    attack2: assetUrl('xmJHo2FGR6'),
-    hit: assetUrl('VbAUPUjQRw'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#606070', glow: '#a0a0c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0c0e0',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   // ========== 新增變身 8 帧（v2.6.2 改為本地真8幀） ==========
   demon_lord: {
@@ -2018,234 +2036,238 @@ const SPRITE = {
     slashColor: '#a0d0ff',
   },
   dragon: {
-    idle: assetUrl('9Do8Ov0n08'),
-    walk: assetUrl('9Do8Ov0n08'),
-    walk2: assetUrl('e6cVUaEb1W'),
-    walk3: assetUrl('AiYHpTKu8K'),
-    walk4: assetUrl('ResU9dONwj'),
-    attack: assetUrl('CHAU6a1OqQ'),
-    attack2: assetUrl('SqE44zEURU'),
-    hit: assetUrl('aOi6g9V9CR'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#cc3322', glow: '#ff6644', useImg: true, multiFrame: true, coverMode: true,
   },
   shaman: {
-    idle: assetUrl('UrxAO5gJZh'),
-    walk: assetUrl('UrxAO5gJZh'),
-    walk2: assetUrl('9tQUBUFncb'),
-    walk3: assetUrl('Z2xMHdIvFW'),
-    walk4: assetUrl('h6R9VB8C2D'),
-    attack: assetUrl('ok9EV5aDdb'),
-    attack2: assetUrl('292nQJbkml'),
-    hit: assetUrl('km8jUYM0xi'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#558833', glow: '#44ff44', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== Boss ==========
   bandit: {
-    idle: assetUrl('hy8Xjp5GAH'),
-    walk: assetUrl('hy8Xjp5GAH'),
-    walk2: assetUrl('CQZcKHDPUL'),
-    walk3: assetUrl('ZscZv5PG5H'),
-    walk4: assetUrl('MijY5iMyg7'),
-    attack: assetUrl('ahUJpmTMju'),
-    attack2: assetUrl('FEDzWUgVga'),
-    hit: assetUrl('aCANFoS5Gl'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#444444', glow: '#aaaaaa', useImg: true, multiFrame: true, coverMode: true,
   },
   zombie: {
-    idle: assetUrl('Oa7zNf9UFK'),
-    walk: assetUrl('Oa7zNf9UFK'),
-    walk2: assetUrl('iRA0DU1c1U'),
-    walk3: assetUrl('mlRsq3v4CR'),
-    walk4: assetUrl('4e21Sv8gty'),
-    attack: assetUrl('5Db9F0ZKN5'),
-    attack2: assetUrl('U6IJ8Cv32K'),
-    hit: assetUrl('dRz7qCVPik'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#668844', glow: '#88aa44', useImg: true, multiFrame: true, coverMode: true,
   },
   darkmage: {
-    idle: assetUrl('SWrInn0grd'),
-    walk: assetUrl('SWrInn0grd'),
-    walk2: assetUrl('V9DEE42h0u'),
-    walk3: assetUrl('86rJAUsBMa'),
-    walk4: assetUrl('6UTDEAFDC4'),
-    attack: assetUrl('hPGhoqXxrK'),
-    attack2: assetUrl('6q6TBuiWlt'),
-    hit: assetUrl('qN9sQGMUCq'),
+    idle: assetUrl('monster/lich/idle'),
+    walk: assetUrl('monster/lich/walk_1'),
+    walk2: assetUrl('monster/lich/walk_2'),
+    walk3: assetUrl('monster/lich/walk_3'),
+    walk4: assetUrl('monster/lich/walk_4'),
+    attack: assetUrl('monster/lich/attack'),
+    attack2: assetUrl('monster/lich/attack'),
+    hit: assetUrl('monster/lich/hit'),
     color: '#8844cc', glow: '#cc66ff', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== Boss ==========
   spider_queen: {
-    idle: assetUrl('wUbEJL0DQj'),
-    walk: assetUrl('wUbEJL0DQj'),
-    walk2: assetUrl('MqykB9GBTw'),
-    walk3: assetUrl('4EULJzSSlr'),
-    walk4: assetUrl('0Kft2Gw701'),
-    attack: assetUrl('RzttyT1vnA'),
-    attack2: assetUrl('2t7NaIE7tA'),
-    hit: assetUrl('kKsYi20tlC'),
+    idle: assetUrl('monster/spider/idle'),
+    walk: assetUrl('monster/spider/walk_1'),
+    walk2: assetUrl('monster/spider/walk_2'),
+    walk3: assetUrl('monster/spider/walk_3'),
+    walk4: assetUrl('monster/spider/walk_4'),
+    attack: assetUrl('monster/spider/attack'),
+    attack2: assetUrl('monster/spider/attack'),
+    hit: assetUrl('monster/spider/hit'),
     color: '#6622aa', glow: '#aa44ff', useImg: true, multiFrame: true, coverMode: true,
   },
   lava_golem: {
-    idle: assetUrl('HUp2dsmzpG'),
-    walk: assetUrl('HUp2dsmzpG'),
-    walk2: assetUrl('MgoybTkwZ6'),
-    walk3: assetUrl('oUaxg5EX4u'),
-    walk4: assetUrl('32iobvZMDR'),
-    attack: assetUrl('qUQX6lr47u'),
-    attack2: assetUrl('jomDSXKJlp'),
-    hit: assetUrl('41VYP0XKXm'),
+    idle: assetUrl('monster/stone_golem/idle'),
+    walk: assetUrl('monster/stone_golem/walk_1'),
+    walk2: assetUrl('monster/stone_golem/walk_2'),
+    walk3: assetUrl('monster/stone_golem/walk_3'),
+    walk4: assetUrl('monster/stone_golem/walk_4'),
+    attack: assetUrl('monster/stone_golem/attack'),
+    attack2: assetUrl('monster/stone_golem/attack'),
+    hit: assetUrl('monster/stone_golem/hit'),
     color: '#cc4400', glow: '#ff8800', useImg: true, multiFrame: true, coverMode: true,
   },
   bone_dragon: {
-    idle: assetUrl('db3YKTmL82'),
-    walk: assetUrl('db3YKTmL82'),
-    walk2: assetUrl('tT2bGXfVAt'),
-    walk3: assetUrl('P7mvta9pXb'),
-    walk4: assetUrl('e37AqKOKFL'),
-    attack: assetUrl('UIhYxdZIV4'),
-    attack2: assetUrl('N3Oo4VTI1q'),
-    hit: assetUrl('2oWLq4vXlG'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#ccccaa', glow: '#66ddff', useImg: true, multiFrame: true, coverMode: true,
   },
   griffin: {
-    idle: assetUrl('VAWDvwJJu2'),
-    walk: assetUrl('VAWDvwJJu2'),
-    walk2: assetUrl('qOZI7NIdhG'),
-    walk3: assetUrl('W3swxk3OAM'),
-    walk4: assetUrl('spjSIXLSiv'),
-    attack: assetUrl('wtVX2EX1W9'),
-    attack2: assetUrl('wS6Zm0HXjw'),
-    hit: assetUrl('AudVTivqvo'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#dd9922', glow: '#ffcc44', useImg: true, multiFrame: true, coverMode: true,
   },
   chimera: {
-    idle: assetUrl('tUaY3UCxsD'),
-    walk: assetUrl('tUaY3UCxsD'),
-    walk2: assetUrl('isJ78s37eH'),
-    walk3: assetUrl('AUb3VXl0Qy'),
-    walk4: assetUrl('mfvvD9NaVO'),
-    attack: assetUrl('VTiQzea4Rm'),
-    attack2: assetUrl('CIxe6TrTWl'),
-    hit: assetUrl('aqedAEKlp6'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#333333', glow: '#ff6622', useImg: true, multiFrame: true, coverMode: true,
   },
   hydra: {
-    idle: assetUrl('930N2UUgHS'),
-    walk: assetUrl('930N2UUgHS'),
-    walk2: assetUrl('iucIEoCrcU'),
-    walk3: assetUrl('omtqjxhzdX'),
-    walk4: assetUrl('gpjTvUFuXy'),
-    attack: assetUrl('QBG6VLKJN8'),
-    attack2: assetUrl('4eRQoBplQY'),
-    hit: assetUrl('nt1sPXaTHe'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#338833', glow: '#66ff44', useImg: true, multiFrame: true, coverMode: true,
   },
   naga: {
-    idle: assetUrl('XuUqNLGiQv'),
-    walk: assetUrl('XuUqNLGiQv'),
-    walk2: assetUrl('mRBvVrhlWs'),
-    walk3: assetUrl('XvP3MIcdio'),
-    walk4: assetUrl('B7CVTe4x0z'),
-    attack: assetUrl('t7LvPGwoxg'),
-    attack2: assetUrl('Q3tRQvOOgA'),
-    hit: assetUrl('oVatgTEF4i'),
+    idle: assetUrl('monster/lizardman/idle'),
+    walk: assetUrl('monster/lizardman/walk_1'),
+    walk2: assetUrl('monster/lizardman/walk_2'),
+    walk3: assetUrl('monster/lizardman/walk_3'),
+    walk4: assetUrl('monster/lizardman/walk_4'),
+    attack: assetUrl('monster/lizardman/attack'),
+    attack2: assetUrl('monster/lizardman/attack'),
+    hit: assetUrl('monster/lizardman/hit'),
     color: '#338866', glow: '#44ffaa', useImg: true, multiFrame: true, coverMode: true,
   },
   armored_bear: {
-    idle: assetUrl('hmpB2nomb5'),
-    walk: assetUrl('hmpB2nomb5'),
-    walk2: assetUrl('DfBHVDQWHG'),
-    walk3: assetUrl('yAMXkNx3dg'),
-    walk4: assetUrl('FVI72L2SIo'),
-    attack: assetUrl('boDcUh2M8E'),
-    attack2: assetUrl('U3cuZTf5WT'),
-    hit: assetUrl('Nj49Ur4BtB'),
+    idle: assetUrl('monster/orc/idle'),
+    walk: assetUrl('monster/orc/walk_1'),
+    walk2: assetUrl('monster/orc/walk_2'),
+    walk3: assetUrl('monster/orc/walk_3'),
+    walk4: assetUrl('monster/orc/walk_4'),
+    attack: assetUrl('monster/orc/attack'),
+    attack2: assetUrl('monster/orc/attack'),
+    hit: assetUrl('monster/orc/hit'),
     color: '#885522', glow: '#ffaa44', useImg: true, multiFrame: true, coverMode: true,
   },
   kraken: {
-    idle: assetUrl('WD439eGaFU'),
-    walk: assetUrl('WD439eGaFU'),
-    walk2: assetUrl('IainVVfq3F'),
-    walk3: assetUrl('1YUXX26uiA'),
-    walk4: assetUrl('jNM4KI8ia2'),
-    attack: assetUrl('RCdDqMVfE5'),
-    attack2: assetUrl('NHFUFVv4Vs'),
-    hit: assetUrl('eAGGLx6phH'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#552288', glow: '#9944ff', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_orc: {
-    idle: assetUrl('fvPYGckiQc'),
-    walk: assetUrl('fvPYGckiQc'),
-    walk2: assetUrl('Yz4l2QxCxp'),
-    walk3: assetUrl('TZ0P76Cllb'),
-    walk4: assetUrl('CPUrKw4Hol'),
-    attack: assetUrl('qjNBrcFMWq'),
-    attack2: assetUrl('qBmed9uuoE'),
-    hit: assetUrl('5r13VWiPU7'),
+    idle: assetUrl('monster/orc/idle'),
+    walk: assetUrl('monster/orc/walk_1'),
+    walk2: assetUrl('monster/orc/walk_2'),
+    walk3: assetUrl('monster/orc/walk_3'),
+    walk4: assetUrl('monster/orc/walk_4'),
+    attack: assetUrl('monster/orc/attack'),
+    attack2: assetUrl('monster/orc/attack'),
+    hit: assetUrl('monster/orc/hit'),
     color: '#558833', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_demon: {
-    idle: assetUrl('UfgjsaYUoz'),
-    walk: assetUrl('UfgjsaYUoz'),
-    walk2: assetUrl('HcRMhunYY3'),
-    walk3: assetUrl('mfoJtk6O9p'),
-    walk4: assetUrl('Up2bmaIU99'),
-    attack: assetUrl('ICVHEO0qCP'),
-    attack2: assetUrl('6oppkux3K5'),
-    hit: assetUrl('R1gVGe51Fb'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#cc2200', glow: '#ff6600', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_dragon: {
-    idle: assetUrl('o1qWUrCATh'),
-    walk: assetUrl('o1qWUrCATh'),
-    walk2: assetUrl('g3Irrwx4oq'),
-    walk3: assetUrl('jJaVDoXIZ2'),
-    walk4: assetUrl('CnUAPsRzlA'),
-    attack: assetUrl('Fr4eqGqBd6'),
-    attack2: assetUrl('mXwLa8wNlS'),
-    hit: assetUrl('1wgGAVd8JU'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#e09010', glow: '#ffc040', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffd060',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   boss_death_knight: {
-    idle: assetUrl('7FnWRqmp3O'),
-    walk: assetUrl('7FnWRqmp3O'),
-    walk2: assetUrl('U8U8zD5mQY'),
-    walk3: assetUrl('x0ngk7iSES'),
-    walk4: assetUrl('aPOtgxIgss'),
-    attack: assetUrl('KRVgdmZdqh'),
-    attack2: assetUrl('B1oZEnBt4W'),
-    hit: assetUrl('eqsOwvfx7E'),
+    idle: assetUrl('monster/skeleton/idle'),
+    walk: assetUrl('monster/skeleton/walk_1'),
+    walk2: assetUrl('monster/skeleton/walk_2'),
+    walk3: assetUrl('monster/skeleton/walk_3'),
+    walk4: assetUrl('monster/skeleton/walk_4'),
+    attack: assetUrl('monster/skeleton/attack'),
+    attack2: assetUrl('monster/skeleton/attack'),
+    hit: assetUrl('monster/skeleton/hit'),
     color: '#404060', glow: '#8080c0', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0c0ff',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   boss_baphomet: {
-    idle: assetUrl('B5UzjmgzgT'),
-    walk: assetUrl('B5UzjmgzgT'),
-    walk2: assetUrl('rCZVzIR4DM'),
-    walk3: assetUrl('DsZs2wdjX8'),
-    walk4: assetUrl('FvmW2tQuUr'),
-    attack: assetUrl('fXcREvAk5H'),
-    attack2: assetUrl('49gZhlUxoM'),
-    hit: assetUrl('9aUL4o7j9K'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#602040', glow: '#ff5080', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff80a0',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   boss_demon_lord: {
-    idle: assetUrl('MQbYJyKtqK'),
-    walk: assetUrl('MQbYJyKtqK'),
-    walk2: assetUrl('daKfmMOKiL'),
-    walk3: assetUrl('H0oH4yS5iQ'),
-    walk4: assetUrl('HfzbqxNOUp'),
-    attack: assetUrl('wltQkklEoZ'),
-    attack2: assetUrl('OYdq2KLrpQ'),
-    hit: assetUrl('7YUd2dOZDc'),
+    idle: assetUrl('monster/demon/idle'),
+    walk: assetUrl('monster/demon/walk_1'),
+    walk2: assetUrl('monster/demon/walk_2'),
+    walk3: assetUrl('monster/demon/walk_3'),
+    walk4: assetUrl('monster/demon/walk_4'),
+    attack: assetUrl('monster/demon/attack'),
+    attack2: assetUrl('monster/demon/attack'),
+    hit: assetUrl('monster/demon/hit'),
     color: '#a01010', glow: '#ff3030', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff5050',
+    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   // ========== NPC ==========
   // ========== NPC 8 幀完整動畫 ==========
@@ -5791,16 +5813,48 @@ const EQUIP_ICON_MAP = {
   accessory:assetUrl('equip/icon_ring_white.jpg'),
 };
 
-// 道具/消耗品圖標（v2.4.0：新語意路徑 assets/item/icon_*.jpg）
+// 道具/消耗品圖標（v2.7.7：全面重製，天堂W寫實風、每種道具獨特識別）
 const ITEM_ICON_MAP = {
-  potion_hp: assetUrl('item/icon_potion_hp.jpg'),
-  potion_mp: assetUrl('item/icon_potion_mp.jpg'),
-  scroll:    assetUrl('item/icon_scroll.jpg'),
-  gem:       assetUrl('item/icon_gem_ruby.jpg'),
-  enhance:   assetUrl('item/icon_gem_ruby.jpg'),
-  gold:      assetUrl('item/icon_gold_coin.jpg'),
-  diamond:   assetUrl('item/icon_gem_ruby.jpg'),
-  default:   assetUrl('item/icon_gem_ruby.jpg'),
+  // 藥水系列
+  potion_hp:          assetUrl('item/icon_potion_hp.jpg'),
+  potion_mp:          assetUrl('item/icon_potion_mp.jpg'),
+  potion_green:       assetUrl('item/icon_potion_green.jpg'),
+  potion_orange:      assetUrl('item/icon_potion_orange.jpg'),
+  // 卷軸系列
+  scroll:             assetUrl('item/icon_scroll.jpg'),
+  teleport_scroll:    assetUrl('item/icon_teleport_scroll.jpg'),
+  revive_scroll:      assetUrl('item/icon_revive_scroll.jpg'),
+  quest_scroll:       assetUrl('item/icon_quest_scroll.jpg'),
+  bag_scroll:         assetUrl('item/icon_bag_scroll.jpg'),
+  enhance_scroll:     assetUrl('item/icon_enhance_scroll.jpg'),
+  probability_scroll: assetUrl('item/icon_probability_scroll.jpg'),
+  // 寶石系列
+  gem:                assetUrl('item/icon_gem_ruby.jpg'),
+  gem_ruby:           assetUrl('item/icon_gem_ruby.jpg'),
+  gem_sapphire:       assetUrl('item/icon_gem_sapphire.jpg'),
+  gem_emerald:        assetUrl('item/icon_gem_emerald.jpg'),
+  gem_amethyst:       assetUrl('item/icon_gem_amethyst.jpg'),
+  diamond:            assetUrl('item/icon_gem_sapphire.jpg'),
+  enhance:            assetUrl('item/icon_enhance_stone.jpg'),
+  enhance_stone:      assetUrl('item/icon_enhance_stone.jpg'),
+  soul_gem:           assetUrl('item/icon_soul_gem.jpg'),
+  crystal_shard:      assetUrl('item/icon_crystal_shard.jpg'),
+  // 寶箱
+  chest:              assetUrl('item/icon_chest.jpg'),
+  chest_open:         assetUrl('item/icon_chest_open.jpg'),
+  // 貨幣 / 材料
+  gold:               assetUrl('item/icon_gold_coin.jpg'),
+  gold_coin:          assetUrl('item/icon_gold_coin.jpg'),
+  dragon_scale:       assetUrl('item/icon_dragon_scale.jpg'),
+  dungeon_key:        assetUrl('item/icon_dungeon_key.jpg'),
+  monster_eye:        assetUrl('item/icon_monster_eye.jpg'),
+  bless_stone:        assetUrl('item/icon_bless_stone.jpg'),
+  // 書籍 / 體驗券
+  ancient_book:       assetUrl('item/icon_ancient_book.jpg'),
+  true_death_coupon:  assetUrl('item/icon_true_death_coupon.jpg'),
+  transform_coupon:   assetUrl('item/icon_true_death_coupon.jpg'),
+  // fallback
+  default:            assetUrl('item/icon_gem_ruby.jpg'),
 };
 
 // 取得裝備圖標 URL（按類型，白色品質預設；推薦使用 getEquipRarityIcon(type, rarity)）
@@ -6420,7 +6474,7 @@ function loadGameFromSlot(idx) {
 function applySaveData(data) {
   if (!data || typeof data !== 'object') return false;
   SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
-  // v2.7.6：完整性校驗 — 防止損壞存檔把關鍵欄位覆蓋成 null/undefined
+  // v2.7.7：完整性校驗 — 防止損壞存檔把關鍵欄位覆蓋成 null/undefined
   if (!GS.player || typeof GS.player !== 'object') {
     console.warn('[存檔] player 欄位損壞，已恢復預設值');
     GS.player = {
@@ -6502,7 +6556,7 @@ function updateMultiplayerStatus(status) {
   const txt = document.getElementById('mp-status-text');
   const btn = document.getElementById('mp-connect-btn');
   const s = status || S.OFFLINE;
-  // v2.7.6：讀取傳輸方式與失敗原因（WebSocket / Long-Poll）
+  // v2.7.7：讀取傳輸方式與失敗原因（WebSocket / Long-Poll）
   const transport = (window.MultiplayerClient && MultiplayerClient.transport) || '';
   const wsReason = (window.MultiplayerClient && MultiplayerClient.wsFailureReason) || '';
   // 狀態點
@@ -6763,7 +6817,7 @@ function _initCore() {
       console.log('[Init] assets-manifest 已就緒，刷新圖片路徑中...');
       try {
         // 重新載入當前地圖背景、玩家精靈、NPC 精靈等
-        // v2.7.6：manifest 非同步回呼可能在 __resetGameState 之後到達，增加 GS.player 防衛
+        // v2.7.7：manifest 非同步回呼可能在 __resetGameState 之後到達，增加 GS.player 防衛
         if (GS.currentMap && sceneBg && GS.player) loadMap(GS.currentMap);
         refreshAllSprites();
       } catch (e) { console.warn('[Init] manifest 載入後刷新失敗:', e); }
@@ -12718,7 +12772,7 @@ function positionUnit(el, x, y, kind) {
 }
 
 function renderPlayer() {
-  if (!GS.player) return; // v2.7.6：null 防衛
+  if (!GS.player) return; // v2.7.7：null 防衛
   const p = GS.player;
   // 玩家始終在 worldLayer 中
   const parent = worldLayer;
@@ -12789,7 +12843,7 @@ function loadMap(mapId) {
   const map = allMaps[mapId];
   if (!map) return;
 
-  // v2.7.6：GS.player 為 null 時緊急恢復預設值，避免 null.x 崩潰
+  // v2.7.7：GS.player 為 null 時緊急恢復預設值，避免 null.x 崩潰
   //  可能觸發原因：__resetGameState 後 manifest 非同步回呼、損壞存檔、切換角色競態
   if (!GS.player) {
     console.warn('[loadMap] GS.player 為 null，已恢復預設值（map=' + mapId + '）');
@@ -12802,7 +12856,7 @@ function loadMap(mapId) {
       transformId: null, buffs: {},
     };
   }
-  // v2.7.6：確保 aiPlayers / monsters 陣列存在（null 會導致 forEach 崩潰）
+  // v2.7.7：確保 aiPlayers / monsters 陣列存在（null 會導致 forEach 崩潰）
   if (!Array.isArray(GS.aiPlayers)) GS.aiPlayers = [];
   if (!Array.isArray(GS.monsters)) GS.monsters = [];
 
@@ -12831,7 +12885,7 @@ function loadMap(mapId) {
   if (el.minimapTitle) el.minimapTitle.textContent = map.name;
 
   // 清空AI玩家DOM（彻底清除旧地图AI，避免残留死图）
-  // v2.7.6：過濾 null/undefined 元素，防止陣列中有空洞時崩潰
+  // v2.7.7：過濾 null/undefined 元素，防止陣列中有空洞時崩潰
   if (Array.isArray(GS.aiPlayers)) {
     GS.aiPlayers.forEach(ai => { if (ai && ai.el) { ai.el.remove(); ai.el = null; } });
   }
@@ -26392,7 +26446,7 @@ window._setServerInstanceId = function(id) {
  */
 window.setServerAIs = function(ais, serverId, mapId) {
   if (!ais || !Array.isArray(ais)) return;
-  // v2.7.6：過濾 null/undefined 元素，避免伺服器廣播異常導致客戶端崩潰
+  // v2.7.7：過濾 null/undefined 元素，避免伺服器廣播異常導致客戶端崩潰
   const validAis = ais.filter(a => a && typeof a === 'object' && a.id);
   _serverAIActive = true;
   _offlineMode = false;
@@ -26419,6 +26473,12 @@ let _lastServerAICount = 0;
  */
 function renderServerAIsToWorld(ais) {
   if (!worldLayer) return;
+
+  // v2.7.7：修復 AI:local 根因 —  validAis 從未在函式內定義，導致 ReferenceError
+  //  進而讓伺服器 AI 永遠無法渲染，指示器一直顯示 AI:local
+  const validAis = (ais && Array.isArray(ais))
+    ? ais.filter(a => a && typeof a === 'object' && a.id)
+    : [];
 
   // v2.7.5：計算快照hash（只看 id+數量），相同則增量更新位置/HP即可
   const curIds = validAis.map(a => a.id).sort().join(',');
@@ -27106,13 +27166,20 @@ if (typeof dealDamageToAIPlayer === 'function') {
     const color = getTransportColor(tr);
     let sid = '-', mid = '-', aiSrc = 'local', aiCount = 0, iid = '-';
     let wsFailReason = '';
+    let isOffline = false;
+    let serverLabel = '';
     try {
       if (window.MultiplayerClient) {
         sid = MultiplayerClient.serverId || '-';
         mid = MultiplayerClient.mapId || '-';
         wsFailReason = MultiplayerClient.wsFailureReason || MultiplayerClient.getWsFailureReason?.() || '';
+        isOffline = MultiplayerClient.transport === 'offline' || MultiplayerClient.status === 'offline';
       }
-      if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
+      // v2.7.7：離線狀態用明顯紅色標示，不顯示 AI:local 以免誤以為在線
+      if (isOffline) {
+        aiSrc = 'offline';
+        aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
+      } else if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
         aiSrc = 'server';
         aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
       } else {
@@ -27120,12 +27187,40 @@ if (typeof dealDamageToAIPlayer === 'function') {
         aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
       }
       if (typeof _serverInstanceId !== 'undefined') iid = (_serverInstanceId || '-').slice(0, 8);
+      // 伺服器名稱縮寫（zeus → ZEUS 全大寫）
+      if (sid && sid !== '-') serverLabel = sid.toUpperCase().slice(0, 8);
+      else serverLabel = '-';
     } catch(e) {}
+
+    // v2.7.7：一眼區分 — 傳輸協定(WS/LP/OFF) + 伺服器 + AI來源(server/local/offline) + AI數量
     const trLabel = tr === 'websocket' ? 'WS' : (tr === 'longpoll' ? 'LP' : 'OFF');
-    ind.innerHTML = '<span style="color:' + color + ';font-weight:700">' + trLabel + '</span> · ' + sid + '/' + mid + ' · AI:' + aiSrc + '(' + aiCount + ')' + ' · <span style="opacity:0.6">' + iid + '</span>';
-    let tooltip = '連線狀態：' + tr + '\n伺服器：' + sid + '\n地圖：' + mid + '\nAI來源：' + aiSrc + ' / ' + aiCount + ' 個';
+    const trColor = color;
+    // AI 來源顏色：server 綠 / local 黃 / offline 紅
+    let aiColor = '#ffd040';
+    if (aiSrc === 'server') aiColor = '#50ff80';
+    else if (aiSrc === 'offline') aiColor = '#ff6060';
+    const aiLabel = aiSrc === 'server' ? 'AI:SVR' : (aiSrc === 'offline' ? 'AI:OFF' : 'AI:LOC');
+
+    ind.innerHTML =
+      '<span style="color:' + trColor + ';font-weight:700">' + trLabel + '</span>' +
+      '<span style="opacity:0.4">·</span>' +
+      '<span style="color:#d4af37">' + serverLabel + '</span>' +
+      '<span style="opacity:0.4">·</span>' +
+      '<span style="color:' + aiColor + ';font-weight:600">' + aiLabel + '(' + aiCount + ')</span>' +
+      '<span style="opacity:0.4">·</span>' +
+      '<span style="opacity:0.6">' + iid + '</span>';
+
+    let tooltip =
+      '連線傳輸：' + tr + '\n' +
+      '伺服器：' + sid + '\n' +
+      '地圖：' + mid + '\n' +
+      'AI 來源：' + aiSrc + '（' + aiCount + ' 個）\n' +
+      '實例：' + iid;
     if (wsFailReason && tr !== 'websocket') {
       tooltip += '\n\nWebSocket 失敗原因：\n' + wsFailReason;
+    }
+    if (isOffline) {
+      tooltip += '\n\n⚠ 離線模式：所有 AI 為本地生成，\n   不會與其他玩家同步。';
     }
     ind.title = tooltip;
   }
