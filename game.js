@@ -21442,10 +21442,10 @@ function renderShopPage() {
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
               <!-- 數量選擇器：− 數量 + MAX -->
               <div class="shop-qty-row" style="display:flex;align-items:center;gap:0;overflow:hidden;border-radius:6px;border:1px solid var(--gold-dark);background:rgba(0,0,0,0.4)">
-                <button class="shop-qty-btn minus" data-shop-qty="minus:${item.id}" style="width:32px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:18px;cursor:pointer;font-weight:700;line-height:1">−</button>
-                <span class="shop-qty-num" style="width:44px;text-align:center;font-size:15px;font-weight:700;color:var(--parchment-light);background:rgba(0,0,0,0.3);height:28px;display:flex;align-items:center;justify-content:center;border-right:1px solid rgba(240,192,64,0.2)">${qty}</span>
-                <button class="shop-qty-btn plus" data-shop-qty="plus:${item.id}" style="width:32px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:18px;cursor:pointer;font-weight:700;line-height:1">+</button>
-                <button class="shop-qty-btn max" data-shop-qty="max:${item.id}" style="padding:0 10px;height:28px;background:linear-gradient(180deg, rgba(100,70,30,0.9), rgba(60,40,15,0.95));border:none;color:var(--gold-bright);font-size:12px;cursor:pointer;font-weight:700;letter-spacing:1px">MAX</button>
+                <button class="shop-qty-btn minus" data-shop-qty="minus:${item.id}" style="width:28px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:16px;cursor:pointer;font-weight:700;line-height:1">−</button>
+                <input class="shop-qty-input" data-shop-qty-input="${item.id}" type="text" inputmode="numeric" value="${qty}" min="1" max="999" style="width:42px;text-align:center;font-size:14px;font-weight:700;color:var(--parchment-light);background:rgba(0,0,0,0.5);height:28px;border:none;border-right:1px solid rgba(240,192,64,0.2);outline:none;padding:0"/>
+                <button class="shop-qty-btn plus" data-shop-qty="plus:${item.id}" style="width:28px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:16px;cursor:pointer;font-weight:700;line-height:1">+</button>
+                <button class="shop-qty-btn max" data-shop-qty="max:${item.id}" style="padding:0 8px;height:28px;background:linear-gradient(180deg, rgba(100,70,30,0.9), rgba(60,40,15,0.95));border:none;color:var(--gold-bright);font-size:11px;cursor:pointer;font-weight:700;letter-spacing:1px">MAX</button>
               </div>
               <!-- 購買按鈕 -->
               ${isLimitedBought
@@ -21741,59 +21741,101 @@ function bindPageEvents(page) {
     el.pageContent.querySelectorAll('[data-buy-id]').forEach(btn => {
       btn.addEventListener('click', () => handleShopBuy(btn.dataset.buyId, btn.dataset.buyTab, Number(btn.dataset.buyQty) || 1));
     });
-    // 數量選擇器
+    // 數量選擇器按鈕（− / + / MAX）
     el.pageContent.querySelectorAll('[data-shop-qty]').forEach(btn => {
       btn.addEventListener('click', () => {
         const [action, itemId] = btn.dataset.shopQty.split(':');
         if (!GS.shopQty) GS.shopQty = {};
         let qty = GS.shopQty[itemId] || 1;
-        if (action === 'plus') qty = Math.min(99, qty + 1);
+        const tab = btn.closest('.shop-item-row')?.querySelector('[data-buy-id]')?.dataset.buyTab || 'consumable';
+        const priceInfo = _getShopPriceInfo(itemId, tab);
+        const isGem = priceInfo?.currency === 'gem';
+        const balance = isGem ? (GS.resources?.gem || 0) : (GS.resources?.gold || 0);
+        const maxByMoney = priceInfo && priceInfo.price > 0 ? Math.max(1, Math.floor(balance / priceInfo.price)) : 99;
+        const maxQty = Math.min(999, Math.max(1, maxByMoney));
+        if (action === 'plus') qty = Math.min(maxQty, qty + 1);
         else if (action === 'minus') qty = Math.max(1, qty - 1);
-        else if (action === 'max') qty = 99;
-        GS.shopQty[itemId] = qty;
-        // 只刷新該行，而非整頁
-        const row = btn.closest('.shop-item-row');
-        const qtyEl = row?.querySelector('.shop-qty-num');
-        if (qtyEl) qtyEl.textContent = qty;
-        const buyBtn = row?.querySelector('[data-buy-id]');
-        if (buyBtn) {
-          buyBtn.dataset.buyQty = qty;
-          // 取得價格並重新計算
-          const tab = buyBtn.dataset.buyTab;
-          const shopItems = {
-            consumable: [
-              { id: 'hp1', price: 50 }, { id: 'hp2', price: 200 }, { id: 'hp4', price: 500 },
-              { id: 'mp1', price: 75 }, { id: 'mp2', price: 250 }, { id: 'mp4', price: 800 },
-              { id: 'spd1', price: 400 }, { id: 'spd2', price: 50, currency: 'gem' }, { id: 'move1', price: 200 },
-              { id: 'mgem', price: 1000 }, { id: 'town_scroll', price: 500 },
-              { id: 'enhance_stone_low', price: 5000 }, { id: 'enhance_stone_mid', price: 50, currency: 'gem' },
-              { id: 'enhance_stone_high', price: 200, currency: 'gem' },
-              { id: 'enhance_scroll', price: ENHANCE_SCROLL_PRICE },
-            ],
-            gem: [
-              { id: 'exp_potion', price: 120, currency: 'gem' },
-              { id: 'gold_pouch', price: 100, currency: 'gem' },
-              { id: 'enhance_ticket', price: ENHANCE_TICKET_COST, currency: 'gem' },
-              { id: 'mgem_gem', price: 150, currency: 'gem' },
-              { id: 'exp_boost_scroll', price: 100, currency: 'gem' },
-              { id: 'drop_boost_scroll', price: 100, currency: 'gem' },
-              { id: 'mystery_chest', price: 100, currency: 'gem' },
-              { id: 'revive_gem', price: 50, currency: 'gem' },
-              { id: 'bag_expand', price: 100, currency: 'gem' },
-              { id: 'enhance_boost_scroll', price: ENHANCE_BOOST_SCROLL_PRICE, currency: 'gem' },
-            ],
-            equip: [
-              { id: 'w1', price: 5000 },
-            ],
-          };
-          const tabItems = shopItems[tab] || [];
-          const target = tabItems.find(x => x.id === itemId);
-          if (target) {
-            buyBtn.textContent = `購買 ${(target.price * qty).toLocaleString()}`;
-          }
-        }
+        else if (action === 'max') qty = maxQty;
+        _updateShopQtyRow(btn, itemId, qty);
       });
     });
+    // 數量輸入框：直接鍵入
+    el.pageContent.querySelectorAll('[data-shop-qty-input]').forEach(input => {
+      input.addEventListener('input', () => {
+        const itemId = input.dataset.shopQtyInput;
+        let val = parseInt(input.value.replace(/\D/g, ''));
+        if (isNaN(val) || val < 1) val = 1;
+        if (val > 999) val = 999;
+        if (!GS.shopQty) GS.shopQty = {};
+        GS.shopQty[itemId] = val;
+        _updateShopQtyRow(input, itemId, val);
+      });
+      input.addEventListener('blur', () => {
+        const itemId = input.dataset.shopQtyInput;
+        const qty = GS.shopQty?.[itemId] || 1;
+        input.value = qty;
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      });
+    });
+  }
+
+  // v2.7.8：商店輔助函數
+  function _getShopPriceInfo(itemId, tab) {
+    const shopItems = {
+      consumable: [
+        { id: 'hp1', price: 50 }, { id: 'hp2', price: 200 }, { id: 'hp4', price: 500 },
+        { id: 'mp1', price: 75 }, { id: 'mp2', price: 250 }, { id: 'mp4', price: 800 },
+        { id: 'spd1', price: 400 }, { id: 'spd2', price: 50, currency: 'gem' }, { id: 'move1', price: 200 },
+        { id: 'mgem', price: 1000 }, { id: 'town_scroll', price: 500 },
+        { id: 'enhance_stone_low', price: 5000 }, { id: 'enhance_stone_mid', price: 50, currency: 'gem' },
+        { id: 'enhance_stone_high', price: 200, currency: 'gem' },
+        { id: 'enhance_scroll', price: ENHANCE_SCROLL_PRICE },
+      ],
+      gem: [
+        { id: 'exp_potion', price: 120, currency: 'gem' },
+        { id: 'gold_pouch', price: 100, currency: 'gem' },
+        { id: 'enhance_ticket', price: ENHANCE_TICKET_COST, currency: 'gem' },
+        { id: 'mgem_gem', price: 150, currency: 'gem' },
+        { id: 'exp_boost_scroll', price: 100, currency: 'gem' },
+        { id: 'drop_boost_scroll', price: 100, currency: 'gem' },
+        { id: 'mystery_chest', price: 100, currency: 'gem' },
+        { id: 'revive_gem', price: 50, currency: 'gem' },
+        { id: 'bag_expand', price: 100, currency: 'gem' },
+        { id: 'enhance_boost_scroll', price: ENHANCE_BOOST_SCROLL_PRICE, currency: 'gem' },
+      ],
+      equip: [{ id: 'w1', price: 5000 }],
+    };
+    return (shopItems[tab] || []).find(x => x.id === itemId);
+  }
+
+  function _updateShopQtyRow(el, itemId, qty) {
+    const row = el.closest('.shop-item-row');
+    const inputEl = row?.querySelector('.shop-qty-input');
+    if (inputEl) inputEl.value = qty;
+    const buyBtn = row?.querySelector('[data-buy-id]');
+    if (buyBtn) {
+      buyBtn.dataset.buyQty = qty;
+      const tab = buyBtn.dataset.buyTab;
+      const info = _getShopPriceInfo(itemId, tab);
+      if (info) {
+        const total = info.price * qty;
+        const isGem = info.currency === 'gem';
+        const balance = isGem ? (GS.resources?.gem || 0) : (GS.resources?.gold || 0);
+        const cannotAfford = total > balance;
+        const currencyLabel = isGem ? '💎' : '💰';
+        buyBtn.innerHTML = `<span>${currencyLabel}</span><span>${total.toLocaleString()}</span>`;
+        buyBtn.disabled = cannotAfford;
+        if (cannotAfford) {
+          buyBtn.style.opacity = '0.5';
+          buyBtn.style.cursor = 'not-allowed';
+        } else {
+          buyBtn.style.opacity = '1';
+          buyBtn.style.cursor = 'pointer';
+        }
+      }
+    }
   }
 
   if (page === 'bag') {
@@ -22096,7 +22138,7 @@ function handleShopBuy(id, tab, qty = 1) {
     } else if (id === 'bag_expand') {
       const curMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
       const canAdd = Math.min(qty, BAG_MAX_SLOTS - curMax);
-      if (canAdd <= 0) { alert('背包已達最大容量'); return; }
+      if (canAdd <= 0) { showToast('背包已達最大容量', 'error'); return; }
       buyGemItem(100 * canAdd, () => {
         GS.bagMaxSlots = curMax + canAdd;
         addLog('shop', `購買背包擴充卷 ×${canAdd}，容量 ${curMax} → ${curMax + canAdd}`);
@@ -22109,7 +22151,7 @@ function handleShopBuy(id, tab, qty = 1) {
       });
     } else if (id === 'true_death_pack') {
       // 限購1次檢查
-      if (GS.boughtTrueDeathPack) { alert('此商品僅限購買1次'); return; }
+      if (GS.boughtTrueDeathPack) { showToast('此商品僅限購買1次', 'error'); return; }
       buyGemItem(3000, () => {
         GS.boughtTrueDeathPack = true;
         const tickets = [
@@ -22157,7 +22199,7 @@ function handleShopBuy(id, tab, qty = 1) {
     const def = itemDefs[id];
     if (!def) { addLog('system', '未知商品'); return; }
     const totalPrice = def.price * qty;
-    if (GS.resources.gold < totalPrice) { alert('金幣不足'); return; }
+    if (GS.resources.gold < totalPrice) { showToast('金幣不足，無法購買', 'error'); return; }
     // 檢查背包容量
     const curBagCount = GS.inventory.length;
     const bagMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
@@ -22185,7 +22227,7 @@ function handleShopBuy(id, tab, qty = 1) {
       count: qty, effect: def.effect || {},
     }, qty);
     if (!added) {
-      alert('背包已滿，無法購買');
+      showToast('背包已滿，無法購買', 'error');
       return;
     }
     GS.resources.gold -= totalPrice;
@@ -22199,6 +22241,7 @@ function handleShopBuy(id, tab, qty = 1) {
       }
     }
     addLog('shop', `購買了【${def.name}】 ×${qty}`);
+    showToast(`購買成功：${def.name} ×${qty}（花費 ${totalPrice.toLocaleString()} 金幣）`, 'success');
   } else if (tab === 'equip') {
     // 裝備商店：真實購買邏輯
     const equipDefs = {
@@ -22206,9 +22249,9 @@ function handleShopBuy(id, tab, qty = 1) {
     };
     const def = equipDefs[id];
     if (!def) { addLog('system', '未知裝備'); return; }
-    if (GS.resources.gold < def.price) { alert('金幣不足'); return; }
+    if (GS.resources.gold < def.price * qty) { showToast('金幣不足，無法購買', 'error'); return; }
     const bagMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
-    if (GS.inventory.length >= bagMax) { alert('背包已滿'); return; }
+    if (GS.inventory.length >= bagMax) { showToast('背包已滿，無法購買', 'error'); return; }
     const equipItem = {
       id: def.id,
       name: def.name,
@@ -22221,17 +22264,18 @@ function handleShopBuy(id, tab, qty = 1) {
       enhanceLevel: 0,
       bound: false,
     };
-    const added = addToInventory(equipItem, 1);
-    if (!added) { alert('背包已滿'); return; }
-    GS.resources.gold -= def.price;
-    collectTax(def.price, 0);
-    addLog('shop', `購買了【${def.name}】`);
+    const added = addToInventory(equipItem, qty);
+    if (!added) { showToast('背包已滿，無法購買', 'error'); return; }
+    GS.resources.gold -= def.price * qty;
+    collectTax(def.price * qty, 0);
+    addLog('shop', `購買了【${def.name}】 ×${qty}`);
+    showToast(`購買成功：${def.name} ×${qty}（花費 ${(def.price * qty).toLocaleString()} 金幣）`, 'success');
   }
   updateUI();
 }
 
 function buyGemItem(cost, onBuy) {
-  if (GS.resources.gem < cost) { alert('鑽石不足！'); return; }
+  if (GS.resources.gem < cost) { showToast('鑽石不足，無法購買', 'error'); return; }
   GS.resources.gem -= cost;
   onBuy();
   updateUI();
