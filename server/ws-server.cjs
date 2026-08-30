@@ -19,6 +19,13 @@ function createWsServer(httpServer) {
   // v2.7.6：握手統計與最後錯誤（給 /api/diag 診斷用）
   let _handshakeOk = false;
   let _lastError = null;
+  // v2.7.10：WS 健康度統計
+  let _lastCloseCode = null;
+  let _lastCloseReason = '';
+  let _totalConnections = 0;
+  let _keepaliveEnabled = true;
+  const KEEPALIVE_INTERVAL_MS = 20000; // 20 秒主動 ping，打穿 ~60s idle 的代理
+  const KEEPALIVE_TIMEOUT_MS = 60000;  // 60 秒沒收到 pong 視為斷線
 
   // 地圖狀態：key = "serverId:mapId" -> Map(wsId -> client)
   const mapStates = new Map();
@@ -477,6 +484,7 @@ function createWsServer(httpServer) {
     );
     _handshakeOk = true;
     _lastError = null;
+    _totalConnections++;
 
     const wsId = nextWsId++;
     const client = {
@@ -491,6 +499,12 @@ function createWsServer(httpServer) {
       level: 1,
       buffer: Buffer.alloc(0),
       authenticated: false,
+      // v2.7.10：fragmentation 支援
+      fragOpcode: 0,
+      fragBuffer: null,
+      // v2.7.10：keepalive
+      lastPongTime: Date.now(),
+      pingTimer: null,
     };
     clients.set(wsId, client);
 
@@ -500,17 +514,45 @@ function createWsServer(httpServer) {
     });
 
     socket.on('close', () => {
+      _lastCloseCode = client._closeCode || 1006;
+      _lastCloseReason = client._closeReason || '';
+      if (client.pingTimer) { clearInterval(client.pingTimer); client.pingTimer = null; }
       handleDisconnect(client);
     });
 
     socket.on('error', () => {
+      if (client.pingTimer) { clearInterval(client.pingTimer); client.pingTimer = null; }
       handleDisconnect(client);
     });
+
+    // v2.7.10：啟動 server 主動 ping keepalive
+    if (_keepaliveEnabled) {
+      client.pingTimer = setInterval(() => {
+        if (client.socket.destroyed) {
+          clearInterval(client.pingTimer);
+          client.pingTimer = null;
+          return;
+        }
+        // 超過 60 秒沒收到 pong → 視為連線已死
+        if (Date.now() - client.lastPongTime > KEEPALIVE_TIMEOUT_MS) {
+          clearInterval(client.pingTimer);
+          client.pingTimer = null;
+          client._closeCode = 1006;
+          client._closeReason = 'keepalive timeout';
+          try { client.socket.destroy(); } catch(e) {}
+          return;
+        }
+        // 發送 ping（payload 為當前時間戳，供客戶端計算 RTT）
+        const pingPayload = Buffer.from(String(Date.now()), 'utf8');
+        sendFrame(client.socket, 0x9, pingPayload);
+      }, KEEPALIVE_INTERVAL_MS);
+    }
   }
 
   function processWsBuffer(client) {
     while (client.buffer.length >= 2) {
       const buf = client.buffer;
+      const fin = (buf[0] & 0x80) !== 0;
       const opcode = buf[0] & 0x0F;
       const masked = (buf[1] & 0x80) !== 0;
       let payloadLen = buf[1] & 0x7F;
@@ -546,24 +588,89 @@ function createWsServer(httpServer) {
 
       client.buffer = buf.slice(offset + payloadLen);
 
-      // 0x8 = close, 0x9 = ping, 0xA = pong, 0x1 = text
+      // v2.7.10：控制幀（opcode 0x8-0xF）必須 FIN=1 且 payload ≤ 125
+      // 0x8 = close, 0x9 = ping, 0xA = pong
       if (opcode === 0x8) {
-        sendFrame(client.socket, 0x8, Buffer.alloc(0));
-        client.socket.end();
+        // 解析 close code + reason 並 echo 回去
+        let closeCode = 1000;
+        let closeReason = '';
+        if (decoded.length >= 2) {
+          closeCode = decoded.readUInt16BE(0);
+          if (decoded.length > 2) {
+            try { closeReason = decoded.slice(2).toString('utf8'); } catch(e) {}
+          }
+        }
+        client._closeCode = closeCode;
+        client._closeReason = closeReason;
+        _lastCloseCode = closeCode;
+        _lastCloseReason = closeReason;
+        // echo close frame（RFC 6455 §5.5.1）
+        const echoPayload = Buffer.alloc(2 + Buffer.byteLength(closeReason, 'utf8'));
+        echoPayload.writeUInt16BE(closeCode, 0);
+        echoPayload.write(closeReason, 2, 'utf8');
+        try { sendFrame(client.socket, 0x8, echoPayload); } catch(e) {}
+        try { client.socket.end(); } catch(e) {}
         return;
       } else if (opcode === 0x9) {
+        // 客戶端 ping → 回 pong（同 payload）
         sendFrame(client.socket, 0xA, decoded);
         continue;
-      } else if (opcode === 0x1) {
-        let msg;
-        try {
-          msg = JSON.parse(decoded.toString('utf8'));
-        } catch (e) {
-          continue;
-        }
-        handleMessage(client, msg);
+      } else if (opcode === 0xA) {
+        // 收到 pong → 更新時間戳
+        client.lastPongTime = Date.now();
+        continue;
       }
+
+      // v2.7.10：資料幀（text=0x1, binary=0x2, continuation=0x0）
+      if (opcode === 0x1 || opcode === 0x2) {
+        // 起始幀
+        if (fin) {
+          // 單幀訊息，直接處理
+          if (opcode === 0x1) {
+            handleTextMessage(client, decoded);
+          } else {
+            // binary 幀目前保留（未使用，安全忽略）
+          }
+        } else {
+          // 分片起始：初始化 frag buffer
+          client.fragOpcode = opcode;
+          client.fragBuffer = Buffer.from(decoded);
+        }
+      } else if (opcode === 0x0) {
+        // 延續幀
+        if (!client.fragBuffer) {
+          // 沒有起始幀的延續 → 協定錯誤，關閉連線
+          const closePayload = Buffer.alloc(2);
+          closePayload.writeUInt16BE(1002, 0);
+          try { sendFrame(client.socket, 0x8, closePayload); } catch(e) {}
+          try { client.socket.end(); } catch(e) {}
+          return;
+        }
+        client.fragBuffer = Buffer.concat([client.fragBuffer, decoded]);
+        if (fin) {
+          // 最後一幀，組合完畢
+          const fullPayload = client.fragBuffer;
+          const fullOpcode = client.fragOpcode;
+          client.fragBuffer = null;
+          client.fragOpcode = 0;
+          if (fullOpcode === 0x1) {
+            handleTextMessage(client, fullPayload);
+          }
+          // binary 分片同樣忽略
+        }
+      }
+      // 其他 opcode 保留（忽略）
     }
+  }
+
+  function handleTextMessage(client, buf) {
+    let msg;
+    try {
+      msg = JSON.parse(buf.toString('utf8'));
+    } catch (e) {
+      return;
+    }
+    handleMessage(client, msg);
   }
 
   function sendFrame(socket, opcode, payload) {
@@ -1072,7 +1179,12 @@ function createWsServer(httpServer) {
     get authenticatedCount() { return getOnlineCount(); },
     get handshakeOk() { return _handshakeOk; },
     get lastError() { return _lastError; },
-    get totalConnections() { return clients.size; },
+    get lastCloseCode() { return _lastCloseCode; },
+    get lastCloseReason() { return _lastCloseReason; },
+    get totalConnections() { return _totalConnections; },
+    get keepaliveIntervalMs() { return KEEPALIVE_INTERVAL_MS; },
+    get keepaliveTimeoutMs() { return KEEPALIVE_TIMEOUT_MS; },
+    get keepaliveEnabled() { return _keepaliveEnabled; },
   };
 }
 

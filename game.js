@@ -6569,30 +6569,35 @@ function updateMultiplayerStatus(status) {
   // v2.7.7：讀取傳輸方式與失敗原因（WebSocket / Long-Poll）
   const transport = (window.MultiplayerClient && MultiplayerClient.transport) || '';
   const wsReason = (window.MultiplayerClient && MultiplayerClient.wsFailureReason) || '';
+  const wsCloseCode = window.MultiplayerClient ? MultiplayerClient.wsLastCloseCode : null;
+  const wsCloseReason = window.MultiplayerClient ? MultiplayerClient.wsLastCloseReason : '';
   // 狀態點
-  if (dot) {
-    dot.className = 'mp-status-dot mp-status-' + s;
-    let title = '';
-    if (s === S.ONLINE) {
-      if (transport === 'websocket') title = 'WebSocket 實時連線（正常）';
-      else if (transport === 'longpoll') title = '長輪詢模式（WS 未升級，已降級 LP）';
-      else title = '已連線多人';
-      if (wsReason) title += '\nWS 失敗: ' + wsReason;
-    } else if (s === S.ERROR) {
-      title = '連線失敗';
-      if (wsReason) title += '\nWS: ' + wsReason;
-    } else {
-      const titles = {
-        offline: '離線',
-        loading: '載入中...',
-        connecting: '連線中...',
-        reconnecting: '斷線重連中...',
-      };
-      title = titles[s] || '';
-      if (wsReason) title += '\nWS: ' + wsReason;
-    }
-    dot.title = title;
-  }
+    if (dot) {
+     dot.className = 'mp-status-dot mp-status-' + s;
+     let title = '';
+     if (s === S.ONLINE) {
+       if (transport === 'websocket') title = 'WebSocket 實時連線（正常）';
+       else if (transport === 'longpoll') title = '長輪詢模式（WS 未升級，已降級 LP）';
+       else title = '已連線多人';
+       if (wsReason) title += '\nWS 失敗: ' + wsReason;
+       if (wsCloseCode != null) title += '\nclose code: ' + wsCloseCode + (wsCloseReason ? ' / ' + wsCloseReason : '');
+     } else if (s === S.ERROR) {
+       title = '連線失敗';
+       if (wsReason) title += '\nWS: ' + wsReason;
+       if (wsCloseCode != null) title += '\nclose code: ' + wsCloseCode + (wsCloseReason ? ' / ' + wsCloseReason : '');
+     } else {
+       const titles = {
+         offline: '離線',
+         loading: '載入中...',
+         connecting: '連線中...',
+         reconnecting: '斷線重連中...',
+       };
+       title = titles[s] || '';
+       if (wsReason) title += '\nWS: ' + wsReason;
+       if (wsCloseCode != null) title += '\nclose code: ' + wsCloseCode + (wsCloseReason ? ' / ' + wsCloseReason : '');
+     }
+     dot.title = title;
+   }
   // 設定面板狀態文字
   if (txt) {
     txt.className = 'mp-status-text mp-status-' + s;

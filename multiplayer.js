@@ -35,8 +35,18 @@
   let useWebSocket = false; // 是否成功切換到 WS
 
   let _wsFailureReason = ''; // v2.7.5：WS 上次失敗原因（供 UI 顯示）
+  let _wsLastCloseCode = null; // v2.7.10：最後 close code
+  let _wsLastCloseReason = ''; // v2.7.10：最後 close reason
+  let _wsPath = '/'; // v2.7.10：伺服器 WS upgrade 路徑（從 /api/health 取得）
 
   function getWsFailureReason() { return _wsFailureReason; }
+  function getWsLastCloseCode() { return _wsLastCloseCode; }
+  function getWsLastCloseReason() { return _wsLastCloseReason; }
+  // v2.7.10：回傳目前使用的傳輸層類型（'ws' | 'lp' | 'offline'）
+  function getTransportType() {
+    if (status === STATUS.OFFLINE || status === STATUS.ERROR) return 'offline';
+    return useWebSocket ? 'ws' : 'lp';
+  }
 
   const remotePlayers = new Map();
   let pollAbortController = null;
@@ -155,6 +165,8 @@
           if (data && data.status === 'online') {
             setStatus(STATUS.ONLINE);
             console.info('[Multi] 伺服器連線成功:', data.version, 'WS=', data.webSocket || data.socketIo);
+            // v2.7.10：從伺服器取得 WS upgrade 路徑（預設 '/'）
+            _wsPath = data.wsTransportPath || '/';
 
             // v2.7.7：伺服器在線就先把 AI 模式切到 server（防止本地 AI 偷生）
             //  joinWorld 還沒完成、AI 還沒到也沒關係 — setServerAIs 會在後續到達時補渲染
@@ -511,18 +523,28 @@
         reject(new Error(_wsFailureReason));
         return;
       }
-      // v2.7.5：從 serverUrl 正確推 ws:// 或 wss://，保持同 port、同 path
+      // v2.7.10：從 location.origin 正確推 WS URL，處理反向代理子路徑
+      // 邏輯：用伺服器回傳的 wsTransportPath 作為 WS upgrade 路徑
+      // 若 path 為 '/' 則用 serverUrl 的 pathname（DO 根路徑或妙搭子路徑都正確）
       let wsUrl;
       try {
         const u = new URL(serverUrl);
         u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-        u.pathname = u.pathname.endsWith('/') ? u.pathname : u.pathname + '/';
+        // 若伺服器有指定 WS path（非 '/')，用它；否則保留 serverUrl 的 pathname
+        if (_wsPath && _wsPath !== '/') {
+          // 規範化：確保不以 // 開頭
+          let p = _wsPath;
+          if (!p.startsWith('/')) p = '/' + p;
+          u.pathname = p;
+        }
+        // 確保 pathname 以 / 結尾（與 server upgrade 路徑一致）
+        if (!u.pathname.endsWith('/')) u.pathname += '/';
         wsUrl = u.toString();
       } catch(e) {
         // fallback：簡單字串取代
         wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/?$/, '/');
       }
-      console.log('[WS] 嘗試連線:', wsUrl);
+      console.log('[WS] 嘗試連線:', wsUrl, '(serverUrl=' + serverUrl + ', wsPath=' + _wsPath + ')');
       _wsFailureReason = '';
       try {
         ws = new WebSocket(wsUrl);
