@@ -16,10 +16,23 @@
  * 啟動：node server/server.cjs（根目錄 npm start 亦可）
  */
 
-// v2.7.5：注入 vendor/ 為 NODE_PATH，讓隨包附帶的 pg 可直接 require（零 npm install）
+// v2.7.6：隨包 vendor 依賴解析（零 npm install）
+//  - 標準 node_modules 樹狀結構在 server/vendor/node_modules/（含 pg 完整遞迴依賴）
+//  - 加入 globalPaths 讓 Node 原生解析器自動向上找，pg 內部巢狀 require('pg-types') 等都能解析
+//  - 保留舊 flat vendor/ 作為 fallback，向後相容
 const Module = require('module');
 const path = require('path');
 const vendorDir = path.resolve(__dirname, 'vendor');
+const vendorNodeModules = path.join(vendorDir, 'node_modules');
+// 注入 globalPaths：所有模組的 require 都會經過這裡
+if (Array.isArray(Module.globalPaths) && !Module.globalPaths.includes(vendorNodeModules)) {
+  Module.globalPaths.unshift(vendorNodeModules);
+}
+// 同時把 vendorDir 也加入 fallback（舊 flat 結構相容）
+if (Array.isArray(Module.globalPaths) && !Module.globalPaths.includes(vendorDir)) {
+  Module.globalPaths.push(vendorDir);
+}
+// 額外補丁：若某些情境 globalPaths 沒生效（極端 Node 版本），再保留 _resolveFilename fallback
 const origResolve = Module._resolveFilename;
 Module._resolveFilename = function(request, parent, isMain, options) {
   try {
@@ -27,9 +40,13 @@ Module._resolveFilename = function(request, parent, isMain, options) {
   } catch (e) {
     if (e.code === 'MODULE_NOT_FOUND') {
       try {
-        return origResolve.call(this, path.join(vendorDir, request), parent, isMain, options);
+        return origResolve.call(this, path.join(vendorNodeModules, request), parent, isMain, options);
       } catch (_) {
-        throw e;
+        try {
+          return origResolve.call(this, path.join(vendorDir, request), parent, isMain, options);
+        } catch (__) {
+          throw e;
+        }
       }
     }
     throw e;
@@ -682,9 +699,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.7.5',
-      build: '2.7.5-2608300300',
-      buildId: '2.7.5-2608300300',
+      version: '2.7.6',
+      build: '2.7.6-2608300400',
+      buildId: '2.7.6-2608300400',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -787,9 +804,9 @@ async function handleApi(req, res, pathname, query) {
       version: '2.7.3',
       build: '2.7.3-2608292300',
       buildId: '2.7.3-2608292300',
-      version: '2.7.5',
-      build: '2.7.5-2608300300',
-      buildId: '2.7.5-2608300300',
+      version: '2.7.6',
+      build: '2.7.6-2608300400',
+      buildId: '2.7.6-2608300400',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       uptimeMs: uptime,
@@ -825,6 +842,10 @@ async function handleApi(req, res, pathname, query) {
       listenHost: '0.0.0.0',
       wsClientCount: wsServer.clientCount,
       wsAuthenticatedCount: wsServer.authenticatedCount,
+      wsHandshakeOk: wsServer.handshakeOk !== false,
+      wsLastError: wsServer.lastError || null,
+      upgradeHandlerRegistered: true,
+      wsTransportPath: '/',
       servers: serverSummaries,
     });
   }

@@ -16,6 +16,9 @@ const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 function createWsServer(httpServer) {
   const clients = new Map(); // wsId -> { socket, account, name, serverId, mapId, playerId, ... }
   let nextWsId = 1;
+  // v2.7.6：握手統計與最後錯誤（給 /api/diag 診斷用）
+  let _handshakeOk = false;
+  let _lastError = null;
 
   // 地圖狀態：key = "serverId:mapId" -> Map(wsId -> client)
   const mapStates = new Map();
@@ -211,6 +214,7 @@ function createWsServer(httpServer) {
   function acceptUpgrade(req, socket, head) {
     const key = req.headers['sec-websocket-key'];
     if (!key) {
+      _lastError = 'missing Sec-WebSocket-Key header';
       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
       socket.destroy();
       return;
@@ -226,6 +230,8 @@ function createWsServer(httpServer) {
       'Sec-WebSocket-Accept: ' + accept + '\r\n' +
       '\r\n'
     );
+    _handshakeOk = true;
+    _lastError = null;
 
     const wsId = nextWsId++;
     const client = {
@@ -843,6 +849,9 @@ function createWsServer(httpServer) {
     broadcastAISnapshot,
     get clientCount() { return clients.size; },
     get authenticatedCount() { return getOnlineCount(); },
+    get handshakeOk() { return _handshakeOk; },
+    get lastError() { return _lastError; },
+    get totalConnections() { return clients.size; },
   };
 }
 

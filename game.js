@@ -6420,6 +6420,22 @@ function loadGameFromSlot(idx) {
 function applySaveData(data) {
   if (!data || typeof data !== 'object') return false;
   SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
+  // v2.7.6：完整性校驗 — 防止損壞存檔把關鍵欄位覆蓋成 null/undefined
+  if (!GS.player || typeof GS.player !== 'object') {
+    console.warn('[存檔] player 欄位損壞，已恢復預設值');
+    GS.player = {
+      name: '玩家', classId: 'warrior', level: 1, exp: 0, expMax: 100,
+      x: 200, y: 260, targetX: 200, targetY: 260,
+      hp: 200, hpMax: 200, mp: 100, mpMax: 100,
+      state: 'idle', facing: 'right', attackCooldown: 0,
+      skillCooldowns: [0,0,0,0,0,0,0,0], hitTimer: 0,
+      transformId: null, buffs: {},
+    };
+  }
+  if (!Array.isArray(GS.aiPlayers)) GS.aiPlayers = [];
+  if (!Array.isArray(GS.monsters)) GS.monsters = [];
+  if (!GS.resources || typeof GS.resources !== 'object') GS.resources = { gold: 0, gem: 0 };
+  if (!GS.inventory) GS.inventory = [];
   console.log('[存檔] 英雄', GS.ownedHeroes?.length || 0, '張 / 寵物', GS.ownedPets?.length || 0, '張 / 變身', GS.ownedTransforms?.length || 0, '張');
   return true;
 }
@@ -6486,31 +6502,52 @@ function updateMultiplayerStatus(status) {
   const txt = document.getElementById('mp-status-text');
   const btn = document.getElementById('mp-connect-btn');
   const s = status || S.OFFLINE;
+  // v2.7.6：讀取傳輸方式與失敗原因（WebSocket / Long-Poll）
+  const transport = (window.MultiplayerClient && MultiplayerClient.transport) || '';
+  const wsReason = (window.MultiplayerClient && MultiplayerClient.wsFailureReason) || '';
   // 狀態點
   if (dot) {
     dot.className = 'mp-status-dot mp-status-' + s;
-    const titles = {
-      offline: '連線中',
-      loading: '載入中...',
-      connecting: '連線中...',
-      online: '已連線多人',
-      reconnecting: '斷線重連中...',
-      error: '連線失敗',
-    };
-    dot.title = titles[s] || '';
+    let title = '';
+    if (s === S.ONLINE) {
+      if (transport === 'websocket') title = 'WebSocket 實時連線（正常）';
+      else if (transport === 'longpoll') title = '長輪詢模式（WS 未升級，已降級 LP）';
+      else title = '已連線多人';
+      if (wsReason) title += '\nWS 失敗: ' + wsReason;
+    } else if (s === S.ERROR) {
+      title = '連線失敗';
+      if (wsReason) title += '\nWS: ' + wsReason;
+    } else {
+      const titles = {
+        offline: '離線',
+        loading: '載入中...',
+        connecting: '連線中...',
+        reconnecting: '斷線重連中...',
+      };
+      title = titles[s] || '';
+      if (wsReason) title += '\nWS: ' + wsReason;
+    }
+    dot.title = title;
   }
   // 設定面板狀態文字
   if (txt) {
     txt.className = 'mp-status-text mp-status-' + s;
-    const labels = {
-      offline: '連線中',
-      loading: '載入中...',
-      connecting: '連線中，伺服器可能喚醒中',
-      online: '已連線',
-      reconnecting: '斷線重連中',
-      error: '連線失敗',
-    };
-    txt.textContent = labels[s] || '連線中';
+    let label = '連線中';
+    if (s === S.ONLINE) {
+      if (transport === 'websocket') label = '已連線 · WebSocket';
+      else if (transport === 'longpoll') label = '已連線 · 長輪詢';
+      else label = '已連線';
+    } else {
+      const labels = {
+        offline: '離線',
+        loading: '載入中...',
+        connecting: '連線中，伺服器可能喚醒中',
+        reconnecting: '斷線重連中',
+        error: '連線失敗',
+      };
+      label = labels[s] || '連線中';
+    }
+    txt.textContent = label;
   }
   // 連線按鈕文字
   if (btn) {
@@ -6726,7 +6763,8 @@ function _initCore() {
       console.log('[Init] assets-manifest 已就緒，刷新圖片路徑中...');
       try {
         // 重新載入當前地圖背景、玩家精靈、NPC 精靈等
-        if (GS.currentMap && sceneBg) loadMap(GS.currentMap);
+        // v2.7.6：manifest 非同步回呼可能在 __resetGameState 之後到達，增加 GS.player 防衛
+        if (GS.currentMap && sceneBg && GS.player) loadMap(GS.currentMap);
         refreshAllSprites();
       } catch (e) { console.warn('[Init] manifest 載入後刷新失敗:', e); }
     }
@@ -12680,6 +12718,7 @@ function positionUnit(el, x, y, kind) {
 }
 
 function renderPlayer() {
+  if (!GS.player) return; // v2.7.6：null 防衛
   const p = GS.player;
   // 玩家始終在 worldLayer 中
   const parent = worldLayer;
@@ -12750,6 +12789,23 @@ function loadMap(mapId) {
   const map = allMaps[mapId];
   if (!map) return;
 
+  // v2.7.6：GS.player 為 null 時緊急恢復預設值，避免 null.x 崩潰
+  //  可能觸發原因：__resetGameState 後 manifest 非同步回呼、損壞存檔、切換角色競態
+  if (!GS.player) {
+    console.warn('[loadMap] GS.player 為 null，已恢復預設值（map=' + mapId + '）');
+    GS.player = {
+      name: '玩家', classId: 'warrior', level: 1, exp: 0, expMax: 100,
+      x: 200, y: 260, targetX: 200, targetY: 260,
+      hp: 200, hpMax: 200, mp: 100, mpMax: 100,
+      state: 'idle', facing: 'right', attackCooldown: 0,
+      skillCooldowns: [0,0,0,0,0,0,0,0], hitTimer: 0,
+      transformId: null, buffs: {},
+    };
+  }
+  // v2.7.6：確保 aiPlayers / monsters 陣列存在（null 會導致 forEach 崩潰）
+  if (!Array.isArray(GS.aiPlayers)) GS.aiPlayers = [];
+  if (!Array.isArray(GS.monsters)) GS.monsters = [];
+
   // 切出城堡地圖时清理攻城战状态和元素
   const curMap = allMaps[GS.currentMap];
   if (curMap?.type === 'castle_siege' && map.type !== 'castle_siege') {
@@ -12775,7 +12831,10 @@ function loadMap(mapId) {
   if (el.minimapTitle) el.minimapTitle.textContent = map.name;
 
   // 清空AI玩家DOM（彻底清除旧地图AI，避免残留死图）
-  GS.aiPlayers.forEach(ai => { if (ai.el) { ai.el.remove(); ai.el = null; } });
+  // v2.7.6：過濾 null/undefined 元素，防止陣列中有空洞時崩潰
+  if (Array.isArray(GS.aiPlayers)) {
+    GS.aiPlayers.forEach(ai => { if (ai && ai.el) { ai.el.remove(); ai.el = null; } });
+  }
   GS.aiPlayers = [];
   GS.targetAiUid = null;
   // 清理怪物動畫狀態（unitAnimState中的怪物条目），避免地圖切換後內存泄漏
@@ -12790,10 +12849,13 @@ function loadMap(mapId) {
   }
 
   // 清空怪物
-  GS.monsters.forEach(m => {
-    const elDiv = worldLayer.querySelector(`[data-id="${m.uid}"]`);
-    if (elDiv) elDiv.remove();
-  });
+  if (Array.isArray(GS.monsters)) {
+    GS.monsters.forEach(m => {
+      if (!m) return;
+      const elDiv = worldLayer ? worldLayer.querySelector('[data-id="' + m.uid + '"]') : null;
+      if (elDiv) elDiv.remove();
+    });
+  }
   GS.monsters = [];
   GS.targetMonsterUid = null;
   GS.targetAiUid = null;
@@ -12839,11 +12901,13 @@ function loadMap(mapId) {
   }
 
   // 玩家重置位置（世界中心偏下）
-  GS.player.x = CAMERA.worldWidth / 2;
-  GS.player.y = CAMERA.worldHeight * 0.7;
-  GS.player.targetX = GS.player.x;
-  GS.player.targetY = GS.player.y;
-  GS.player.state = 'idle';
+  if (GS.player) {
+    GS.player.x = CAMERA.worldWidth / 2;
+    GS.player.y = CAMERA.worldHeight * 0.7;
+    GS.player.targetX = GS.player.x;
+    GS.player.targetY = GS.player.y;
+    GS.player.state = 'idle';
+  }
   GS.autoMode = false;
   el.autoBtn.classList.remove('active');
   el.autoLabel.textContent = '自動';
@@ -26328,12 +26392,14 @@ window._setServerInstanceId = function(id) {
  */
 window.setServerAIs = function(ais, serverId, mapId) {
   if (!ais || !Array.isArray(ais)) return;
+  // v2.7.6：過濾 null/undefined 元素，避免伺服器廣播異常導致客戶端崩潰
+  const validAis = ais.filter(a => a && typeof a === 'object' && a.id);
   _serverAIActive = true;
   _offlineMode = false;
 
   // 更新快取
-  _serverAICurrentMap = { serverId, mapId, ais: [...ais] };
-  ais.forEach(ai => { _serverAIMap.set(ai.id, ai); });
+  _serverAICurrentMap = { serverId, mapId, ais: [...validAis] };
+  validAis.forEach(ai => { _serverAIMap.set(ai.id, ai); });
 
   // 若未進入遊戲，先延遲
   if (!GS || !worldLayer) return;
@@ -26355,18 +26421,18 @@ function renderServerAIsToWorld(ais) {
   if (!worldLayer) return;
 
   // v2.7.5：計算快照hash（只看 id+數量），相同則增量更新位置/HP即可
-  const curIds = ais.map(a => a.id).sort().join(',');
-  const countChanged = ais.length !== _lastServerAICount;
+  const curIds = validAis.map(a => a.id).sort().join(',');
+  const countChanged = validAis.length !== _lastServerAICount;
 
   if (!countChanged && curIds === _lastServerAISnapshotHash) {
     // 只有位置/HP變動：增量更新
-    updateServerAIsFromSnapshot(ais);
+    updateServerAIsFromSnapshot(validAis);
     return;
   }
 
   // 數量或id變動 → 重建（但仍儘量比對差異）
   _lastServerAISnapshotHash = curIds;
-  _lastServerAICount = ais.length;
+  _lastServerAICount = validAis.length;
 
   // 把現有的 ai-player DOM 全部清掉（舊的本地 AI）
   const oldAIs = worldLayer.querySelectorAll('.world-unit.ai-player');
@@ -26376,7 +26442,7 @@ function renderServerAIsToWorld(ais) {
   if (GS.aiPlayers) GS.aiPlayers = [];
 
   // 建立伺服器 AI 的精靈（包裝成 createAISprite 可接受的格式）
-  const wrapped = ais.map(sai => wrapServerAI(sai));
+  const wrapped = validAis.map(sai => wrapServerAI(sai));
   GS.aiPlayers = wrapped;
 
   // 分幀建立 DOM
@@ -26385,7 +26451,7 @@ function renderServerAIsToWorld(ais) {
   function spawnBatch() {
     const end = Math.min(idx + BATCH, wrapped.length);
     for (; idx < end; idx++) {
-      try { createAISprite(wrapped[idx]); } catch(e) {}
+      try { if (wrapped[idx]) createAISprite(wrapped[idx]); } catch(e) {}
     }
     if (idx < wrapped.length) requestAnimationFrame(spawnBatch);
   }
@@ -26418,8 +26484,8 @@ function updateServerAIsFromSnapshot(ais) {
       local.dead = false;
       if (local.el) local.el.style.opacity = '';
     }
-    // 更新 HP bar
-    if (local.el) {
+  // 更新 HP bar
+  if (local && local.el) {
       const hpFill = local.el.querySelector('.unit-hp-fill');
       const pct = Math.max(0, Math.min(100, (local.hp / (local.hpMax || 1)) * 100));
       if (hpFill) hpFill.style.width = pct + '%';
@@ -26498,7 +26564,7 @@ function updateServerAIs(dt) {
   if (!_serverAIActive || !GS.aiPlayers || GS.aiPlayers.length === 0) return;
   const now = Date.now();
   GS.aiPlayers.forEach(ai => {
-    if (!ai.isServerAI || !ai.el) return;
+    if (!ai || !ai.isServerAI || !ai.el) return;
     if (ai.targetX == null) return;
     const dx = ai.targetX - ai.x;
     const dy = ai.targetY - ai.y;
