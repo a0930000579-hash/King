@@ -264,6 +264,26 @@ async function initPgSchema() {
       info TEXT DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
+    `CREATE TABLE IF NOT EXISTS leaderboard_entries (
+      id BIGSERIAL PRIMARY KEY,
+      server_id VARCHAR(64) NOT NULL,
+      rank_type VARCHAR(16) NOT NULL,
+      entity_id VARCHAR(64) NOT NULL,
+      entity_name VARCHAR(64),
+      is_ai BOOLEAN NOT NULL DEFAULT FALSE,
+      level INTEGER DEFAULT 1,
+      power INTEGER DEFAULT 0,
+      kills INTEGER DEFAULT 0,
+      gold BIGINT DEFAULT 0,
+      contribution INTEGER DEFAULT 0,
+      nation_id VARCHAR(32),
+      guild_id VARCHAR(64),
+      class_id VARCHAR(32),
+      rank_pos INTEGER,
+      extra JSONB DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_leaderboard_server_type ON leaderboard_entries(server_id, rank_type, rank_pos)`,
   ];
   for (const sql of statements) {
     try { await pgPool.query(sql); }
@@ -1269,6 +1289,7 @@ async function getStats() {
       'accounts', 'characters', 'account_shared', 'warehouse_logs',
        'gm_action_logs', 'announcements', 'game_config', 'castle_states',
        'custom_items', 'bug_reports', 'game_servers',
+       'leaderboard_entries',
      ];
     const result = {};
     for (const t of tables) {
@@ -1301,6 +1322,7 @@ async function getStats() {
       custom_items: Object.keys(loadJSON('custom-items.json', {})).length,
       bug_reports: loadJSON('bug-reports.json', []).length,
       game_servers: loadJSON('game-servers.json', []).length,
+      leaderboard_entries: loadJSON('leaderboard-entries.json', []).length,
     };
     return counts;
   }
@@ -1372,6 +1394,7 @@ async function resetAll(options = {}) {
     const tables = [
       'characters', 'account_shared', 'warehouse_logs',
       'announcements', 'gm_action_logs', 'bug_reports', 'accounts',
+      'leaderboard_entries',
     ];
     if (!keepCustomItems) tables.push('custom_items');
     for (const t of tables) {
@@ -1381,8 +1404,8 @@ async function resetAll(options = {}) {
       } catch (e) { counts[t] = 0; }
     }
     const truncateList = keepCustomItems
-      ? 'accounts, characters, account_shared, warehouse_logs, announcements, gm_action_logs, bug_reports'
-      : 'accounts, characters, account_shared, warehouse_logs, announcements, gm_action_logs, bug_reports, custom_items';
+      ? 'accounts, characters, account_shared, warehouse_logs, announcements, gm_action_logs, bug_reports, leaderboard_entries'
+      : 'accounts, characters, account_shared, warehouse_logs, announcements, gm_action_logs, bug_reports, custom_items, leaderboard_entries';
     try {
       await pgPool.query(`TRUNCATE TABLE ${truncateList} RESTART IDENTITY CASCADE`);
     } catch (e) {
@@ -1431,6 +1454,7 @@ async function resetAll(options = {}) {
     saveJSON('announcements.json', []);
     saveJSON('gm-action-logs.json', []);
     saveJSON('bug-reports.json', []);
+    saveJSON('leaderboard-entries.json', []);
     if (!keepCustomItems) saveJSON('custom-items.json', {});
     saveJSON('game-config.json', {});
     saveJSON('castle-states.json', {});
@@ -1489,6 +1513,38 @@ async function resetCharacters() {
     saveJSON('account-shared.json', {});
     saveJSON('warehouse-logs.json', []);
     return counts;
+  }
+}
+
+// --- 清空排行榜：leaderboard_entries ---
+async function clearLeaderboard() {
+  if (backend === 'postgres') {
+    await ensureSchema();
+    const { rows } = await pgPool.query('SELECT COUNT(*)::int AS c FROM leaderboard_entries');
+    const count = rows[0].c;
+    try {
+      await pgPool.query('TRUNCATE TABLE leaderboard_entries RESTART IDENTITY');
+    } catch (e) {
+      await pgPool.query('DELETE FROM leaderboard_entries');
+      try { await pgPool.query('ALTER SEQUENCE leaderboard_entries_id_seq RESTART WITH 1'); } catch(_) {}
+    }
+    return { leaderboard_entries: count };
+  } else {
+    const entries = loadJSON('leaderboard-entries.json', []);
+    const count = entries.length;
+    saveJSON('leaderboard-entries.json', []);
+    return { leaderboard_entries: count };
+  }
+}
+
+// --- 取得排行榜統計數 ---
+async function getLeaderboardStats() {
+  if (backend === 'postgres') {
+    const { rows } = await pgPool.query('SELECT COUNT(*)::int AS c FROM leaderboard_entries');
+    return { count: rows[0].c };
+  } else {
+    const entries = loadJSON('leaderboard-entries.json', []);
+    return { count: entries.length };
   }
 }
 
@@ -1577,4 +1633,6 @@ module.exports = {
   resetAll,
   resetCharacters,
   resetLogs,
+  clearLeaderboard,
+  getLeaderboardStats,
 };

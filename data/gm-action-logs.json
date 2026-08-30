@@ -2,129 +2,59 @@
   {
     "gmAccount": "19811013",
     "targetAccount": null,
-    "action": "server_update",
+    "action": "reset_characters",
     "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
+      "counts": {
+        "characters": 0,
+        "account_shared": 0,
+        "warehouse_logs": 0
+      }
     },
-    "createdAt": "2026-08-30T06:29:36.278Z"
+    "createdAt": "2026-08-30T15:45:39.518Z"
   },
   {
     "gmAccount": "19811013",
     "targetAccount": null,
-    "action": "server_update",
+    "action": "clear_leaderboard",
     "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
+      "counts": {
+        "leaderboard_entries": 0
+      }
     },
-    "createdAt": "2026-08-30T06:29:35.974Z"
+    "createdAt": "2026-08-30T15:45:39.514Z"
   },
   {
     "gmAccount": "19811013",
     "targetAccount": null,
-    "action": "server_update",
+    "action": "admin_reset_ai_all",
     "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
+      "serverCount": 2,
+      "totalMaps": 2
     },
-    "createdAt": "2026-08-30T06:29:35.670Z"
+    "createdAt": "2026-08-30T15:45:39.512Z"
   },
   {
     "gmAccount": "19811013",
     "targetAccount": null,
-    "action": "server_update",
+    "action": "reset_characters",
     "detail": {
-      "id": "zeus",
-      "changes": [
-        "name",
-        "status",
-        "aiCount",
-        "initLevel",
-        "maxPlayers"
-      ]
+      "counts": {
+        "characters": 4,
+        "account_shared": 0,
+        "warehouse_logs": 0
+      }
     },
-    "createdAt": "2026-08-30T06:29:35.649Z"
+    "createdAt": "2026-08-30T15:43:44.569Z"
   },
   {
     "gmAccount": "19811013",
     "targetAccount": null,
-    "action": "server_update",
+    "action": "clear_leaderboard",
     "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
+      "counts": {
+        "leaderboard_entries": 0
+      }
     },
-    "createdAt": "2026-08-30T06:28:36.801Z"
-  },
-  {
-    "gmAccount": "19811013",
-    "targetAccount": null,
-    "action": "server_update",
-    "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
-    },
-    "createdAt": "2026-08-30T06:28:36.497Z"
-  },
-  {
-    "gmAccount": "19811013",
-    "targetAccount": null,
-    "action": "server_update",
-    "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
-    },
-    "createdAt": "2026-08-30T06:28:36.191Z"
-  },
-  {
-    "gmAccount": "19811013",
-    "targetAccount": null,
-    "action": "server_update",
-    "detail": {
-      "id": "zeus",
-      "changes": [
-        "name",
-        "status",
-        "aiCount",
-        "initLevel",
-        "maxPlayers"
-      ]
-    },
-    "createdAt": "2026-08-30T06:28:36.166Z"
-  },
-  {
-    "gmAccount": "19811013",
-    "targetAccount": null,
-    "action": "server_update",
-    "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
-    },
-    "createdAt": "2026-08-29T16:47:59.784Z"
-  },
-  {
-    "gmAccount": "19811013",
-    "targetAccount": null,
-    "action": "server_update",
-    "detail": {
-      "id": "zeus",
-      "changes": [
-        "aiCount"
-      ]
-    },
-    "createdAt": "2026-08-29T16:47:59.628Z"
+    "createdAt": "2026-08-30T15:43:44.566Z"
   }
 ]

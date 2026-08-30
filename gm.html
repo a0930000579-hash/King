@@ -1218,10 +1218,34 @@
           <div class="stat-card"><div class="value" id="dbStat-castle_states">--</div><div class="label">城堡狀態</div></div>
           <div class="stat-card"><div class="value" id="dbStat-custom_items">--</div><div class="label">自定義道具</div></div>
           <div class="stat-card"><div class="value" id="dbStat-game_servers">--</div><div class="label">伺服器</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-leaderboard_entries">--</div><div class="label">排行榜</div></div>
         </div>
         <div class="mt-16 flex gap-10">
           <button class="btn btn-sm btn-ghost" onclick="loadDbStats()">重新整理</button>
           <span style="color:#8a6a2a;font-size:12px;align-self:center;" id="dbStatsTime"></span>
+        </div>
+      </div>
+
+      <!-- 一鍵清空快捷列 -->
+      <div class="card danger-card">
+        <h3 style="color:#e05050;">⚡ 一鍵清空數據</h3>
+        <div class="desc" style="color:#c06060;margin-bottom:12px;">三個層級的清空操作，按鈕點擊後立即執行，請謹慎操作。</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+          <div style="background:rgba(40,30,20,0.6);border:1px solid rgba(200,140,60,0.3);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;color:#e0a860;margin-bottom:4px;">清空 AI 數據</div>
+            <div style="font-size:12px;color:#a08050;margin-bottom:10px;">刪除所有伺服器 AI 實體與持久化檔案，按 GM 設定的 aiCount 重新生成</div>
+            <button class="btn" style="background:#a07028;width:100%;" onclick="confirmClearAI()">清空 AI 數據</button>
+          </div>
+          <div style="background:rgba(40,30,20,0.6);border:1px solid rgba(200,140,60,0.3);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;color:#e0a860;margin-bottom:4px;">清空排行榜</div>
+            <div style="font-size:12px;color:#a08050;margin-bottom:10px;">刪除排行榜所有記錄，下次從真實玩家 + AI 重新計算</div>
+            <button class="btn" style="background:#a07028;width:100%;" onclick="confirmClearLeaderboard()">清空排行榜</button>
+          </div>
+          <div style="background:rgba(60,20,20,0.6);border:1px solid rgba(224,80,80,0.4);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;color:#e05050;margin-bottom:4px;">重置全部數據</div>
+            <div style="font-size:12px;color:#c06060;margin-bottom:10px;">清空所有玩家角色、背包、AI、排行榜（保留帳號表？→ 見下方詳細）</div>
+            <button class="btn btn-danger" style="width:100%;" onclick="scrollToFullReset()">前往完整重置</button>
+          </div>
         </div>
       </div>
 
@@ -1623,11 +1647,15 @@ async function loadDashboard() {
       syncEl.style.color = '#e06060';
     }
   }
-  if (online && online.players) {
-    document.getElementById('statOnline').textContent = online.count;
+  if (online && (online.players || online.list)) {
+    const list = online.players || online.list || [];
+    const cnt = online.count != null ? online.count : list.length;
+    document.getElementById('statOnline').textContent = cnt;
   }
   if (players && players.total != null) {
     document.getElementById('statTotal').textContent = players.total;
+  } else if (health && health.totalAccounts != null) {
+    document.getElementById('statTotal').textContent = health.totalAccounts;
   }
   document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-TW');
 }
@@ -2361,6 +2389,51 @@ function confirmResetLogs() {
       showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
     }
   });
+}
+
+// 一鍵清空 AI 數據
+function confirmClearAI() {
+  if (!confirm('確定要清空所有伺服器的 AI 數據嗎？\n\n· 刪除所有 AI 實體與持久化檔案\n· 按 GM 設定的 aiCount 重新生成新 AI\n· 影響所有伺服器與所有地圖\n\n此操作不可逆！')) return;
+  if (!confirm('再次確認：真的要重置全部 AI 嗎？')) return;
+
+  apiCall('/api/gm/admin/reset-ai-all', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      showToast('AI 數據已清空並重新生成！共 ' + data.serverCount + ' 服 / ' + data.totalMaps + ' 張地圖', 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  }).catch(e => {
+    showToast('失敗：' + e.message, 'error');
+  });
+}
+
+// 一鍵清空排行榜
+function confirmClearLeaderboard() {
+  if (!confirm('確定要清空排行榜所有記錄嗎？\n\n· 刪除排行榜表所有記錄\n· 下次從真實玩家 + AI 重新計算\n\n此操作不可逆！')) return;
+
+  apiCall('/api/gm/admin/clear-leaderboard', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      showToast('排行榜已清空，共刪除 ' + data.counts.leaderboard_entries + ' 筆', 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  }).catch(e => {
+    showToast('失敗：' + e.message, 'error');
+  });
+}
+
+// 捲動到完整重置區塊
+function scrollToFullReset() {
+  const el = document.querySelector('#page-database .danger-card:nth-of-type(2) h3');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // 自動登入

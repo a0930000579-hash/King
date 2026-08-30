@@ -5887,7 +5887,12 @@ function getEquipRarityIcon(type, rarity) {
     sword:'sword' };
   const slot = slotMap[type] || 'sword';
   const r = rarity || 'white';
-  return EQUIP_RARITY_ICONS[slot]?.[r] || EQUIP_RARITY_ICONS.sword.white;
+  const icon = EQUIP_RARITY_ICONS[slot]?.[r] || EQUIP_RARITY_ICONS.sword.white;
+  // v2.8.3：診斷 log（只在 type 不在 slotMap 或 slot 映射異常時打印，避免刷屏）
+  if (!slotMap[type] || !EQUIP_RARITY_ICONS[slot]?.[r]) {
+    console.log('[getEquipRarityIcon] type=', type, 'rarity=', r, '→ slot=', slot, '→ icon=', icon);
+  }
+  return icon;
 }
 
 // ==================== 裝備配置 ====================
@@ -12621,7 +12626,7 @@ function getTransformSprite(spriteKey) {
 function createPlayerSprite() {
   const src = getPlayerSprite();
   const elUnit = document.createElement('div');
-  elUnit.className = 'world-unit hero idle';
+  elUnit.className = 'world-unit hero idle player-sprite';
   elUnit.dataset.id = 'player';
   elUnit.innerHTML = buildSpriteHTML(src, 'hero');
   // 填充名字和等級：國旗在名稱左側
@@ -13035,6 +13040,20 @@ function loadMap(mapId) {
   // v2.8.0：切圖前完整清場（確保 DOM/狀態不殘留）
   if (GS.currentMap && GS.currentMap !== mapId) {
     fullMapCleanup();
+    // v2.8.3：防衛檢查 — 確保玩家 sprite 在 fullMapCleanup 後依然存在
+    // 理論上 .world-unit:not(.player-sprite):not(.hero) 不會刪玩家，但保險起見重建
+    if (worldLayer && typeof createPlayerSprite === 'function') {
+      const existing = worldLayer.querySelector('[data-id="player"]');
+      if (!existing) {
+        console.warn('[MapSwitch] 玩家 sprite 在 fullMapCleanup 後遺失，重新建立');
+        createPlayerSprite();
+      } else {
+        // 把玩家元素移到 worldLayer 最後（確保在最上層）
+        if (existing.parentNode === worldLayer) {
+          worldLayer.appendChild(existing);
+        }
+      }
+    }
   }
 
   GS.currentMap = mapId;
@@ -13581,18 +13600,94 @@ const MONSTER_FALLBACK_MAP = {
 
 function getMonsterSprite(type) {
   if (!type) return SPRITE.goblin;
+  // v2.8.3：中文名 → type 對照（地圖配置 name 是中文、伺服器可能直接傳中文名）
+  //  放在第一步，確保不論 type 是英文 key 還是中文名都能解析到精靈
+  const cnMap = {
+    // 哥布林系
+    '哥布林': 'goblin', '哥布林弓手': 'goblin', '哥布林巡邏兵': 'goblin',
+    '哥布林戰士': 'goblin', '哥布林法師': 'goblin', '哥布林偵察兵': 'goblin',
+    '哥布林薩滿': 'shaman', '哥布林酋長': 'orc', '森林哥布林': 'goblin',
+    '森林哥布林隊長': 'goblin', '精英哥布林': 'goblin',
+    // 骷髏系
+    '骷髏': 'skeleton', '骷髏兵': 'skeleton', '小骷髏兵': 'skeleton',
+    '骷髏戰士': 'skeleton', '骷髏弓箭手': 'skeleton', '骷髏騎士': 'skeleton',
+    '骷髏法師': 'darkmage', '骷髏王': 'skeleton', '骷髏將軍': 'skeleton',
+    // 史萊姆
+    '史萊姆': 'slime', '藍史萊姆': 'slime', '綠史萊姆': 'slime',
+    '金色史萊姆': 'slime', '史萊姆王': 'slime',
+    // 蝙蝠
+    '蝙蝠': 'bat', '洞穴蝙蝠': 'bat', '森林蝙蝠': 'bat', '火焰蝙蝠': 'bat',
+    '吸血蝙蝠': 'bat',
+    // 蜘蛛
+    '蜘蛛': 'spider', '毒蜘蛛': 'spider', '巨型蜘蛛': 'spider',
+    '小蜘蛛': 'spider', '蜘蛛后': 'spider_queen', '蜘蛛女王': 'spider_queen',
+    // 野狼
+    '野狼': 'wolf', '灰狼': 'wolf', '黑狼': 'wolf', '雪原狼': 'monster_direwolf',
+    '地獄犬': 'monster_hellhound', '地獄獵犬': 'monster_hellhound',
+    '三頭犬': 'cerberus', '三頭地獄犬': 'cerberus',
+    // 獸人/巨魔/食人魔
+    '獸人': 'orc', '獸人戰士': 'orc', '獸人酋長': 'orc', '黑暗獸人': 'orc',
+    '巨魔': 'troll', '山怪': 'troll', '食人魔': 'ogre', '雙頭食人魔': 'ogre',
+    // 僵屍/幽靈/巫師
+    '僵屍': 'zombie', '殭屍': 'zombie', '僵屍兵': 'zombie', '殭屍王': 'zombie',
+    '幽靈': 'ghost', '鬼魂': 'ghost', '幽靈王': 'ghost', '惡靈': 'ghost',
+    '法師': 'darkmage', '黑暗法師': 'darkmage', '暗黑法師': 'darkmage',
+    '巫師': 'shaman', '薩滿': 'shaman', '老薩滿': 'shaman', '巫師長': 'shaman',
+    '巫妖': 'lich', '死靈法師': 'lich',
+    // 蠍子/蛇
+    '蠍子': 'scorpion', '巨蠍': 'scorpion', '蠍王': 'scorpion',
+    '沙漠蠍': 'monster_scorpion',
+    '蛇': 'lizardman', '眼鏡蛇': 'lizardman', '巨蛇': 'lizardman',
+    // 蜥蜴人/石巨人/石魔像
+    '蜥蜴人': 'lizardman', '蜥蜴人戰士': 'lizardman', '蜥蜴人薩滿': 'lizardman',
+    '石巨人': 'stone_golem', '石魔像': 'stone_golem', '熔岩巨人': 'lava_golem',
+    '熔岩魔像': 'lava_golem', '魔像': 'stone_golem',
+    // 惡魔/惡夢/石像鬼
+    '惡魔': 'demon', '小惡魔': 'demon', '惡魔領主': 'demon', '惡魔領主': 'demon',
+    '巴風特': 'demon', '巴弗滅': 'demon', '墮落天使': 'demon',
+    '石像鬼': 'monster_gargoyle', '鬼臉惡魔': 'monster_braindevil',
+    // 巨龍/骨龍
+    '巨龍': 'dragon', '紅龍': 'dragon', '黑龍': 'dragon', '遠古巨龍': 'dragon',
+    '骨龍': 'bone_dragon', '骷髏龍': 'bone_dragon',
+    // 其他
+    '山賊': 'bandit', '盜賊': 'bandit', '強盜': 'bandit', '山賊頭目': 'bandit',
+    '熊': 'armored_bear', '巨熊': 'armored_bear', '裝甲熊': 'armored_bear',
+    '獅鷲': 'griffin', '獅鷲獸': 'griffin',
+    '海德拉': 'hydra', '九頭蛇': 'hydra',
+    '那加': 'naga', '娜迦': 'naga', '蛇女': 'naga',
+    '奇美拉': 'chimera', '合成獸': 'chimera',
+    '北海巨妖': 'kraken', '克拉肯': 'kraken',
+    '死亡騎士': 'darkmage', '闇黑騎士': 'darkmage', '黑騎士': 'darkmage',
+    // 變異體/特殊
+    '哥布林精英': 'goblin', '骷髏精英': 'skeleton', '毒蠍': 'scorpion',
+    '寒冰狼': 'wolf', '火焰骷髏': 'skeleton', '暗影法師': 'darkmage',
+  };
+  let resolvedType = type;
+  if (cnMap[type]) resolvedType = cnMap[type];
+
+  // v2.8.3：console.log 排查 sprite key（只在 type 是中文/未命中時打印，避免刷屏）
+  if (cnMap[type] || (!MONSTER_SPRITES[type] && !SPRITE[type] && !MONSTER_FALLBACK_MAP[type])) {
+    console.log('[getMonsterSprite] key=', type, '→ resolvedType=', resolvedType);
+  }
+
   // 1. 精確匹配 MONSTER_SPRITES
-  if (MONSTER_SPRITES[type] && MONSTER_SPRITES[type].useImg) return MONSTER_SPRITES[type];
+  if (MONSTER_SPRITES[resolvedType] && MONSTER_SPRITES[resolvedType].useImg) {
+    if (cnMap[type]) console.log('[getMonsterSprite] result=MONSTER_SPRITES[' + resolvedType + '].useImg=true');
+    return MONSTER_SPRITES[resolvedType];
+  }
   // 2. 精確匹配 SPRITE
-  if (SPRITE[type] && SPRITE[type].useImg) return SPRITE[type];
+  if (SPRITE[resolvedType] && SPRITE[resolvedType].useImg) {
+    if (cnMap[type]) console.log('[getMonsterSprite] result=SPRITE[' + resolvedType + '].useImg=true');
+    return SPRITE[resolvedType];
+  }
   // 3. fallback map
-  const fb = MONSTER_FALLBACK_MAP[type];
+  const fb = MONSTER_FALLBACK_MAP[resolvedType];
   if (fb) {
     if (SPRITE[fb] && SPRITE[fb].useImg) return SPRITE[fb];
     if (MONSTER_SPRITES[fb] && MONSTER_SPRITES[fb].useImg) return MONSTER_SPRITES[fb];
   }
   // 4. 終極 fallback → goblin（類人型最常見）
-  console.warn('[Sprite] missing monster type, fallback to goblin:', type);
+  console.warn('[Sprite] missing monster type, fallback to goblin:', type, '(resolved=' + resolvedType + ')');
   return SPRITE.goblin;
 }
 

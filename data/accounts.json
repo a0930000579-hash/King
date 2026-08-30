@@ -12,51 +12,7 @@
     "createdAt": "2026-08-30T12:18:48.089Z",
     "isGM": false,
     "characters": {
-      "zeus": [
-        {
-          "player": {
-            "name": "ti0028",
-            "classId": "warrior",
-            "level": 1,
-            "exp": 0,
-            "hp": 120,
-            "mp": 60,
-            "maxHp": 120,
-            "maxMp": 60,
-            "atk": 12,
-            "def": 8,
-            "spd": 1,
-            "crit": 5,
-            "hit": 95,
-            "dodge": 5,
-            "x": 0,
-            "y": 0,
-            "direction": "down"
-          },
-          "resources": {
-            "gold": 0,
-            "gem": 0
-          },
-          "inventory": [],
-          "ownedHeroes": [],
-          "ownedPets": [],
-          "ownedTransforms": [],
-          "equipment": {},
-          "bagMaxSlots": 30,
-          "enhanceTickets": 0,
-          "killCount": 0,
-          "currentMap": null,
-          "nation": null,
-          "siegeStats": {},
-          "rankings": {},
-          "createdAt": 1788092328094,
-          "name": "ti0028",
-          "classId": "warrior",
-          "level": 1,
-          "exp": 0,
-          "created": true
-        }
-      ]
+      "zeus": []
     }
   },
   "multi0192328": {
@@ -65,51 +21,7 @@
     "createdAt": "2026-08-30T12:18:48.096Z",
     "isGM": false,
     "characters": {
-      "zeus": [
-        {
-          "player": {
-            "name": "ti0128",
-            "classId": "warrior",
-            "level": 1,
-            "exp": 0,
-            "hp": 120,
-            "mp": 60,
-            "maxHp": 120,
-            "maxMp": 60,
-            "atk": 12,
-            "def": 8,
-            "spd": 1,
-            "crit": 5,
-            "hit": 95,
-            "dodge": 5,
-            "x": 0,
-            "y": 0,
-            "direction": "down"
-          },
-          "resources": {
-            "gold": 0,
-            "gem": 0
-          },
-          "inventory": [],
-          "ownedHeroes": [],
-          "ownedPets": [],
-          "ownedTransforms": [],
-          "equipment": {},
-          "bagMaxSlots": 30,
-          "enhanceTickets": 0,
-          "killCount": 0,
-          "currentMap": null,
-          "nation": null,
-          "siegeStats": {},
-          "rankings": {},
-          "createdAt": 1788092328098,
-          "name": "ti0128",
-          "classId": "warrior",
-          "level": 1,
-          "exp": 0,
-          "created": true
-        }
-      ]
+      "zeus": []
     }
   },
   "multi0292328": {
@@ -118,51 +30,7 @@
     "createdAt": "2026-08-30T12:18:48.100Z",
     "isGM": false,
     "characters": {
-      "zeus": [
-        {
-          "player": {
-            "name": "ti0228",
-            "classId": "warrior",
-            "level": 1,
-            "exp": 0,
-            "hp": 120,
-            "mp": 60,
-            "maxHp": 120,
-            "maxMp": 60,
-            "atk": 12,
-            "def": 8,
-            "spd": 1,
-            "crit": 5,
-            "hit": 95,
-            "dodge": 5,
-            "x": 0,
-            "y": 0,
-            "direction": "down"
-          },
-          "resources": {
-            "gold": 0,
-            "gem": 0
-          },
-          "inventory": [],
-          "ownedHeroes": [],
-          "ownedPets": [],
-          "ownedTransforms": [],
-          "equipment": {},
-          "bagMaxSlots": 30,
-          "enhanceTickets": 0,
-          "killCount": 0,
-          "currentMap": null,
-          "nation": null,
-          "siegeStats": {},
-          "rankings": {},
-          "createdAt": 1788092328103,
-          "name": "ti0228",
-          "classId": "warrior",
-          "level": 1,
-          "exp": 0,
-          "created": true
-        }
-      ]
+      "zeus": []
     }
   },
   "maptest": {
@@ -171,51 +39,7 @@
     "createdAt": "2026-08-30T12:21:55.063Z",
     "isGM": false,
     "characters": {
-      "zeus": [
-        {
-          "player": {
-            "name": "maptest",
-            "classId": "warrior",
-            "level": 1,
-            "exp": 0,
-            "hp": 120,
-            "mp": 60,
-            "maxHp": 120,
-            "maxMp": 60,
-            "atk": 12,
-            "def": 8,
-            "spd": 1,
-            "crit": 5,
-            "hit": 95,
-            "dodge": 5,
-            "x": 0,
-            "y": 0,
-            "direction": "down"
-          },
-          "resources": {
-            "gold": 0,
-            "gem": 0
-          },
-          "inventory": [],
-          "ownedHeroes": [],
-          "ownedPets": [],
-          "ownedTransforms": [],
-          "equipment": {},
-          "bagMaxSlots": 30,
-          "enhanceTickets": 0,
-          "killCount": 0,
-          "currentMap": null,
-          "nation": null,
-          "siegeStats": {},
-          "rankings": {},
-          "createdAt": 1788092515067,
-          "name": "maptest",
-          "classId": "warrior",
-          "level": 1,
-          "exp": 0,
-          "created": true
-        }
-      ]
+      "zeus": []
     }
   },
   "testA_o0li14": {

@@ -821,9 +821,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-version: '2.8.2',
-      build: '2.8.2-2608302300',
-      buildId: '2.8.2-2608302300',
+      version: '2.8.3',
+      build: '2.8.3-2608311200',
+      buildId: '2.8.3-2608311200',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1511,8 +1511,26 @@ version: '2.8.2',
     if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
     try {
       const stats = await db.getStats();
-      return sendJson(res, 200, { ok: true, stats, backend: db.getBackend() });
+      // v2.8.3：附加線上玩家數（WS + LP 合計）與註冊總數
+      let onlineCount = 0;
+      try {
+        if (typeof wsServer.getOnlineCount === 'function') {
+          onlineCount += wsServer.getOnlineCount();
+        }
+      } catch(e) {}
+      try {
+        onlineCount += (onlinePlayers ? onlinePlayers.size : 0);
+      } catch(e) {}
+      const totalAccounts = stats.accounts != null ? stats.accounts : 0;
+      return sendJson(res, 200, {
+        ok: true,
+        stats,
+        backend: db.getBackend(),
+        onlineCount,
+        totalAccounts,
+      });
     } catch (e) {
+      console.error('[GM] admin/stats 失敗:', e.message);
       return sendJson(res, 500, { error: e.message });
     }
   }
@@ -1569,6 +1587,24 @@ version: '2.8.2',
       return sendJson(res, 200, { ok: true, counts });
     } catch (e) {
       console.error('[GM] reset-logs 失敗:', e.message);
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/admin/clear-leaderboard - 清空排行榜
+  if (req.method === 'POST' && pathname === '/api/gm/admin/clear-leaderboard') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      const counts = await db.clearLeaderboard();
+      // 廣播給所有線上玩家：排行榜已清空
+      if (wsServer && wsServer.broadcastData) {
+        wsServer.broadcastData({ type: 'leaderboard_cleared', time: Date.now() });
+      }
+      await db.logGMAction(gmAcc, null, 'clear_leaderboard', { counts });
+      return sendJson(res, 200, { ok: true, counts });
+    } catch (e) {
+      console.error('[GM] clear-leaderboard 失敗:', e.message);
       return sendJson(res, 500, { error: e.message });
     }
   }
@@ -2628,7 +2664,7 @@ wsServer.setLPAIBroadcast((serverId, mapId, ais) => {
 });
 
 // v2.7.3：注入伺服器 AI 持久化函式（重啟後 AI 不變）
-wsServer.setAIPersistence({
+const aiPersistence = {
   load(serverId, mapId) {
     const f = path.join(AI_DATA_DIR, `${serverId}_${mapId}.json`);
     try {
@@ -2670,7 +2706,8 @@ wsServer.setAIPersistence({
       }
     } catch(e) { console.warn('[AI Persist] clearAll 失敗', e.message); }
   },
-});
+};
+wsServer.setAIPersistence(aiPersistence);
 
 // v2.7.5：注入 LP 玩家提供者（讓 WS 端能取得 LP 玩家用於 AI 索敵）
 wsServer.setLpMapPlayersProvider((serverId, mapId) => {

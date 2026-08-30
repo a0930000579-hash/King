@@ -821,9 +821,16 @@ function createWsServer(httpServer) {
     }
   }
 
-  // GM 廣播
+  // GM 廣播（文字）
   function gmBroadcast(text) {
     const msg = { type: 'gm_broadcast', text, time: Date.now() };
+    for (const [wsId, c] of clients) {
+      if (c.authenticated) sendJson(c.socket, msg);
+    }
+  }
+
+  // 廣播任意 JSON 給所有已認證客戶端
+  function broadcastData(msg) {
     for (const [wsId, c] of clients) {
       if (c.authenticated) sendJson(c.socket, msg);
     }
@@ -990,6 +997,7 @@ function createWsServer(httpServer) {
     adjustAICount,
     setAICountForServer,
     gmBroadcast,
+    broadcastData,
     getOnlineCount,
     getOnlinePlayers,
     ensureAIForMap,

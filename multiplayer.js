@@ -531,28 +531,44 @@
         reject(new Error(_wsFailureReason));
         return;
       }
-      // v2.7.10：從 location.origin 正確推 WS URL，處理反向代理子路徑
-      // 邏輯：用伺服器回傳的 wsTransportPath 作為 WS upgrade 路徑
-      // 若 path 為 '/' 則用 serverUrl 的 pathname（DO 根路徑或妙搭子路徑都正確）
+      // v2.8.3：修復 DO / HTTPS 環境 WS 連線
+      //  - 協議用 window.location.protocol 判斷（頁面是 https 就用 wss）
+      //  - path 以頁面當前 pathname 為基準，確保反向代理子路徑正確
+      //  - 詳細 log 方便排查 upgrade 結果
       let wsUrl;
       try {
-        const u = new URL(serverUrl);
-        u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-        // 若伺服器有指定 WS path（非 '/')，用它；否則保留 serverUrl 的 pathname
+        // 以當前頁面的 origin 為準，避免 serverUrl 與頁面不一致
+        const pageProto = (typeof window !== 'undefined' && window.location && window.location.protocol) || 'http:';
+        const pageHost = (typeof window !== 'undefined' && window.location && window.location.host) || '';
+        const pagePath = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
+
+        const wsProto = pageProto === 'https:' ? 'wss:' : 'ws:';
+
+        // 如果伺服器有明確指定 wsTransportPath 且非 '/'，用它
+        // 否則用頁面 pathname 作為基礎（DO 子路徑部署時正確）
+        let targetPath;
         if (_wsPath && _wsPath !== '/') {
-          // 規範化：確保不以 // 開頭
-          let p = _wsPath;
-          if (!p.startsWith('/')) p = '/' + p;
-          u.pathname = p;
+          targetPath = _wsPath.startsWith('/') ? _wsPath : '/' + _wsPath;
+        } else {
+          // 用頁面 pathname，去掉 index.html / gm.html 等檔名，保留子路徑
+          if (pagePath.endsWith('.html')) {
+            targetPath = pagePath.substring(0, pagePath.lastIndexOf('/') + 1);
+          } else {
+            targetPath = pagePath.endsWith('/') ? pagePath : pagePath + '/';
+          }
         }
-        // 確保 pathname 以 / 結尾（與 server upgrade 路徑一致）
-        if (!u.pathname.endsWith('/')) u.pathname += '/';
-        wsUrl = u.toString();
+        // 確保以 / 結尾
+        if (!targetPath.endsWith('/')) targetPath += '/';
+
+        wsUrl = wsProto + '//' + pageHost + targetPath;
+        console.log('[WS] 嘗試連線:', wsUrl);
+        console.log('[WS]  - pageProto=' + pageProto + ' pageHost=' + pageHost + ' pagePath=' + pagePath);
+        console.log('[WS]  - serverUrl=' + serverUrl + ' wsPath=' + _wsPath);
       } catch(e) {
         // fallback：簡單字串取代
         wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/?$/, '/');
+        console.warn('[WS] URL 構建異常，使用 fallback:', wsUrl, e.message);
       }
-      console.log('[WS] 嘗試連線:', wsUrl, '(serverUrl=' + serverUrl + ', wsPath=' + _wsPath + ')');
       _wsFailureReason = '';
       try {
         ws = new WebSocket(wsUrl);
@@ -571,7 +587,7 @@
       }, 5000);
 
       ws.onopen = () => {
-        console.log('[WS] 已連接，發送 auth...');
+        console.log('[WS] upgrade 成功，連線已開啟 (onopen)，發送 auth...');
         wsSend({
           type: 'auth',
           token: authToken,
@@ -586,16 +602,16 @@
         try { msg = JSON.parse(ev.data); } catch(e) { return; }
         if (!msg || !msg.type) return;
 
-        if (msg.type === 'auth_ok') {
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            useWebSocket = true;
-            wsConnected = true;
-            wsReconnectDelay = 1000;
-            console.log('[WS] 認證成功，account=', msg.account);
-            resolve(msg);
-          }
+          if (msg.type === 'auth_ok') {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              useWebSocket = true;
+              wsConnected = true;
+              wsReconnectDelay = 1000;
+              console.log('[WS] 認證成功，account=', msg.account, '(WebSocket 模式啟用)');
+              resolve(msg);
+            }
           // 若已經在地圖中，重新 join
           if (currentMapId && myPlayerId) {
             wsSend({
@@ -626,18 +642,17 @@
       };
 
       ws.onerror = (err) => {
-        console.warn('[WS] 錯誤', err);
+        console.warn('[WS] 錯誤事件 onerror:', err?.message || err, 'readyState=' + (ws?.readyState ?? '?'));
+        _wsFailureReason = '連線錯誤（' + (err?.message || 'network error') + '）';
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
-          // v2.7.7：錯誤時保留連線線索，給指示器 tooltip 顯示
-          _wsFailureReason = '連線錯誤（網路或代理阻擋）';
           reject(new Error('WebSocket 連線錯誤（' + (err?.message || 'network error') + '）'));
         }
       };
 
       ws.onclose = (ev) => {
-        console.log('[WS] 連線關閉 code=' + ev.code + ' reason=' + (ev.reason || ''));
+        console.log('[WS] 連線關閉 code=' + ev.code + ' reason=' + (ev.revision || ev.reason || '') + ' wasClean=' + ev.wasClean);
         wsConnected = false;
         _wsLastCloseCode = ev.code;
         _wsLastCloseReason = ev.reason || '';
