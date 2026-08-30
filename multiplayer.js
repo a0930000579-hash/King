@@ -34,13 +34,17 @@
   let wsReconnectTimer = null;
   let useWebSocket = false; // 是否成功切換到 WS
 
+  let _wsFailureReason = ''; // v2.7.5：WS 上次失敗原因（供 UI 顯示）
+
+  function getWsFailureReason() { return _wsFailureReason; }
+
   const remotePlayers = new Map();
   let pollAbortController = null;
   let pollRunning = false;
   let reconnectDelay = 1000;
   let lastPollTime = 0;
   let lastUpdateTime = 0;
-  const UPDATE_THROTTLE = 50; // 50ms 節流發位置
+  const UPDATE_THROTTLE = 100; // v2.7.5：50ms → 100ms（10Hz），降低廣播頻寬
 
   // ========== 工具 ==========
   function getAuthHeader() {
@@ -407,6 +411,25 @@
       }).catch(() => {});
     },
 
+    // 回報攻擊（對伺服器 AI 造成傷害）
+    reportAttack(targetId, skillId, damage) {
+      if (status !== STATUS.ONLINE || !currentMapId) return;
+      const body = {
+        mapId: currentMapId,
+        serverId: currentServerId || 'zeus',
+        charIdx: currentCharIdx,
+        targetId,
+        skillId: skillId || 0,
+        damage: damage || 0,
+      };
+      // v2.7.5：優先走 WebSocket，否則走 LP
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'attack', ...body });
+      } else {
+        apiPost('/api/mp/attack', body).catch(() => {});
+      }
+    },
+
     // 每幀更新遠端玩家位置（內插）
     tick(dt) {
       if (status !== STATUS.ONLINE || remotePlayers.size === 0) return;
@@ -416,6 +439,8 @@
     _getRemotePlayers() { return remotePlayers; },
     _getWebSocket() { return ws; },
     get isWebSocket() { return useWebSocket; },
+    get wsFailureReason() { return _wsFailureReason; },
+    getWsFailureReason: getWsFailureReason,
   };
 
   // ========== v2.7.2：WebSocket 連線（優先通道，失敗降級 long-poll） ==========
@@ -430,13 +455,27 @@
   function tryWebSocket() {
     return new Promise((resolve, reject) => {
       if (typeof WebSocket === 'undefined') {
-        reject(new Error('瀏覽器不支援 WebSocket'));
+        _wsFailureReason = '瀏覽器不支援 WebSocket';
+        reject(new Error(_wsFailureReason));
         return;
       }
-      const wsUrl = serverUrl.replace(/^http/, 'ws') + '/';
+      // v2.7.5：從 serverUrl 正確推 ws:// 或 wss://，保持同 port、同 path
+      let wsUrl;
+      try {
+        const u = new URL(serverUrl);
+        u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+        u.pathname = u.pathname.endsWith('/') ? u.pathname : u.pathname + '/';
+        wsUrl = u.toString();
+      } catch(e) {
+        // fallback：簡單字串取代
+        wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/?$/, '/');
+      }
+      console.log('[WS] 嘗試連線:', wsUrl);
+      _wsFailureReason = '';
       try {
         ws = new WebSocket(wsUrl);
       } catch(e) {
+        _wsFailureReason = '建立失敗: ' + (e.message || String(e));
         reject(e);
         return;
       }
@@ -505,19 +544,31 @@
       };
 
       ws.onerror = (err) => {
-        console.warn('[WS] 錯誤');
+        console.warn('[WS] 錯誤', err);
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
+          _wsFailureReason = '連線錯誤（網路或代理阻擋）';
           reject(new Error('WebSocket 連線錯誤'));
         }
       };
 
-      ws.onclose = () => {
-        console.log('[WS] 連線關閉');
+      ws.onclose = (ev) => {
+        console.log('[WS] 連線關閉 code=' + ev.code + ' reason=' + (ev.reason || ''));
         wsConnected = false;
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          let reason = '連線被關閉';
+          if (ev.code === 1006) reason = '無法連接伺服器（code 1006，請檢查代理是否支援 WS Upgrade）';
+          else if (ev.code === 1000) reason = '正常關閉';
+          else reason = '關閉 code=' + ev.code;
+          _wsFailureReason = reason;
+          reject(new Error(reason));
+          return;
+        }
+        // 意外斷線：嘗試重連，或降級 long-poll
         if (useWebSocket && status === STATUS.ONLINE) {
-          // 意外斷線：嘗試重連，或降級 long-poll
           console.warn('[WS] 線中斷，降級 long-poll 並嘗試重連');
           useWebSocket = false;
           startPollLoop();
@@ -625,6 +676,15 @@
       case 'ai_update':
         if (msg.ais && Array.isArray(msg.ais) && typeof window.setServerAIs === 'function') {
           window.setServerAIs(msg.ais, msg.serverId, msg.mapId);
+        }
+        break;
+      // v2.7.5：伺服器 AI 戰鬥事件
+      case 'ai_damaged':
+      case 'ai_killed':
+      case 'ai_attack':
+      case 'ai_respawn':
+        if (typeof window._handleServerAIEvent === 'function') {
+          try { window._handleServerAIEvent(msg.type, msg); } catch(e) { console.warn('[WS] AI event error:', e); }
         }
         break;
       case 'chat':
@@ -792,6 +852,15 @@
                 });
               } catch(e) {}
             }
+          }
+          break;
+        // v2.7.5：伺服器 AI 戰鬥事件（LP 通道）
+        case 'ai_damaged':
+        case 'ai_killed':
+        case 'ai_attack':
+        case 'ai_respawn':
+          if (typeof window._handleServerAIEvent === 'function') {
+            try { window._handleServerAIEvent(ev.type, ev); } catch(e) {}
           }
           break;
       }

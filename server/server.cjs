@@ -16,9 +16,28 @@
  * 啟動：node server/server.cjs（根目錄 npm start 亦可）
  */
 
+// v2.7.5：注入 vendor/ 為 NODE_PATH，讓隨包附帶的 pg 可直接 require（零 npm install）
+const Module = require('module');
+const path = require('path');
+const vendorDir = path.resolve(__dirname, 'vendor');
+const origResolve = Module._resolveFilename;
+Module._resolveFilename = function(request, parent, isMain, options) {
+  try {
+    return origResolve.call(this, request, parent, isMain, options);
+  } catch (e) {
+    if (e.code === 'MODULE_NOT_FOUND') {
+      try {
+        return origResolve.call(this, path.join(vendorDir, request), parent, isMain, options);
+      } catch (_) {
+        throw e;
+      }
+    }
+    throw e;
+  }
+};
+
 const http = require('http');
 const fs = require('fs');
-const path = require('path');
 const url = require('url');
 const crypto = require('crypto');
 
@@ -445,15 +464,22 @@ async function handleMpApi(req, res, pathname, query, account) {
     if (!mapId) { sendJson(res, 400, { error: '缺少 mapId' }); return; }
     const mapState = getMapState(serverId, mapId);
     if (!mapState.has(playerId)) { sendJson(res, 401, { error: '未加入' }); return; }
+    // v2.7.5：伺服器端 AI 傷害權威處理（targetId 若為 AI 則扣血並廣播）
+    const dmg = Math.max(0, Math.floor(body.damage || 0));
+    const isAI = targetId && targetId.startsWith && targetId.startsWith('ai_');
+    if (isAI && wsServer && typeof wsServer.damageAI === 'function') {
+      wsServer.damageAI(serverId, mapId, targetId, dmg, playerId);
+    }
     notifyMapUpdate(serverId, mapId, {
       type: 'attack',
       playerId,
       targetId,
       skillId: body.skillId || 0,
-      damage: body.damage || 0,
+      damage: dmg,
+      isAITarget: isAI,
       time: Date.now(),
     });
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, { ok: true, serverAuthoritative: isAI });
     return;
   }
 
@@ -656,14 +682,15 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.7.3',
-      build: '2.7.3-2608292300',
-      buildId: '2.7.3-2608292300',
+      version: '2.7.5',
+      build: '2.7.5-2608300300',
+      buildId: '2.7.5-2608300300',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
       socketIo: true,
       webSocket: true,
+      wsTransportPath: '/',
       longPoll: true,
       dbBackend: backend,
       dbError: dbErr,
@@ -760,6 +787,9 @@ async function handleApi(req, res, pathname, query) {
       version: '2.7.3',
       build: '2.7.3-2608292300',
       buildId: '2.7.3-2608292300',
+      version: '2.7.5',
+      build: '2.7.5-2608300300',
+      buildId: '2.7.5-2608300300',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       uptimeMs: uptime,
@@ -1493,6 +1523,54 @@ async function handleApi(req, res, pathname, query) {
       return sendJson(res, 200, { ok: true, server: srv });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/server/reset-ai - 重置指定伺服器的 AI（清空持久化並重新生成）
+  if (req.method === 'POST' && pathname === '/api/gm/server/reset-ai') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    let body;
+    try { body = await parseJsonBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const id = body.id;
+    if (!id) return sendJson(res, 400, { error: '缺少伺服器 id' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      // 清空持久化檔案
+      if (aiPersistence && aiPersistence.clearByServer) {
+        aiPersistence.clearByServer(id);
+      }
+      // 取得最新設定
+      const srv = await db.getServer(id);
+      const aiCount = srv ? (srv.aiCount != null ? parseInt(srv.aiCount) : 8) : 8;
+      const initLevel = srv ? (srv.initLevel != null ? parseInt(srv.initLevel) : 1) : 1;
+      // 強制重設所有活躍地圖的 AI
+      const result = wsServer.setAICountForServer(id, aiCount, { initLevel, forceReset: true });
+      await db.logGMAction(gmAcc, null, 'server_reset_ai', { id, aiCount, initLevel, mapsReset: result.affected ? result.affected.length : 0 });
+      return sendJson(res, 200, { ok: true, aiCount, initLevel, mapsReset: result.affected ? result.affected.length : 0 });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/gm/admin/reset-ai-all - 重置全部伺服器 AI（清除所有 data/ai 檔）
+  if (req.method === 'POST' && pathname === '/api/gm/admin/reset-ai-all') {
+    if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
+    const gmAcc = await getAuthAccount(req);
+    try {
+      if (aiPersistence && aiPersistence.clearAll) aiPersistence.clearAll();
+      // 重新載入所有伺服器 AI（從 DB 設定）
+      const servers = await db.listServers();
+      let totalMaps = 0;
+      for (const srv of servers) {
+        const aiCount = srv.aiCount != null ? parseInt(srv.aiCount) : 8;
+        const initLevel = srv.initLevel != null ? parseInt(srv.initLevel) : 1;
+        const r = wsServer.setAICountForServer(srv.id, aiCount, { initLevel, forceReset: true });
+        totalMaps += r.affected ? r.affected.length : 0;
+      }
+      await db.logGMAction(gmAcc, null, 'admin_reset_ai_all', { serverCount: servers.length, totalMaps });
+      return sendJson(res, 200, { ok: true, serverCount: servers.length, totalMaps });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
     }
   }
 
@@ -2421,7 +2499,42 @@ wsServer.setAIPersistence({
   delete(serverId, mapId) {
     const f = path.join(AI_DATA_DIR, `${serverId}_${mapId}.json`);
     try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch(e) {}
-  }
+  },
+  clearByServer(serverId) {
+    try {
+      const files = fs.readdirSync(AI_DATA_DIR);
+      const prefix = serverId + '_';
+      for (const f of files) {
+        if (f.startsWith(prefix) && f.endsWith('.json')) {
+          try { fs.unlinkSync(path.join(AI_DATA_DIR, f)); } catch(e) {}
+        }
+      }
+    } catch(e) { console.warn('[AI Persist] clearByServer 失敗', e.message); }
+  },
+  clearAll() {
+    try {
+      const files = fs.readdirSync(AI_DATA_DIR);
+      for (const f of files) {
+        if (f.endsWith('.json')) {
+          try { fs.unlinkSync(path.join(AI_DATA_DIR, f)); } catch(e) {}
+        }
+      }
+    } catch(e) { console.warn('[AI Persist] clearAll 失敗', e.message); }
+  },
+});
+
+// v2.7.5：注入 LP 玩家提供者（讓 WS 端能取得 LP 玩家用於 AI 索敵）
+wsServer.setLpMapPlayersProvider((serverId, mapId) => {
+  const key = mpKey(serverId, mapId);
+  const ms = mpMapStates.get(key);
+  return ms || null;
+});
+
+// v2.7.5：AI 攻擊事件轉發到 LP 通道
+wsServer.setLpForwardEvent((serverId, mapId, event) => {
+  try {
+    notifyMapUpdate(serverId, mapId, event);
+  } catch(e) {}
 });
 
 // v2.7.3：注入伺服器 AI 設定提供者（從 DB 讀真實設定）

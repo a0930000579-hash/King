@@ -1122,7 +1122,10 @@
       <div class="card">
         <div class="flex justify-between items-center">
           <h3>伺服器清單</h3>
-          <button class="btn btn-sm" onclick="openServerModal()">+ 新增伺服器</button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm" onclick="openServerModal()">+ 新增伺服器</button>
+            <button class="btn btn-sm btn-ghost" onclick="resetAllAI()" title="清除所有AI持久化檔案並重新生成">↻ 重置全部 AI</button>
+          </div>
         </div>
         <div style="margin-top:12px;">
           <table>
@@ -1435,15 +1438,16 @@ async function loadServerList() {
             <td>${s.maxPlayers}</td>
             <td>${s.onlineCount != null ? s.onlineCount : '--'}</td>
             <td style="font-size:12px;color:#8a6a2a;">${s.createdAt ? new Date(s.createdAt).toLocaleDateString('zh-TW') : '--'}</td>
-            <td>
-              <div class="flex gap-6" style="flex-wrap:wrap;">
-                <button class="btn btn-xs" onclick="editServer('${s.id}')">編輯</button>
-                <button class="btn btn-xs btn-ghost" onclick="toggleServerStatus('${s.id}', '${s.status}')">
-                  ${s.status === 'open' ? '關閉' : '開啟'}
-                </button>
-                <button class="btn btn-xs btn-danger" onclick="deleteServer('${s.id}')">刪除</button>
-              </div>
-            </td>
+             <td>
+               <div class="flex gap-6" style="flex-wrap:wrap;">
+                 <button class="btn btn-xs" onclick="editServer('${s.id}')">編輯</button>
+                 <button class="btn btn-xs btn-ghost" onclick="toggleServerStatus('${s.id}', '${s.status}')">
+                   ${s.status === 'open' ? '關閉' : '開啟'}
+                 </button>
+                 <button class="btn btn-xs" onclick="resetServerAI('${s.id}')" title="清空AI持久化並重新生成">重設AI</button>
+                 <button class="btn btn-xs btn-danger" onclick="deleteServer('${s.id}')">刪除</button>
+               </div>
+             </td>
           </tr>
         `;
       }).join('');
@@ -1546,6 +1550,41 @@ async function deleteServer(id) {
     loadServerList();
   } catch (e) {
     showToast('刪除失敗：' + e.message, 'error');
+  }
+}
+
+// v2.7.5：重置單一伺服器的 AI
+async function resetServerAI(id) {
+  if (!confirm('確定要重置伺服器「' + id + '」的所有 AI 嗎？\n（清空持久化檔案、重新生成）')) return;
+  try {
+    const data = await apiCall('/api/gm/server/reset-ai', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    if (data && data.ok) {
+      showToast('AI 已重置，影響 ' + (data.mapsReset || 0) + ' 張地圖', 'success');
+      loadServerList();
+    }
+  } catch (e) {
+    showToast('重置失敗：' + e.message, 'error');
+  }
+}
+
+// v2.7.5：重置全部伺服器的 AI
+async function resetAllAI() {
+  if (!confirm('確定要重置所有伺服器的 AI 嗎？\n（這會清除所有 data/ai 持久化檔案）')) return;
+  if (!confirm('再次確認：真的要重置全部 AI 嗎？')) return;
+  try {
+    const data = await apiCall('/api/gm/admin/reset-ai-all', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    if (data && data.ok) {
+      showToast('全部 AI 已重置（' + data.serverCount + ' 服 / ' + data.totalMaps + ' 張地圖）', 'success');
+      loadServerList();
+    }
+  } catch (e) {
+    showToast('重置失敗：' + e.message, 'error');
   }
 }
 

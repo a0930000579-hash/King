@@ -645,20 +645,62 @@ img { display: block; pointer-events: none; }
   will-change: left, top;
 }
 
+/* v2.7.5：所有世界單位（玩家/AI/怪/NPC/召喚/攻城）統一橢圓腳影 + 柔邊 */
+.world-unit::before {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  height: 10px;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.25) 45%, transparent 75%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+  filter: blur(1px);
+}
+/* hero 比較高，腳影壓大一點 */
+.world-unit.hero::before {
+  width: 50%;
+  height: 12px;
+  bottom: -3px;
+}
+/* boss 腳影更大 */
+.world-unit.boss-unit::before {
+  width: 90%;
+  height: 16px;
+  bottom: -4px;
+}
+/* 死亡狀態腳影淡化 */
+.world-unit.dead::before {
+  opacity: 0.3;
+}
+
 /* ========== 全身精靈圖顯示系統 ==========
-   v2.6.0：移除橢圓蒙版與拱門邊框，顯示完整全身角色圖 */
+   v2.6.0：移除橢圓蒙版與拱門邊框，顯示完整全身角色圖
+   v2.7.5：世界層精靈加圓角柔邊 + 橢圓腳影，避免硬方形卡牌感 */
 .unit-sprite-wrap {
   position: relative;
-  overflow: visible;
+  overflow: hidden;  /* v2.7.5：隱藏溢出，圓角生效 */
   flex-shrink: 0;
   background: transparent !important;
   display: block;
   transform-origin: center bottom;
   pointer-events: none;
-  border-radius: 0;
+  border-radius: 20% 20% 16% 16% / 14% 14% 10% 10%;  /* v2.7.5：大圓角柔邊，去除卡牌硬邊 */
   box-shadow: none;
-  -webkit-mask-image: none;
-          mask-image: none;
+  /* v2.7.5：邊緣羽化（由外向內逐漸透明，模擬去背效果） */
+  -webkit-mask-image: linear-gradient(to bottom,
+      rgba(0,0,0,0.85) 0%, #000 6%, #000 94%, rgba(0,0,0,0.85) 100%),
+    linear-gradient(to right,
+      rgba(0,0,0,0.85) 0%, #000 8%, #000 92%, rgba(0,0,0,0.85) 100%);
+  -webkit-mask-composite: source-in;
+          mask-image: linear-gradient(to bottom,
+      rgba(0,0,0,0.85) 0%, #000 6%, #000 94%, rgba(0,0,0,0.85) 100%),
+    linear-gradient(to right,
+      rgba(0,0,0,0.85) 0%, #000 8%, #000 92%, rgba(0,0,0,0.85) 100%);
+          mask-composite: intersect;
   /* 柔和陰影 */
   filter: drop-shadow(2px 4px 4px rgba(0,0,0,0.5))
           drop-shadow(0 1px 1px rgba(0,0,0,0.3));

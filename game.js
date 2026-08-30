@@ -8653,6 +8653,25 @@ function onAIPlayerClick(ai) {
 }
 
 function dealDamageToAIPlayer(ai, dmg, damageType, skill, effectType) {
+  // v2.7.5：伺服器 AI 由伺服器權威扣血，本地只發送攻擊事件
+  if (ai && ai.isServerAI && window.MultiplayerClient && MultiplayerClient.connected) {
+    const isCrit = damageType === 'crit' || Math.random() < 0.05;
+    const finalDmg = isCrit ? Math.floor(dmg * 1.5) : dmg;
+    if (typeof MultiplayerClient.reportAttack === 'function') {
+      MultiplayerClient.reportAttack(ai.uid, skill ? skill.id : 0, finalDmg);
+    }
+    // 本地立刻顯示傷害飄字與受擊閃爍（視覺反饋，實際血量等伺服器確認）
+    if (typeof showDamage === 'function') {
+      try { showDamage(ai.x, ai.y - 50, finalDmg, isCrit ? 'crit' : 'normal'); } catch(e) {}
+    }
+    if (ai.el) {
+      ai.el.classList.add('hit-flash');
+      setTimeout(() => ai.el && ai.el.classList.remove('hit-flash'), 150);
+    }
+    addLog(isCrit ? 'crit' : 'damage',
+      `你對【${ai.name}】造成 ${finalDmg} 傷害${isCrit ? '（暴擊）' : ''}${skill?.name ? ' · ' + skill.name : ''}`);
+    return;
+  }
   if (!ai || ai.hp <= 0) return;
   const isCrit = damageType === 'crit' || Math.random() < 0.05;
   const finalDmg = isCrit ? Math.floor(dmg * 1.5) : dmg;
@@ -21775,8 +21794,9 @@ function bindTransformCardEvents() {
       e.stopPropagation();
       const tid = btn.dataset.useTransformId;
       if (activateTransform(tid)) {
-        el.pageContent.innerHTML = renderTransformPanel();
-        bindTransformCardEvents();
+        // v2.7.5：重新 render 完整 HeroPage（含子分欄列），而非只有 transform panel
+        el.pageContent.innerHTML = renderHeroPage();
+        bindPageEvents('hero');
         renderPlayer();
       }
     });
@@ -21796,8 +21816,9 @@ function bindTransformCardEvents() {
         updateRankings();
         updateUI();
         renderPlayer();
-        el.pageContent.innerHTML = renderTransformPanel();
-        bindTransformCardEvents();
+        // v2.7.5：重新 render 完整 HeroPage（含子分欄列）
+        el.pageContent.innerHTML = renderHeroPage();
+        bindPageEvents('hero');
       }
   });
   // 變身卡片點擊（顯示詳情）
@@ -21844,8 +21865,9 @@ function bindTransformCardEvents() {
       if (useBtn) useBtn.onclick = () => {
         if (activateTransform(tid)) {
           document.getElementById('transform-detail-modal').remove();
-          el.pageContent.innerHTML = renderTransformPanel();
-          bindTransformCardEvents();
+          // v2.7.5：重新 render 完整 HeroPage（含子分欄列）
+          el.pageContent.innerHTML = renderHeroPage();
+          bindPageEvents('hero');
           renderPlayer();
         }
       };
@@ -21857,8 +21879,9 @@ function bindTransformCardEvents() {
         removeTransformBuff();
         calcCP();
         document.getElementById('transform-detail-modal').remove();
-        el.pageContent.innerHTML = renderTransformPanel();
-        bindTransformCardEvents();
+        // v2.7.5：重新 render 完整 HeroPage（含子分欄列）
+        el.pageContent.innerHTML = renderHeroPage();
+        bindPageEvents('hero');
         renderPlayer();
         updateUI();
       };
@@ -22292,6 +22315,12 @@ function exportGameFile() {
 // 原始碼僅由營運方保管，不對玩家開放
 
 function openMenuPage(page) {
+  // v2.7.5：有專屬 overlay 的頁面(auction/settings/codex/synth)不開空白 side-page
+  const noSidePages = ['auction', 'settings', 'codex', 'synth'];
+  if (noSidePages.includes(page)) {
+    closeSideMenu();
+    return;
+  }
   closeSideMenu();
   openSidePage('menu_' + page);
   el.pageTitle.textContent = getMenuPageTitle(page);
@@ -25793,7 +25822,7 @@ function bindEvents() {
   el.menuBtn.addEventListener('click', openSideMenu);
   el.sideMenuClose.addEventListener('click', closeSideMenu);
   el.sideMenuOverlay.addEventListener('click', closeSideMenu);
-  document.querySelectorAll('.side-menu-item').forEach(item => {
+  document.querySelectorAll('.side-menu-item[data-menu]').forEach(item => {
     item.addEventListener('click', () => openMenuPage(item.dataset.menu));
   });
 
@@ -26295,6 +26324,7 @@ window._setServerInstanceId = function(id) {
  * 設定伺服器廣播的 AI 清單（來自 WebSocket 或 long-poll）
  *  - 以 ai.id 為主鍵做增量更新
  *  - 本地只做渲染與移動插值，不做邏輯/隨機生成
+ *  v2.7.5：補接 ai_damaged / ai_killed / ai_attack / ai_respawn 事件
  */
 window.setServerAIs = function(ais, serverId, mapId) {
   if (!ais || !Array.isArray(ais)) return;
@@ -26314,12 +26344,29 @@ window.setServerAIs = function(ais, serverId, mapId) {
   renderServerAIsToWorld(ais);
 };
 
+let _lastServerAISnapshotHash = ''; // v2.7.5：快照hash，未變不重建DOM
+let _lastServerAICount = 0;
+
 /**
  * 把伺服器 AI 清單渲染到 worldLayer
- *  只與本地 GLOBAL_AI_POOL 做最小差異比對，避免全部重建
+ *  v2.7.5：數量未變時只更新屬性（位置/HP），不重建DOM；大幅降低卡頓
  */
 function renderServerAIsToWorld(ais) {
   if (!worldLayer) return;
+
+  // v2.7.5：計算快照hash（只看 id+數量），相同則增量更新位置/HP即可
+  const curIds = ais.map(a => a.id).sort().join(',');
+  const countChanged = ais.length !== _lastServerAICount;
+
+  if (!countChanged && curIds === _lastServerAISnapshotHash) {
+    // 只有位置/HP變動：增量更新
+    updateServerAIsFromSnapshot(ais);
+    return;
+  }
+
+  // 數量或id變動 → 重建（但仍儘量比對差異）
+  _lastServerAISnapshotHash = curIds;
+  _lastServerAICount = ais.length;
 
   // 把現有的 ai-player DOM 全部清掉（舊的本地 AI）
   const oldAIs = worldLayer.querySelectorAll('.world-unit.ai-player');
@@ -26345,6 +26392,43 @@ function renderServerAIsToWorld(ais) {
   spawnBatch();
 }
 
+/** v2.7.5：快照未變動數量時，只更新每隻AI的位置/HP/方向/等級等 */
+function updateServerAIsFromSnapshot(ais) {
+  if (!GS || !GS.aiPlayers || !worldLayer) return;
+  const byId = new Map();
+  for (const ai of GS.aiPlayers) byId.set(ai.uid, ai);
+  for (const sai of ais) {
+    const local = byId.get(sai.id);
+    if (!local) continue;
+    // 更新目標位置（updateServerAIs 會做插值）
+    local.targetX = sai.x;
+    local.targetY = sai.y;
+    local.serverDir = sai.dir;
+    // 更新 HP（伺服器權威）
+    if (sai.hp != null) local.hp = sai.hp;
+    if (sai.maxHp != null) local.hpMax = sai.maxHp;
+    // 等級與國家（通常不變，保險更新）
+    if (sai.level != null) local.level = sai.level;
+    if (sai.nation) local.nation = sai.nation;
+    // 死亡狀態
+    if (sai.dead) {
+      local.dead = true;
+      if (local.el) local.el.style.opacity = '0.25';
+    } else if (local.dead) {
+      local.dead = false;
+      if (local.el) local.el.style.opacity = '';
+    }
+    // 更新 HP bar
+    if (local.el) {
+      const hpFill = local.el.querySelector('.unit-hp-fill');
+      const pct = Math.max(0, Math.min(100, (local.hp / (local.hpMax || 1)) * 100));
+      if (hpFill) hpFill.style.width = pct + '%';
+      const nameEl = local.el.querySelector('.unit-name');
+      if (nameEl && nameEl.textContent !== local.name) nameEl.textContent = local.name;
+    }
+  }
+}
+
 /** 把伺服器 AI 格式轉換為 createAISprite 可吃的格式 */
 function wrapServerAI(sai) {
   const clsId = sai.classId || 'warrior';
@@ -26358,6 +26442,17 @@ function wrapServerAI(sai) {
     hp: sai.hp != null ? sai.hp : 100,
     hpMax: sai.maxHp || sai.hpMax || 100,
     x: sai.x || 500,
+    y: sai.y || 500,
+    // v2.7.5：插值目標位置（伺服器快照的實際位置，客戶端平滑過去）
+    targetX: sai.x || 500,
+    targetY: sai.y || 500,
+    dir: sai.dir || 'down',
+    isAI: true,
+    isServerAI: true,
+    serverId: sai.serverId || 'zeus',
+    mapId: sai.mapId || 'village_01',
+    dead: !!sai.dead,
+    _spriteClass: clsId,
     y: sai.y || 500,
     dir: sai.dir || 'down',
     isAI: true,
@@ -26427,6 +26522,128 @@ function updateServerAIs(dt) {
       ai.dir = dy > 0 ? 'up' : 'down';
     }
   });
+}
+
+// ========== v2.7.5：伺服器 AI 戰鬥事件處理 ==========
+//  處理 WS/LP 推來的 ai_damaged / ai_killed / ai_attack / ai_respawn 事件
+//  玩家攻擊 AI 的傷害已由伺服器權威計算，這裡負責視覺表現與獎勵
+
+/** 全域事件接收：由 multiplayer.js 呼叫（WS 與 LP 雙通道共用） */
+window._handleServerAIEvent = function(type, data) {
+  if (!type || !data) return;
+  switch (type) {
+    case 'ai_damaged': handleServerAIDamaged(data); break;
+    case 'ai_killed':  handleServerAIKilled(data); break;
+    case 'ai_attack':  handleServerAIAttack(data); break;
+    case 'ai_respawn': handleServerAIRespawn(data); break;
+  }
+};
+
+function handleServerAIDamaged(data) {
+  const { aiId, hp, maxHp, damage, attackerId } = data || {};
+  if (!aiId) return;
+  // 找本地 AI 並更新 HP
+  const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
+  if (!ai) return;
+  ai.hp = hp != null ? hp : Math.max(0, (ai.hp || 100) - (damage || 0));
+  ai.hpMax = maxHp || ai.hpMax || 100;
+  // 更新 HP bar
+  if (ai.el) {
+    const hpFill = ai.el.querySelector('.unit-hp-fill');
+    const pct = Math.max(0, Math.min(100, (ai.hp / ai.hpMax) * 100));
+    if (hpFill) hpFill.style.width = pct + '%';
+  }
+  // 受擊閃爍
+  if (ai.el) {
+    ai.el.classList.add('hit-flash');
+    setTimeout(() => ai.el && ai.el.classList.remove('hit-flash'), 150);
+  }
+  // 傷害飄字（若是玩家打擊）
+  if (damage && attackerId === (window.MultiplayerClient?.myId || '')) {
+    if (typeof showDamage === 'function' && ai.x && ai.y) {
+      try { showDamage(ai.x, ai.y + 20, damage, 'normal'); } catch(e) {}
+    }
+  }
+}
+
+function handleServerAIKilled(data) {
+  const { aiId, killerId, expReward, goldReward, respawnIn } = data || {};
+  const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
+  if (!ai) return;
+  ai.dead = true;
+  if (ai.el) {
+    ai.el.style.opacity = '0.2';
+    ai.el.style.filter = 'grayscale(1) brightness(0.5)';
+  }
+  // 玩家是擊殺者 → 給獎勵
+  if (killerId === (window.MultiplayerClient?.myId || '')) {
+    if (expReward) {
+      GS.player.exp = (GS.player.exp || 0) + expReward;
+      addLog('combat', `擊敗 ${ai.name}，獲得 ${expReward} 經驗`);
+      checkLevelUp();
+    }
+    if (goldReward) {
+      GS.resources.gold = (GS.resources.gold || 0) + goldReward;
+    }
+    updateUI();
+  }
+}
+
+function handleServerAIAttack(data) {
+  const { aiId, targetId, damage, aiX, aiY } = data || {};
+  if (!targetId) return;
+  // 攻擊的是自己 → 玩家受傷
+  if (targetId === window.MultiplayerClient?.myId) {
+    if (typeof damagePlayer === 'function' && damage) {
+      try { damagePlayer(damage, '伺服器 AI'); } catch(e) {}
+    }
+    // 受擊震動/閃屏
+    if (window.AudioSystem && typeof AudioSystem.sfxHit === 'function') {
+      try { AudioSystem.sfxHit(); } catch(e) {}
+    }
+  }
+  // 不論打誰，都顯示 AI 攻擊動作
+  if (aiId) {
+    const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
+    if (ai && ai.el) {
+      ai.el.classList.add('attack-anim');
+      setTimeout(() => ai.el && ai.el.classList.remove('attack-anim'), 300);
+    }
+  }
+}
+
+function handleServerAIRespawn(data) {
+  const { aiId, x, y } = data || {};
+  const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
+  if (!ai) return;
+  ai.dead = false;
+  ai.hp = ai.hpMax || 100;
+  if (x != null) { ai.x = x; ai.targetX = x; }
+  if (y != null) { ai.y = y; ai.targetY = y; }
+  if (ai.el) {
+    ai.el.style.opacity = '';
+    ai.el.style.filter = '';
+    const hpFill = ai.el.querySelector('.unit-hp-fill');
+    if (hpFill) hpFill.style.width = '100%';
+  }
+}
+
+// ========== v2.7.5：玩家攻擊伺服器 AI → 透過 multiplayer 送出，由伺服器扣血 ==========
+//  攔截 dealDamageToAIPlayer：如果是伺服器 AI，不本地扣血，改由廣播通知伺服器
+const _origDealDamageToAI = typeof dealDamageToAIPlayer === 'function' ? dealDamageToAIPlayer : null;
+function _serverAIDamageHook(ai, dmg, damageType, skill, effectType) {
+  if (ai && ai.isServerAI && window.MultiplayerClient && MultiplayerClient.connected) {
+    // 伺服器 AI：透過 multiplayer 攻擊 API 送出（伺服器權威扣血）
+    if (typeof MultiplayerClient.reportAttack === 'function') {
+      MultiplayerClient.reportAttack(ai.uid, skill ? skill.id : 0, dmg);
+    }
+    return; // 不本地扣血
+  }
+  if (_origDealDamageToAI) return _origDealDamageToAI.apply(this, arguments);
+}
+// 若 game.js 本來有 dealDamageToAIPlayer，替換掉
+if (typeof dealDamageToAIPlayer === 'function') {
+  dealDamageToAIPlayer = _serverAIDamageHook;
 }
 
 // ========== v2.7.3：倉庫系統（帳號共享） ==========
@@ -26821,11 +27038,13 @@ function updateServerAIs(dt) {
     const ind = ensureIndicator();
     const tr = getTransportLabel();
     const color = getTransportColor(tr);
-    let sid = '-', mid = '-', aiSrc = 'local', aiCount = 0;
+    let sid = '-', mid = '-', aiSrc = 'local', aiCount = 0, iid = '-';
+    let wsFailReason = '';
     try {
       if (window.MultiplayerClient) {
         sid = MultiplayerClient.serverId || '-';
         mid = MultiplayerClient.mapId || '-';
+        wsFailReason = MultiplayerClient.wsFailureReason || MultiplayerClient.getWsFailureReason?.() || '';
       }
       if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
         aiSrc = 'server';
@@ -26834,9 +27053,15 @@ function updateServerAIs(dt) {
         aiSrc = 'local';
         aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
       }
+      if (typeof _serverInstanceId !== 'undefined') iid = (_serverInstanceId || '-').slice(0, 8);
     } catch(e) {}
     const trLabel = tr === 'websocket' ? 'WS' : (tr === 'longpoll' ? 'LP' : 'OFF');
-    ind.innerHTML = '<span style="color:' + color + ';font-weight:700">' + trLabel + '</span> · ' + sid + '/' + mid + ' · AI:' + aiSrc + '(' + aiCount + ')';
+    ind.innerHTML = '<span style="color:' + color + ';font-weight:700">' + trLabel + '</span> · ' + sid + '/' + mid + ' · AI:' + aiSrc + '(' + aiCount + ')' + ' · <span style="opacity:0.6">' + iid + '</span>';
+    let tooltip = '連線狀態：' + tr + '\n伺服器：' + sid + '\n地圖：' + mid + '\nAI來源：' + aiSrc + ' / ' + aiCount + ' 個';
+    if (wsFailReason && tr !== 'websocket') {
+      tooltip += '\n\nWebSocket 失敗原因：\n' + wsFailReason;
+    }
+    ind.title = tooltip;
   }
 
   window.updateConnectionIndicator = update;

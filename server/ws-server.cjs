@@ -129,9 +129,24 @@ function createWsServer(httpServer) {
 
   function adjustAICount(serverId, mapId, targetCount, opts = {}) {
     const aiState = getAIState(serverId, mapId);
-    const current = aiState.size;
     targetCount = Math.max(0, Math.floor(targetCount));
 
+    // v2.7.5：forceReset 模式 → 清空全部後重新生成
+    if (opts.forceReset) {
+      aiState.clear();
+      const initLv = opts.initLevel != null ? parseInt(opts.initLevel) : 1;
+      for (let i = 0; i < targetCount; i++) {
+        const ai = generateAI(serverId, mapId, i, initLv);
+        aiState.set(ai.id, ai);
+      }
+      if (aiPersistence && aiPersistence.save) {
+        try { aiPersistence.save(serverId, mapId, Array.from(aiState.values())); } catch(e) {}
+      }
+      broadcastAISnapshot(serverId, mapId);
+      return aiState.size;
+    }
+
+    const current = aiState.size;
     if (targetCount < current) {
       // 刪除多餘的 AI（從後往前刪）
       let toRemove = current - targetCount;
@@ -162,13 +177,16 @@ function createWsServer(httpServer) {
     return aiState.size;
   }
 
-  // AI 簡單移動（每 3 秒更新一次位置）
+  // AI 簡單移動（每 1 秒微調位置，約 1Hz 漫步；戰鬥時由 combat tick 接管，~8Hz 廣播）
+  const AI_WANDER_INTERVAL = 1000; // ms
   setInterval(() => {
     for (const [key, aiState] of aiStates) {
       const [serverId, mapId] = key.split(':');
       let changed = false;
       for (const ai of aiState.values()) {
-        if (Math.random() < 0.3) {
+        if (ai.dead) continue;
+        if (ai.targetUid) continue; // 戰鬥中由 combat tick 控移動
+        if (Math.random() < 0.4) {
           ai.x += (Math.random() - 0.5) * 60;
           ai.y += (Math.random() - 0.5) * 60;
           ai.x = Math.max(50, Math.min(2400, ai.x));
@@ -187,7 +205,7 @@ function createWsServer(httpServer) {
         });
       }
     }
-  }, 3000);
+  }, AI_WANDER_INTERVAL);
 
   // ========== WebSocket 協議 ==========
   function acceptUpgrade(req, socket, head) {
@@ -347,6 +365,16 @@ function createWsServer(httpServer) {
         break;
       case 'ping':
         sendJson(client.socket, { type: 'pong', time: Date.now() });
+        break;
+      // v2.7.5：玩家攻擊伺服器 AI（伺服器權威扣血）
+      case 'attack':
+        if (client.authenticated && client.mapId && client.serverId) {
+          const targetId = msg.targetId;
+          const dmg = Math.max(0, parseInt(msg.damage) || 0);
+          if (targetId && dmg > 0) {
+            damageAI(client.serverId, client.mapId, targetId, dmg, client.playerId || client.account);
+          }
+        }
         break;
       default:
         break;
@@ -607,6 +635,188 @@ function createWsServer(httpServer) {
     return aiState.size;
   }
 
+  // ========== v2.7.5：AI 戰鬥系統（伺服器權威） ==========
+  //  - AI 戰鬥 tick 125ms（8Hz），廣播節流在 8~10Hz
+  //  - 玩家攻擊 AI 由伺服器扣血並廣播給所有玩家
+  //  - AI 死亡後掉落經驗/金幣（廣播），10 秒後重生
+  const AI_COMBAT_INTERVAL = 125; // ms  v2.7.5：500 → 125（8Hz）
+  const AI_BROADCAST_INTERVAL = 125; // ms  快照廣播節流（8~10Hz）
+  const AI_ATTACK_RANGE = 90; // 像素
+  const AI_AGGRO_RANGE = 180;
+  const AI_RESPAWN_TIME = 10000; // ms
+  const aiDeathTimers = new Map(); // aiId -> timeout
+
+  function getMapPlayers(serverId, mapId) {
+    // 回傳所有在該地圖的玩家（WS + LP 合併去重）
+    const wsPlayers = new Map();
+    const wsMap = mapStates.get(mapKey(serverId, mapId));
+    if (wsMap) {
+      for (const c of wsMap.values()) {
+        if (c.playerId) wsPlayers.set(c.playerId, c);
+      }
+    }
+    // LP 玩家（由 server.cjs 透過回調注入）
+    if (typeof _getLpMapPlayers === 'function') {
+      const lpMap = _getLpMapPlayers(serverId, mapId);
+      if (lpMap) {
+        for (const [pid, p] of lpMap) {
+          if (!wsPlayers.has(pid)) wsPlayers.set(pid, p);
+        }
+      }
+    }
+    return wsPlayers;
+  }
+  let _getLpMapPlayers = null;
+  function setLpMapPlayersProvider(fn) { _getLpMapPlayers = typeof fn === 'function' ? fn : null; }
+
+  function dist2(x1, y1, x2, y2) {
+    const dx = x1 - x2, dy = y1 - y2;
+    return dx * dx + dy * dy;
+  }
+
+  // 玩家對 AI 造成傷害（伺服器權威）
+  function damageAI(serverId, mapId, aiId, dmg, attackerId) {
+    const aiState = getAIState(serverId, mapId);
+    const ai = aiState.get(aiId);
+    if (!ai) return null;
+    if (ai.dead) return null;
+    ai.hp = Math.max(0, ai.hp - dmg);
+    // 廣播 AI 狀態更新（血條）
+    broadcastToMap(serverId, mapId, {
+      type: 'ai_damaged',
+      aiId,
+      hp: ai.hp,
+      maxHp: ai.maxHp,
+      damage: dmg,
+      attackerId,
+      time: Date.now(),
+    });
+    // 通知 LP 通道
+    if (lpAIBroadcast) {
+      try { lpAIBroadcast(serverId, mapId, Array.from(aiState.values())); } catch(e) {}
+    }
+    if (ai.hp <= 0) {
+      ai.dead = true;
+      ai.deadAt = Date.now();
+      // 廣播死亡
+      broadcastToMap(serverId, mapId, {
+        type: 'ai_killed',
+        aiId,
+        killerId: attackerId,
+        expReward: Math.floor((ai.level || 1) * 20),
+        goldReward: Math.floor((ai.level || 1) * 5),
+        respawnIn: AI_RESPAWN_TIME,
+        time: Date.now(),
+      });
+      // 重生定時器
+      if (aiDeathTimers.has(aiId)) clearTimeout(aiDeathTimers.get(aiId));
+      const t = setTimeout(() => {
+        ai.hp = ai.maxHp;
+        ai.dead = false;
+        ai.x = 150 + Math.random() * 1700;
+        ai.y = 150 + Math.random() * 1100;
+        aiDeathTimers.delete(aiId);
+        broadcastAISnapshot(serverId, mapId);
+        broadcastToMap(serverId, mapId, {
+          type: 'ai_respawn',
+          aiId,
+          x: ai.x, y: ai.y,
+          time: Date.now(),
+        });
+      }, AI_RESPAWN_TIME);
+      aiDeathTimers.set(aiId, t);
+    }
+    return ai;
+  }
+
+  // AI 攻擊玩家（伺服器權威）
+  function aiAttackPlayer(serverId, mapId, ai, playerId, dmg) {
+    broadcastToMap(serverId, mapId, {
+      type: 'ai_attack',
+      aiId: ai.id,
+      targetId: playerId,
+      damage: dmg,
+      aiX: ai.x, aiY: ai.y,
+      time: Date.now(),
+    });
+    // LP 通道轉發（讓 LP 玩家也收到 AI 攻擊）
+    if (typeof _lpForwardEvent === 'function') {
+      try {
+        _lpForwardEvent(serverId, mapId, {
+          type: 'ai_attack',
+          aiId: ai.id,
+          targetId: playerId,
+          damage: dmg,
+          aiX: ai.x, aiY: ai.y,
+          time: Date.now(),
+        });
+      } catch(e) {}
+    }
+  }
+  let _lpForwardEvent = null;
+  function setLpForwardEvent(fn) { _lpForwardEvent = typeof fn === 'function' ? fn : null; }
+
+  // AI 戰鬥 tick：每 AI_COMBAT_INTERVAL 執行一次；廣播節流在 AI_BROADCAST_INTERVAL
+  const _aiBroadcastTimes = new Map(); // key -> lastBroadcastTs
+  setInterval(() => {
+    for (const [key, aiState] of aiStates) {
+      const [serverId, mapId] = key.split(':');
+      const players = getMapPlayers(serverId, mapId);
+      let changed = false;
+      for (const ai of aiState.values()) {
+        if (ai.dead) continue;
+        // 沒玩家就只有漫步（由 wander tick 負責，這裡跳過省運算）
+        if (players.size === 0) continue;
+        // 找最近的敵對玩家
+        let nearestPlayer = null;
+        let nearestDist2 = AI_AGGRO_RANGE * AI_AGGRO_RANGE;
+        for (const [pid, p] of players) {
+          const px = p.x != null ? p.x : 400;
+          const py = p.y != null ? p.y : 400;
+          const d2 = dist2(ai.x, ai.y, px, py);
+          if (d2 < nearestDist2) {
+            nearestDist2 = d2;
+            nearestPlayer = { id: pid, x: px, y: py };
+          }
+        }
+        if (!nearestPlayer) continue;
+        const now = Date.now();
+        if (nearestDist2 <= AI_ATTACK_RANGE * AI_ATTACK_RANGE) {
+          if (!ai._lastAttack || now - ai._lastAttack > 1500) {
+            ai._lastAttack = now;
+            const baseAtk = 5 + (ai.level || 1) * 2;
+            const dmg = Math.max(1, Math.floor(baseAtk * (0.8 + Math.random() * 0.4)));
+            aiAttackPlayer(serverId, mapId, ai, nearestPlayer.id, dmg);
+          }
+        } else {
+          const dist = Math.sqrt(nearestDist2);
+          const speed = 120 + (ai.level || 1) * 2; // 像素/秒
+          const moveDist = speed * (AI_COMBAT_INTERVAL / 1000);
+          const ratio = Math.min(1, moveDist / dist);
+          ai.x += (nearestPlayer.x - ai.x) * ratio;
+          ai.y += (nearestPlayer.y - ai.y) * ratio;
+          if (Math.abs(nearestPlayer.x - ai.x) > Math.abs(nearestPlayer.y - ai.y)) {
+            ai.dir = nearestPlayer.x > ai.x ? 'right' : 'left';
+          } else {
+            ai.dir = nearestPlayer.y > ai.y ? 'down' : 'up';
+          }
+          changed = true;
+        }
+      }
+      // 節流廣播：滿 AI_BROADCAST_INTERVAL 且有變動才推
+      const lastBc = _aiBroadcastTimes.get(key) || 0;
+      if (changed && Date.now() - lastBc >= AI_BROADCAST_INTERVAL) {
+        _aiBroadcastTimes.set(key, Date.now());
+        broadcastToMap(serverId, mapId, {
+          type: 'ai_update',
+          serverId, mapId,
+          ais: Array.from(aiState.values()),
+          time: Date.now(),
+        });
+      }
+    }
+  }, AI_COMBAT_INTERVAL);
+
   // 取得指定地圖的 AI 列表（給 long-poll 用）
   function getAIList(serverId, mapId) {
     const aiState = getAIState(serverId, mapId);
@@ -624,7 +834,11 @@ function createWsServer(httpServer) {
     setServerAIConfigProvider,
     setAIPersistence,
     setLPAIBroadcast,
+    setLpMapPlayersProvider,
+    setLpForwardEvent,
     getAIList,
+    getMapPlayers,
+    damageAI,
     broadcastToMap,
     broadcastAISnapshot,
     get clientCount() { return clients.size; },
