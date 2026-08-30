@@ -693,49 +693,55 @@ img { display: block; pointer-events: none; }
   will-change: transform;
 }
 
-/* v2.8.1：全單位統一「墓碑形」(stele / tombstone) 蒙版
-   頂部大圓拱（半圓頂）、兩側垂直、底部微圓
-   用 border-radius 實現（跨瀏覽器穩定），配合柔和內陰影製造石碑質感 */
+/* v2.8.2：全單位統一「墓碑形」(上下雙拱)
+   頂部半圓拱 + 底部半圓拱 + 左右垂直邊
+   border-radius 規則：50% 50% 50% 50% / 40% 40% 40% 40% 為上下對稱橢圓
+   尺寸：普通單位 64×80、英雄/變身 72×96、BOSS 96×120 */
 .world-unit .unit-sprite-wrap {
   width: 64px;
-  height: 64px;
-  border-radius: 50% 50% 12% 12% / 45% 45% 10% 10%;
+  height: 80px;
+  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
   overflow: hidden;
-  /* 墓碑邊框（內嵌深色石邊） */
+  /* 墓碑邊框（內嵌深色石邊 + 外圍半透明輝光） */
   box-shadow:
     inset 0 0 0 1.5px rgba(255, 220, 140, 0.18),
-    inset 0 2px 4px rgba(0, 0, 0, 0.4);
+    inset 0 2px 4px rgba(0, 0, 0, 0.4),
+    0 0 8px rgba(0, 0, 0, 0.5);
   -webkit-mask-image: none;
           mask-image: none;
 }
-/* hero 較高（80px），墓碑比例跟著拉高 */
+/* hero / 變身：72×96，墓碑比例跟著拉高 */
 .world-unit.hero .unit-sprite-wrap {
-  width: 64px !important;
-  height: 80px !important;
-  border-radius: 50% 50% 12% 12% / 40% 40% 10% 10%;
+  width: 72px !important;
+  height: 96px !important;
+  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
   box-shadow:
     inset 0 0 0 1.5px rgba(255, 220, 140, 0.22),
-    inset 0 3px 6px rgba(0, 0, 0, 0.4);
+    inset 0 3px 6px rgba(0, 0, 0, 0.4),
+    0 0 10px rgba(0, 0, 0, 0.5);
 }
-/* BOSS 單位更寬更高，墓碑比例加寬 */
+/* BOSS 單位更大：96×120 */
 .world-unit.boss-unit .unit-sprite-wrap {
-  border-radius: 50% 50% 14% 14% / 42% 42% 12% 12%;
+  width: 96px !important;
+  height: 120px !important;
+  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
   box-shadow:
-    inset 0 0 0 2px rgba(255, 100, 100, 0.25),
-    inset 0 3px 6px rgba(0, 0, 0, 0.45);
+    inset 0 0 0 2px rgba(255, 100, 100, 0.3),
+    inset 0 3px 6px rgba(0, 0, 0, 0.45),
+    0 0 14px rgba(0, 0, 0, 0.6);
 }
 
-/* 橢圓品質光暈（單位外圈的柔和發光邊，放在 ::before 做 radial 光環）*/
+/* 橢圓品質光暈（單位外圈的柔和發光邊，放在 ::before 做 radial 光環，限制在墓碑框內）*/
 .world-unit .unit-sprite-wrap::before {
   content: '';
   position: absolute;
-  inset: -3px -4px -2px -4px;
-  border-radius: 50% 50% 14% 14% / 45% 45% 12% 12%;
-  background: radial-gradient(ellipse at 50% 40%,
-    rgba(255, 220, 140, 0.0) 55%,
-    rgba(255, 210, 120, 0.18) 72%,
-    rgba(255, 200, 100, 0.12) 82%,
-    transparent 95%);
+  inset: -2px -3px -2px -3px;
+  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(255, 220, 140, 0.0) 58%,
+    rgba(255, 210, 120, 0.18) 74%,
+    rgba(255, 200, 100, 0.12) 84%,
+    transparent 96%);
   pointer-events: none;
   z-index: 0;
   filter: blur(1.5px);
@@ -743,43 +749,43 @@ img { display: block; pointer-events: none; }
 /* 怪物單位：偏紅色血光暈 */
 .world-unit.enemy .unit-sprite-wrap::before,
 .world-unit.monster .unit-sprite-wrap::before {
-  background: radial-gradient(ellipse at center,
-    rgba(255, 60, 60, 0.0) 55%,
-    rgba(255, 80, 60, 0.2) 72%,
-    rgba(200, 30, 30, 0.12) 82%,
-    transparent 95%);
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(255, 60, 60, 0.0) 58%,
+    rgba(255, 80, 60, 0.2) 74%,
+    rgba(200, 30, 30, 0.12) 84%,
+    transparent 96%);
 }
 /* BOSS：更強烈的深紅光暈 */
 .world-unit.boss-unit .unit-sprite-wrap::before {
-  background: radial-gradient(ellipse at center,
-    rgba(255, 40, 40, 0.0) 50%,
-    rgba(255, 60, 40, 0.3) 68%,
-    rgba(200, 20, 20, 0.18) 80%,
-    transparent 92%);
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(255, 40, 40, 0.0) 52%,
+    rgba(255, 60, 40, 0.3) 70%,
+    rgba(200, 20, 20, 0.18) 82%,
+    transparent 94%);
   filter: blur(2.5px);
 }
 /* NPC：偏藍白光暈 */
 .world-unit.npc .unit-sprite-wrap::before {
-  background: radial-gradient(ellipse at center,
-    rgba(180, 220, 255, 0.0) 55%,
-    rgba(150, 200, 255, 0.18) 72%,
-    rgba(100, 160, 220, 0.1) 82%,
-    transparent 95%);
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(180, 220, 255, 0.0) 58%,
+    rgba(150, 200, 255, 0.18) 74%,
+    rgba(100, 160, 220, 0.1) 84%,
+    transparent 96%);
 }
-/* 變身英雄：金色彩光（與變身稀有度對應） */
+/* 變身英雄：金色彩光（與變身稀有度對應），光暈限制在框內 */
 .world-unit.hero.transform-rarity-legend .unit-sprite-wrap::before {
-  background: radial-gradient(ellipse at center,
-    rgba(255, 215, 0, 0.0) 55%,
-    rgba(255, 200, 60, 0.25) 72%,
-    rgba(200, 140, 0, 0.15) 82%,
-    transparent 95%);
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(255, 215, 0, 0.0) 58%,
+    rgba(255, 200, 60, 0.25) 74%,
+    rgba(200, 140, 0, 0.15) 84%,
+    transparent 96%);
   filter: blur(2px);
 }
 
 /* 變身時確保精靈容器尺寸/定位不變，光環 ::before/::after 不影響圖片位置 */
 .world-unit.hero[class*="transform-rarity"] .unit-sprite-wrap {
-  width: 64px !important;
-  height: 80px !important;
+  width: 72px !important;
+  height: 96px !important;
   position: relative !important;
   transform: none !important;
   left: auto !important;

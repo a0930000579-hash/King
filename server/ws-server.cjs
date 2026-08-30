@@ -879,19 +879,18 @@ function createWsServer(httpServer) {
   function setServerAIConfigProvider(fn) { _serverAIConfigProvider = fn; }
 
   async function ensureAIForMap(serverId, mapId, aiCount, initLevel) {
-    // v2.8.0：代理到 aiEngine
-    // 先嘗試從持久化載入（重啟不變）
+    // v2.8.2：每次進入都校準數量到 aiCount（不僅首次），確保排行榜與地圖 AI 同步
+    //  持久化載入僅供恢復狀態，數量以 GM 設定的 aiCount 為準
     const k = mapKey(serverId, mapId);
     const aiState = aiEngine.getAIState(serverId, mapId);
+    const target = Math.max(0, Math.floor(aiCount || 0));
 
     if (!aiLoaded.has(k) && aiPersistence && aiPersistence.load) {
       try {
         const saved = aiPersistence.load(serverId, mapId);
         if (Array.isArray(saved) && saved.length > 0) {
-          // 舊持久化數據：直接注入 aiEngine（會覆蓋）
           aiState.clear();
           saved.forEach(ai => {
-            // 遷移舊格式關鍵欄位（aiEngine 也有自己的預設，但舊持久化可能缺欄位）
             if (ai.maxHp != null && ai.hpMax == null) ai.hpMax = ai.maxHp;
             if (ai.maxHp == null) ai.maxHp = ai.hpMax;
             if (ai.state == null) ai.state = 'wandering';
@@ -900,19 +899,32 @@ function createWsServer(httpServer) {
             aiState.set(ai.id, ai);
           });
           aiLoaded.add(k);
-          console.log(`[AI] 從持久化載入 ${serverId}:${mapId}，共 ${saved.length} 個 AI`);
-          // 校準數量
-          if (aiCount > 0 && aiState.size !== aiCount) {
-            try { aiEngine.adjustCount(serverId, mapId, aiCount, { initLevel }); } catch(e) {}
-          }
-          return aiState.size;
+          console.log(`[AI] 從持久化載入 ${serverId}:${mapId}，共 ${saved.length} 個 AI，目標 aiCount=${target}`);
+        } else {
+          aiLoaded.add(k);
+          console.log(`[AI] ${serverId}:${mapId} 持久化無數據，即將從頭生成 ${target} 個 AI`);
         }
-      } catch(e) { console.warn('[AI] 持久化載入失敗:', e.message); }
-      aiLoaded.add(k);
+      } catch(e) {
+        console.error('[AI] 持久化載入失敗（將從頭生成）:', e.message);
+        aiLoaded.add(k);
+      }
     }
 
-    if (aiState.size === 0 && aiCount > 0) {
-      aiEngine.adjustCount(serverId, mapId, aiCount, { initLevel });
+    // v2.8.2：不論載入結果與當前數量，一律校準到 target
+    if (aiState.size !== target) {
+      try {
+        const before = aiState.size;
+        aiEngine.adjustCount(serverId, mapId, target, { initLevel });
+        const after = aiState.size;
+        console.log(`[AI] ${serverId}:${mapId} 校準 AI 數量：${before} → ${after}（目標 ${target}）`);
+        if (after !== target) {
+          console.error(`[AI] 校準失敗！預期 ${target} 實際 ${after}，請檢查 aiEngine.adjustCount`);
+        }
+      } catch(e) {
+        console.error(`[AI] 校準 ${serverId}:${mapId} 到 ${target} 個 AI 失敗:`, e.message, e.stack);
+      }
+    } else {
+      console.log(`[AI] ${serverId}:${mapId} AI 數量已正確（${aiState.size}）`);
     }
     return aiState.size;
   }

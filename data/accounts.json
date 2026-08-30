@@ -164,5 +164,100 @@
         }
       ]
     }
+  },
+  "maptest": {
+    "account": "maptest",
+    "passwordHash": "9581db18c556dedc2515085a0ebdd55d08a64ef949f4d62611db13fa9b9a7879",
+    "createdAt": "2026-08-30T12:21:55.063Z",
+    "isGM": false,
+    "characters": {
+      "zeus": [
+        {
+          "player": {
+            "name": "maptest",
+            "classId": "warrior",
+            "level": 1,
+            "exp": 0,
+            "hp": 120,
+            "mp": 60,
+            "maxHp": 120,
+            "maxMp": 60,
+            "atk": 12,
+            "def": 8,
+            "spd": 1,
+            "crit": 5,
+            "hit": 95,
+            "dodge": 5,
+            "x": 0,
+            "y": 0,
+            "direction": "down"
+          },
+          "resources": {
+            "gold": 0,
+            "gem": 0
+          },
+          "inventory": [],
+          "ownedHeroes": [],
+          "ownedPets": [],
+          "ownedTransforms": [],
+          "equipment": {},
+          "bagMaxSlots": 30,
+          "enhanceTickets": 0,
+          "killCount": 0,
+          "currentMap": null,
+          "nation": null,
+          "siegeStats": {},
+          "rankings": {},
+          "createdAt": 1788092515067,
+          "name": "maptest",
+          "classId": "warrior",
+          "level": 1,
+          "exp": 0,
+          "created": true
+        }
+      ]
+    }
+  },
+  "testA_o0li14": {
+    "account": "testA_o0li14",
+    "passwordHash": "f3aef7856d96d5a6cc4cb16fcd99a64e017631c3feda483df2f9ccc1da007797",
+    "createdAt": "2026-08-30T14:32:06.069Z",
+    "isGM": false,
+    "characters": {}
+  },
+  "testB_49247o": {
+    "account": "testB_49247o",
+    "passwordHash": "f3aef7856d96d5a6cc4cb16fcd99a64e017631c3feda483df2f9ccc1da007797",
+    "createdAt": "2026-08-30T14:32:06.073Z",
+    "isGM": false,
+    "characters": {}
+  },
+  "wstest_1788100353435": {
+    "account": "wstest_1788100353435",
+    "passwordHash": "f3aef7856d96d5a6cc4cb16fcd99a64e017631c3feda483df2f9ccc1da007797",
+    "createdAt": "2026-08-30T14:32:33.446Z",
+    "isGM": false,
+    "characters": {}
+  },
+  "wstest001": {
+    "account": "wstest001",
+    "passwordHash": "f3aef7856d96d5a6cc4cb16fcd99a64e017631c3feda483df2f9ccc1da007797",
+    "createdAt": "2026-08-30T14:32:44.773Z",
+    "isGM": false,
+    "characters": {}
+  },
+  "tA_1788100422957": {
+    "account": "tA_1788100422957",
+    "passwordHash": "f3aef7856d96d5a6cc4cb16fcd99a64e017631c3feda483df2f9ccc1da007797",
+    "createdAt": "2026-08-30T14:33:42.968Z",
+    "isGM": false,
+    "characters": {}
+  },
+  "tB_1788100422957": {
+    "account": "tB_1788100422957",
+    "passwordHash": "f3aef7856d96d5a6cc4cb16fcd99a64e017631c3feda483df2f9ccc1da007797",
+    "createdAt": "2026-08-30T14:33:42.972Z",
+    "isGM": false,
+    "characters": {}
   }
 }

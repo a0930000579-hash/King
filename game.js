@@ -4661,6 +4661,50 @@ const MONSTER_SPRITES = {
   death_knight: SPRITE.darkmage,
   baphomet:     SPRITE.demon,
   demon_lord:    SPRITE.demon,
+  // v2.8.2：補齊所有常見怪物中文名對應的 type（即使重名也給正確精靈，杜絕 ?）
+  //  哥布林系
+  goblin_archer: SPRITE.goblin,
+  goblin_patrol: SPRITE.goblin,
+  goblin_scout:  SPRITE.goblin,
+  goblin_warrior:SPRITE.goblin,
+  goblin_shaman: SPRITE.shaman,
+  goblin_king:   SPRITE.orc,
+  forest_goblin: SPRITE.goblin,
+  forest_goblin_chief: SPRITE.goblin,
+  //  骷髏系
+  skeleton_soldier:  SPRITE.skeleton,
+  skeleton_archer:   SPRITE.skeleton,
+  skeleton_warrior:  SPRITE.skeleton,
+  skeleton_knight:   SPRITE.skeleton,
+  skeleton_mage:     SPRITE.darkmage,
+  small_skeleton:    SPRITE.skeleton,
+  //  野狼/野豬/史萊姆/蝙蝠/蜘蛛/蛇
+  wild_wolf:    SPRITE.wolf,
+  black_wolf:   SPRITE.wolf,
+  timber_wolf:  SPRITE.monster_direwolf,
+  wild_boar:    SPRITE.ogre,
+  slime_blue:   SPRITE.slime,
+  slime_green:  SPRITE.slime,
+  gold_slime:   SPRITE.slime,
+  cave_bat:     SPRITE.bat,
+  forest_bat:   SPRITE.bat,
+  giant_spider: SPRITE.spider,
+  poison_spider:SPRITE.spider,
+  spiderling:   SPRITE.spider,
+  snake:        SPRITE.lizardman,
+  cobra:        SPRITE.lizardman,
+  //  人形/其他常見怪物 (用相近精靈兜底)
+  bandit_archer:SPRITE.bandit,
+  bandit_leader:SPRITE.bandit,
+  dark_knight:  SPRITE.darkmage,
+  //  Boss 級
+  orc_chief:    SPRITE.orc,
+  orc_warrior:  SPRITE.orc,
+  ogre_berserker:SPRITE.ogre,
+  lizardman_shaman:SPRITE.lizardman,
+  dark_mage:    SPRITE.darkmage,
+  demon_priest: SPRITE.demon,
+  succubus:     SPRITE.demon,
 };
 
 // ==================== 國家/公会/城堡 ====================
@@ -9687,9 +9731,13 @@ function updateRankings() {
     guild: GS.guild?.name || '散人',
     classId: GS.player.classId,
   });
-  // 全服AI玩家數據（真實數據，200個跨地圖AI全數上榜）
-  if (GLOBAL_AI_POOL && GLOBAL_AI_POOL.length > 0) {
-     GLOBAL_AI_POOL.forEach(ai => {
+  // v2.8.2：在線模式下排行榜從伺服器 AI 池讀取（server 端活躍 AI），離線模式才用本地 GLOBAL_AI_POOL
+  //  確保「排行榜有 AI 但地圖上沒有」的幽靈 AI 不再出現
+  const aiListForRanking = (typeof _serverAIActive !== 'undefined' && _serverAIActive && window._serverAIMap)
+    ? Array.from(_serverAIMap.values())
+    : (GLOBAL_AI_POOL || []);
+  if (aiListForRanking.length > 0) {
+     aiListForRanking.forEach(ai => {
        entries.push({
          isPlayer: false,
          name: ai.name,
@@ -13488,10 +13536,70 @@ function checkBossRespawn() {
   }
 }
 
+// v2.8.2：怪物精靈解析 — 帶大類 fallback，零「？」
+//  先從 MONSTER_SPRITES 精確匹配，找不到則按大類 fallback
+//  大類規則：類人型(goblin/orc/lizardman/troll/ogre/bandit/shaman/darkmage) → goblin
+//             亡靈系(skeleton/zombie/ghost/lich/death_knight/bone_dragon) → skeleton
+//             節肢動物(spider/scorpion) → spider
+//             野獸系(wolf/boar/bear/hellhound/direwolf/cerberus/griffin) → orc
+//             特殊型(slime/bat/demon/dragon/hydra/naga/golem) → 各自有圖或就近
+const MONSTER_FALLBACK_MAP = {
+  // 類人型 → goblin
+  wolf: 'orc', boar: 'orc', bear: 'orc', hellhound: 'orc',
+  monster_direwolf: 'orc', monster_hellhound: 'orc', cerberus: 'orc',
+  griffin: 'orc', armored_bear: 'orc', wild_boar: 'orc',
+  // 亡靈系 → skeleton
+  zombie: 'skeleton', ghost: 'skeleton', lich: 'skeleton',
+  death_knight: 'skeleton', bone_dragon: 'skeleton', wraith: 'skeleton',
+  monster_wraith: 'skeleton', skeleton_soldier: 'skeleton', skeleton_archer: 'skeleton',
+  skeleton_warrior: 'skeleton', skeleton_knight: 'skeleton', skeleton_mage: 'skeleton',
+  small_skeleton: 'skeleton', ghostLord: 'skeleton',
+  // 類人型 → goblin
+  troll: 'orc', ogre: 'orc', bandit: 'orc', shaman: 'orc',
+  darkmage: 'orc', darkorc: 'orc', orc_warrior: 'orc', orc_chief: 'orc',
+  elderShaman: 'orc', banditBoss: 'orc', bandit_archer: 'orc', bandit_leader: 'orc',
+  goblin_archer: 'goblin', goblin_patrol: 'goblin', goblin_scout: 'goblin',
+  goblin_warrior: 'goblin', goblin_shaman: 'goblin', goblin_king: 'goblin',
+  forest_goblin: 'goblin', forest_goblin_chief: 'goblin', eliteGoblin: 'goblin',
+  lizardman_shaman: 'lizardman', dark_knight: 'skeleton', dark_mage: 'skeleton',
+  demon_priest: 'demon', baphomet: 'demon', demon_lord: 'demon',
+  // 節肢 → spider
+  giant_spider: 'spider', poisonSpider: 'spider', poison_spider: 'spider',
+  spiderling: 'spider', spider_queen: 'spider', royalScorpion: 'scorpion',
+  monster_scorpion: 'scorpion',
+  // 特殊 → 就近
+  slime_blue: 'slime', slime_green: 'slime', goldenSlime: 'slime', gold_slime: 'slime',
+  icewolf: 'orc', black_wolf: 'orc', timber_wolf: 'orc', wild_wolf: 'orc',
+  cave_bat: 'bat', forest_bat: 'bat', firebat: 'bat',
+  stone_golem: 'stone_golem', lava_golem: 'stone_golem', golem: 'stone_golem',
+  darkSorcerer: 'orc', zombies: 'skeleton',
+  hydra: 'demon', naga: 'lizardman', chimera: 'demon', kraken: 'demon',
+  monster_braindevil: 'demon', monster_gargoyle: 'stone_golem',
+  // 變種 → 原種
+  darkorc: 'orc', icewolf: 'orc', firebat: 'bat', elderShaman: 'orc',
+};
+
+function getMonsterSprite(type) {
+  if (!type) return SPRITE.goblin;
+  // 1. 精確匹配 MONSTER_SPRITES
+  if (MONSTER_SPRITES[type] && MONSTER_SPRITES[type].useImg) return MONSTER_SPRITES[type];
+  // 2. 精確匹配 SPRITE
+  if (SPRITE[type] && SPRITE[type].useImg) return SPRITE[type];
+  // 3. fallback map
+  const fb = MONSTER_FALLBACK_MAP[type];
+  if (fb) {
+    if (SPRITE[fb] && SPRITE[fb].useImg) return SPRITE[fb];
+    if (MONSTER_SPRITES[fb] && MONSTER_SPRITES[fb].useImg) return MONSTER_SPRITES[fb];
+  }
+  // 4. 終極 fallback → goblin（類人型最常見）
+  console.warn('[Sprite] missing monster type, fallback to goblin:', type);
+  return SPRITE.goblin;
+}
+
 function createMonster(type, name, level, behavior = 'passive') {
   const baseHp = 40 + level * 12;
   const baseAtk = 4 + level * 1.2;
-  const sprite = MONSTER_SPRITES[type] || SPRITE.goblin;
+  const sprite = getMonsterSprite(type);
   // 全地圖尺寸隨機生成（使用世界地圖大小，避免容器未測寬時擠在一起）
   const mapW = CAMERA.worldWidth || WORLD_W || 2496;
   const mapH = CAMERA.worldHeight || WORLD_H || 1664;
@@ -15906,6 +16014,8 @@ function openEquipDetailModal(slotId) {
     const enhanceBonusPct = enhanceLv * 5; // 每級 +5%
     const isWeapon = isWeaponSlot(slotId);
     const isArmor = isArmorSlot(slotId);
+    // v2.8.2：強制用 getEquipRarityIcon 單一圖標，忽略 eq.icon（舊存檔可能含拼貼圖）
+    const equipIcon = getEquipRarityIcon(eq.type, eq.rarity);
     const statRows = Object.entries(eq.baseStats || {}).map(([k, v]) => {
       let display = `+${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
       if (enhanceLv > 0 && ((k === 'atk' && isWeapon) || (k === 'def' && isArmor))) {
@@ -15921,7 +16031,7 @@ function openEquipDetailModal(slotId) {
     body.innerHTML = `
       <div class="equip-detail-header">
         <div class="equip-detail-icon" style="display:flex;align-items:center;justify-content:center;position:relative">
-          <img src="${eq.icon || slotIconUrl(slotId)}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>
+          <img src="${equipIcon}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>
           ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:-4px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:10px;font-weight:800;padding:0 6px;border-radius:6px;line-height:16px">+${enhanceLv}</div>` : ''}
         </div>
         <div class="equip-detail-name">${eq.name}</div>
@@ -20097,7 +20207,7 @@ function renderEquipTabPanel() {
       const enhanceLv = eq.enhanceLevel || 0;
       return `<div class="equip-slot-card has-item rarity-${eq.rarity}" data-equip-slot="${slot}" style="border-color:${rc.color}">
         <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center;position:relative">
-          <img src="${eq.icon || slotIconUrl(slot)}" style="width:36px;height:36px;object-fit:contain;border-radius:8px;display:block"/>
+          <img src="${getEquipRarityIcon(eq.type, eq.rarity)}" style="width:36px;height:36px;object-fit:contain;border-radius:8px;display:block"/>
           ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:-4px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:8px;font-weight:800;padding:0 4px;border-radius:4px;line-height:12px">+${enhanceLv}</div>` : ''}
         </div>
         <div class="equip-slot-name">${eq.name}</div>
@@ -20434,7 +20544,7 @@ function renderEquipPanel() {
       return `
         <div class="equip-slot-item has-item rarity-${eq.rarity}" data-equip-slot="${slot}">
           <div class="equip-slot-level-badge">+${level}</div>
-          <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${eq.icon || iconUrl}" style="width:32px;height:32px;object-fit:contain;border-radius:8px;display:block"/></div>
+          <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${getEquipRarityIcon(eq.type, eq.rarity)}" style="width:32px;height:32px;object-fit:contain;border-radius:8px;display:block"/></div>
           <div class="equip-slot-name">${eq.name}</div>
         </div>
       `;
@@ -21280,9 +21390,14 @@ function showItemDetail(item) {
   const isTreasure = item.itemType === 'treasure';
   const isCard = item.itemType === 'card';
 
-  // 取得圖標：優先用 item.icon URL，其次用類型
+  // 取得圖標：裝備用 getEquipRarityIcon（避免裝備誤顯示為寶箱），其他用 getItemIconUrl
   let iconHtml = '';
-  const iconUrl = getItemIconUrl(item);
+  let iconUrl;
+  if (item.itemType === 'equipment') {
+    iconUrl = getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity);
+  } else {
+    iconUrl = getItemIconUrl(item);
+  }
   iconHtml = `<img src="${iconUrl}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>`;
 
   let detailHtml = `
@@ -27352,32 +27467,36 @@ if (typeof dealDamageToAIPlayer === 'function') {
         wsFailReason = MultiplayerClient.wsFailureReason || MultiplayerClient.getWsFailureReason?.() || '';
         isOffline = MultiplayerClient.transport === 'offline' || MultiplayerClient.status === 'offline';
       }
-      // v2.7.7：離線狀態用明顯紅色標示，不顯示 AI:local 以免誤以為在線
-      if (isOffline) {
+      // v2.8.2：狀態列 ON/OFF 只反映「自己這條連線是否成功連上 server」
+      //  不論其他玩家、AI 是否在線，只要自己連上了就顯示 ON
+      //  連線協定優先級：WS > LP > OFF，只要有任一條連上就算在線
+      const mpStatus = window.MultiplayerClient ? MultiplayerClient.status : 'offline';
+      const connected = mpStatus === 'online';
+      const trEff = connected ? tr : 'offline';
+      const trColorEff = connected ? color : '#ff6060';
+      // AI 來源：在線且 serverAI 已啟用 = server；在線但 AI 還沒到 = loading；離線 = offline
+      if (!connected) {
         aiSrc = 'offline';
-        aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
       } else if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
         aiSrc = 'server';
-        aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
       } else {
-        aiSrc = 'local';
-        aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
+        aiSrc = 'loading';
       }
+      aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
       if (typeof _serverInstanceId !== 'undefined') iid = (_serverInstanceId || '-').slice(0, 8);
       // 伺服器名稱縮寫（zeus → ZEUS 全大寫）
       if (sid && sid !== '-') serverLabel = sid.toUpperCase().slice(0, 8);
       else serverLabel = '-';
     } catch(e) {}
 
-    // v2.7.7：一眼區分 — 傳輸協定(WS/LP/OFF) + 伺服器 + AI來源(server/local/offline) + AI數量
-    // v2.8.1：加上帳號名（多帳號並存時可辨識當前連線是誰）
-    const trLabel = tr === 'websocket' ? 'WS' : (tr === 'longpoll' ? 'LP' : 'OFF');
-    const trColor = color;
+    // v2.8.2：傳輸標籤統一用 trEff（連線狀態為準），顏色用 trColorEff
+    const trLabel = trEff === 'websocket' ? 'ON' : (trEff === 'longpoll' ? 'LP' : 'OFF');
+    const trColor = trColorEff;
     // AI 來源顏色：server 綠 / local 黃 / offline 紅
     let aiColor = '#ffd040';
     if (aiSrc === 'server') aiColor = '#50ff80';
     else if (aiSrc === 'offline') aiColor = '#ff6060';
-    const aiLabel = aiSrc === 'server' ? 'AI:SVR' : (aiSrc === 'offline' ? 'AI:OFF' : 'AI:LOC');
+    const aiLabel = aiSrc === 'server' ? 'AI:SVR' : (aiSrc === 'offline' ? 'AI:OFF' : (aiSrc === 'loading' ? 'AI:…' : 'AI:LOC'));
     // 當前帳號（最多 8 字）
     let accName = '-';
     try {
@@ -27389,12 +27508,14 @@ if (typeof dealDamageToAIPlayer === 'function') {
     } catch(e) {}
     if (accName.length > 8) accName = accName.slice(0, 7) + '…';
 
-    ind.innerHTML =
+      // v2.8.2：AI:loading 用橘色，提醒用戶 AI 還在載入（不影響 ON/OFF 判斷）
+      const aiColorEff = aiSrc === 'loading' ? '#ffaa40' : aiColor;
+      ind.innerHTML =
       '<span style="color:' + trColor + ';font-weight:700">' + trLabel + '</span>' +
       '<span style="opacity:0.4">·</span>' +
       '<span style="color:#d4af37">' + serverLabel + '</span>' +
       '<span style="opacity:0.4">·</span>' +
-      '<span style="color:' + aiColor + ';font-weight:600">' + aiLabel + '(' + aiCount + ')</span>' +
+      '<span style="color:' + aiColorEff + ';font-weight:600">' + aiLabel + '(' + aiCount + ')</span>' +
       '<span style="opacity:0.4">·</span>' +
       '<span style="opacity:0.7;font-size:10px">' + accName + '</span>' +
       '<span style="opacity:0.4">·</span>' +
@@ -27456,17 +27577,46 @@ if (typeof dealDamageToAIPlayer === 'function') {
       const headerRow = document.createElement('div');
       headerRow.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(240,192,64,0.3);background:linear-gradient(90deg, rgba(240,192,64,0.08), transparent);';
       const avatar = document.createElement('div');
-      avatar.style.cssText = 'width:48px;height:48px;border:2px solid #8b6520;border-radius:6px;overflow:hidden;background:rgba(20,14,8,0.6);flex-shrink:0;display:flex;align-items:center;justify-content:center;';
+      avatar.style.cssText = 'width:48px;height:48px;border:2px solid #8b6520;border-radius:6px;overflow:hidden;background:rgba(20,14,8,0.6);flex-shrink:0;display:flex;align-items:center;justify-content:center;position:relative;';
       if (sp && sp.useImg && sp.idle) {
         const img = document.createElement('img');
         img.src = sp.idle;
         img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.8));';
-        img.onerror = function() { this.style.display='none'; avatar.textContent='?'; avatar.style.color='#d4af37';avatar.style.fontSize='20px'; };
+        // v2.8.2：圖片加載失敗時用 PortraitGenerator 生成 SVG fallback，絕不顯示「？」
+        img.onerror = function() {
+          this.style.display = 'none';
+          const name = opts.npcName || 'NPC';
+          const fb = document.createElement('img');
+          fb.src = (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.npcPortraitToDataURL) 
+            ? PortraitGenerator.npcPortraitToDataURL(spKey, name)
+            : '';
+          if (fb.src) {
+            fb.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+            avatar.appendChild(fb);
+          } else {
+            avatar.textContent = name.charAt(0);
+            avatar.style.color = '#d4af37';
+            avatar.style.fontSize = '20px';
+            avatar.style.fontWeight = '700';
+          }
+        };
         avatar.appendChild(img);
       } else {
-        avatar.textContent = '?';
-        avatar.style.color = '#d4af37';
-        avatar.style.fontSize = '20px';
+        // v2.8.2：找不到 sprite 時也用 PortraitGenerator fallback，不用「？」
+        const name = opts.npcName || 'NPC';
+        const fb = document.createElement('img');
+        fb.src = (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.npcPortraitToDataURL) 
+          ? PortraitGenerator.npcPortraitToDataURL(spKey, name)
+          : '';
+        if (fb.src) {
+          fb.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+          avatar.appendChild(fb);
+        } else {
+          avatar.textContent = name.charAt(0);
+          avatar.style.color = '#d4af37';
+          avatar.style.fontSize = '20px';
+          avatar.style.fontWeight = '700';
+        }
       }
       headerRow.appendChild(avatar);
       const titleWrap = document.createElement('div');

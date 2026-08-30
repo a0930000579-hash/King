@@ -208,12 +208,16 @@
             return null;
           } else {
             setStatus(STATUS.ERROR);
+            // v2.8.2：health 失敗就標記離線，讓狀態指示器正確顯示 OFF 而非假 ON
+            if (typeof window.setOfflineMode === 'function') window.setOfflineMode(true);
             throw new Error('伺服器狀態異常');
           }
         })
         .catch(err => {
           console.warn('[Multi] 連線失敗:', err.message);
           setStatus(STATUS.ERROR);
+          // v2.8.2：連線失敗標記離線，避免狀態指示器顯示假 ON
+          if (typeof window.setOfflineMode === 'function') window.setOfflineMode(true);
           throw err;
         });
     },
@@ -323,10 +327,12 @@
         } else {
           throw new Error(data.error || '加入失敗');
         }
-      }).catch(err => {
-        console.warn('[Multi] joinWorld 失敗:', err.message);
-        return null;
-      });
+        }).catch(err => {
+         console.warn('[Multi] joinWorld 失敗:', err.message);
+         // v2.8.2：join 失敗時標記離線，避免 health 成功但 join 失敗導致狀態假 ON
+         if (typeof window.setOfflineMode === 'function') window.setOfflineMode(true);
+         return null;
+       });
     },
 
     // 切換地圖
