@@ -1295,9 +1295,16 @@ async function getStats() {
     const result = {};
     for (const t of tables) {
       try {
-        const { rows } = await pgPool.query(`SELECT COUNT(*)::int AS c FROM "${t}"`);
+        const sql = `SELECT COUNT(*)::int AS c FROM "${t}"`;
+        const { rows } = await pgPool.query(sql);
         result[t] = rows[0].c;
-      } catch (e) { result[t] = -1; }
+        if (t === 'accounts') {
+          console.log('[DB][getStats] accounts COUNT =', rows[0].c, '(SQL:', sql.replace(/\s+/g, ' ').trim(), ')');
+        }
+      } catch (e) {
+        result[t] = -1;
+        console.error('[DB][getStats] ❌', t, 'COUNT 失敗:', e.message);
+      }
     }
     return result;
   } else {

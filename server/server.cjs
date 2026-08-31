@@ -818,7 +818,7 @@ async function handleApi(req, res, pathname, query) {
     const assetCount = assetIndex.size;
     const backend = db.getBackend();
     const dbErr = db.getLastError ? db.getLastError() : null;
-    // v2.9.0：線上人數明細（WS + LP 分開計，總數去重）
+    // v3.0.0：線上人數明細（WS + LP 分開計，總數去重）
     let wsCount = 0, lpCount = 0;
     try { wsCount = (wsServer && typeof wsServer.getOnlineCount === 'function') ? wsServer.getOnlineCount() : 0; } catch(e) {}
     try { lpCount = onlinePlayers ? onlinePlayers.size : 0; } catch(e) {}
@@ -834,9 +834,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.9.0',
-      build: '2.9.0-2608311800',
-      buildId: '2.9.0-2608311800',
+      version: '3.0.0',
+      build: '3.0.0-2608311800',
+      buildId: '3.0.0-2608311800',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1527,7 +1527,7 @@ async function handleApi(req, res, pathname, query) {
     if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
     try {
       const stats = await db.getStats();
-      // v2.9.0：線上人數去重計算（WS + LP 同一帳號只算一次），附加明細
+      // v3.0.0：線上人數去重計算（WS + LP 同一帳號只算一次），附加明細
       let wsCount = 0, lpCount = 0;
       try { wsCount = (wsServer && typeof wsServer.getOnlineCount === 'function') ? wsServer.getOnlineCount() : 0; } catch(e) {}
       try { lpCount = onlinePlayers ? onlinePlayers.size : 0; } catch(e) {}
@@ -2680,6 +2680,16 @@ runTest();
 // ========== v2.7.2：零依賴 WebSocket 多人連線 ==========
 const { createWsServer } = require('./ws-server.cjs');
 const wsServer = createWsServer(server);
+const gameWorld = require('./game-world.cjs');
+
+// v3.0.0：註冊全域 _wsSendToClient，供 game-world 做 AOI 單點廣播
+global._wsSendToClient = function(wsId, msg) {
+  return wsServer.sendToClient(wsId, msg);
+};
+
+// v3.0.0：啟動 game-world 全域 tick（Server Authoritative）
+gameWorld.startTick();
+console.log('[Server] v3.0.0 Server Authoritative Game World 已啟動');
 
 // 讓 ws 模組能用 verifyToken
 global._wsVerifyToken = verifyToken;
@@ -2784,9 +2794,23 @@ wsServer.setServerAIConfigProvider(async (serverId) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
-  if (req.headers['upgrade'] && req.headers['upgrade'].toLowerCase() === 'websocket') {
-    wsServer.acceptUpgrade(req, socket, head);
+  const upgradeHeader = (req.headers['upgrade'] || '').toLowerCase();
+  console.log('[WS][upgrade] 收到 upgrade 請求:');
+  console.log('[WS][upgrade]   url=', req.url);
+  console.log('[WS][upgrade]   method=', req.method);
+  console.log('[WS][upgrade]   upgrade=', upgradeHeader);
+  console.log('[WS][upgrade]   x-forwarded-proto=', req.headers['x-forwarded-proto'] || 'n/a');
+  console.log('[WS][upgrade]   x-forwarded-for=', req.headers['x-forwarded-for'] || 'n/a');
+  if (upgradeHeader === 'websocket') {
+    console.log('[WS][upgrade] ✅ 是 WebSocket upgrade，交給 wsServer.acceptUpgrade 處理');
+    try {
+      wsServer.acceptUpgrade(req, socket, head);
+    } catch(e) {
+      console.error('[WS][upgrade] ❌ acceptUpgrade 丟出異常:', e.message);
+      socket.destroy();
+    }
   } else {
+    console.warn('[WS][upgrade] ⚠️ upgrade header 不是 websocket，摧毀 socket');
     socket.destroy();
   }
 });

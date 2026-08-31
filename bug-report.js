@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const GAME_VERSION = 'v2.9.0';
+  const GAME_VERSION = 'v3.0.0';
   const BUG_STORAGE_KEY = 'bug_reports';
   const MAX_ERROR_LOGS = 30;
 

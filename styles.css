@@ -824,8 +824,11 @@ img { display: block; pointer-events: none; }
   background: transparent;
   border-radius: 0;
   transition: none;
+  /* v2.9.1：JPG 精靈去黑底 — mix-blend-mode:screen 把黑色變透明
+     同時用 soft-light 保留色彩層次，darken 邊緣不反白 */
+  mix-blend-mode: screen;
   /* 變身前後圖片尺寸與對齊完全一致，避免視覺偏移 */
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)) brightness(1.03) contrast(1.05);
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)) brightness(1.05) contrast(1.1);
   transform: translateX(0) translateY(0);
   margin: 0 !important;
   padding: 0 !important;
@@ -1969,12 +1972,21 @@ img { display: block; pointer-events: none; }
 }
 
 /* ===== 变身光环：底部魔法阵 + 发光 + 冒烟 + 闪电 ===== */
+/* v2.9.1：transform-aura 明確 position:absolute + 尺寸 + 居中，確保光暈永遠對齊角色 */
 .world-unit.hero .transform-aura {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 72px;
+  height: 96px;
+  margin-left: -36px;
   pointer-events: none;
   z-index: -1;
   visibility: hidden;
   opacity: 0;
   transition: opacity 0.3s, visibility 0.3s;
+  transform: scale(1);
+  transform-origin: center bottom;
 }
 
 /* ===== 四周发光（角色周围光晕脉动） ===== */

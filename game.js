@@ -27926,4 +27926,207 @@ if (typeof dealDamageToAIPlayer === 'function') {
   };
 })();
 
+// ============================================================
+//  v3.0.0：Server Authoritative AOI 實體管理
+//  所有遠端實體（玩家/AI/怪物）由伺服器透過 AOI 事件管理
+//  客戶端只負責渲染，不生成本地 AI/怪物
+// ============================================================
+(function() {
+  // AOI 實體快取：id -> entity data + DOM element
+  const aoiEntities = new Map();
+
+  // 取得或建立 AOI 實體的 DOM
+  function getOrCreateEntity(data) {
+    let ent = aoiEntities.get(data.id);
+    if (ent) {
+      updateEntityDOM(ent, data);
+      return ent;
+    }
+    ent = { data, el: null };
+    aoiEntities.set(data.id, ent);
+
+    // 根據 kind 建立不同的精靈
+    if (data.kind === 'player') {
+      ent.el = createPlayerEntity(data);
+    } else if (data.kind === 'ai') {
+      ent.el = createAIEntity(data);
+    } else {
+      ent.el = createGenericEntity(data);
+    }
+    return ent;
+  }
+
+  function createPlayerEntity(data) {
+    const el = document.createElement('div');
+    el.className = 'world-unit remote-player idle';
+    el.dataset.id = data.id;
+    el.style.position = 'absolute';
+    el.style.left = data.x + 'px';
+    el.style.top = data.y + 'px';
+    el.style.transform = 'translate(-50%, -100%)';
+
+    const cls = SPRITE[data.classId] || SPRITE.warrior;
+    const size = { w: 48, h: 64 };
+    el.innerHTML = buildSpriteHTML(cls, {
+      size,
+      kind: 'hero',
+      name: data.name,
+      level: data.level,
+      showHp: true,
+      showName: true,
+      dir: data.dir || 'down',
+    });
+
+    // 名字顏色（國家區分）
+    const nameEl = el.querySelector('.unit-name');
+    if (nameEl) nameEl.style.color = '#7ec8ff';
+
+    worldLayer.appendChild(el);
+    return el;
+  }
+
+  function createAIEntity(data) {
+    const el = document.createElement('div');
+    el.className = 'world-unit ai-player idle';
+    el.dataset.id = data.id;
+    el.style.position = 'absolute';
+    el.style.left = data.x + 'px';
+    el.style.top = data.y + 'px';
+    el.style.transform = 'translate(-50%, -100%)';
+
+    const cls = SPRITE[data.classId] || SPRITE.warrior;
+    const size = { w: 44, h: 56 };
+    el.innerHTML = buildSpriteHTML(cls, {
+      size,
+      kind: 'hero',
+      name: data.name,
+      level: data.level,
+      showHp: true,
+      showName: true,
+      dir: data.dir || 'down',
+    });
+
+    // 敵對國家上色
+    if (data.nation && GS.nation && data.nation !== GS.nation) {
+      el.classList.add('enemy-ai');
+    }
+
+    worldLayer.appendChild(el);
+    return el;
+  }
+
+  function createGenericEntity(data) {
+    const el = document.createElement('div');
+    el.className = 'world-unit';
+    el.dataset.id = data.id;
+    el.style.position = 'absolute';
+    el.style.left = data.x + 'px';
+    el.style.top = data.y + 'px';
+    el.style.transform = 'translate(-50%, -100%)';
+    el.style.width = '40px';
+    el.style.height = '50px';
+    el.style.background = 'rgba(100,100,100,0.5)';
+    el.style.borderRadius = '4px';
+    worldLayer.appendChild(el);
+    return el;
+  }
+
+  function updateEntityDOM(ent, data) {
+    ent.data = data;
+    const el = ent.el;
+    if (!el) return;
+    // 位置插值目標（由 tick 做平滑移動）
+    ent.targetX = data.x;
+    ent.targetY = data.y;
+    ent.targetDir = data.dir || ent.targetDir || 'down';
+    // HP/MP 更新
+    const hpFill = el.querySelector('.unit-hp-fill');
+    if (hpFill && data.maxHp) {
+      hpFill.style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
+    }
+    // 等級更新
+    const levelTag = el.querySelector('.unit-level-tag');
+    if (levelTag && data.level != null) {
+      levelTag.textContent = 'Lv.' + data.level;
+    }
+  }
+
+  function removeEntity(id) {
+    const ent = aoiEntities.get(id);
+    if (ent && ent.el) {
+      ent.el.remove();
+    }
+    aoiEntities.delete(id);
+  }
+
+  // AOI tick：平滑插值移動所有實體
+  function tickAOI(dt) {
+    if (aoiEntities.size === 0) return;
+    const speed = 200; // 插值速度，越大越緊貼伺服器位置
+    for (const ent of aoiEntities.values()) {
+      if (ent.targetX == null || !ent.el) continue;
+      const dx = ent.targetX - parseFloat(ent.el.style.left || '0');
+      const dy = ent.targetY - parseFloat(ent.el.style.top || '0');
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1) continue;
+      const step = (speed * dt) / 1000;
+      const ratio = Math.min(1, step / dist);
+      const newX = parseFloat(ent.el.style.left) + dx * ratio;
+      const newY = parseFloat(ent.el.style.top) + dy * ratio;
+      ent.el.style.left = newX + 'px';
+      ent.el.style.top = newY + 'px';
+    }
+  }
+
+  // 對外 API（給 multiplayer.js 呼叫）
+  window.handleAOIEnter = function(entities) {
+    for (const data of entities) {
+      try { getOrCreateEntity(data); } catch(e) { console.warn('[AOI] enter 失敗:', e.message, data); }
+    }
+  };
+
+  window.handleAOIUpdate = function(entities) {
+    for (const data of entities) {
+      try { getOrCreateEntity(data); } catch(e) { /* ignore */ }
+    }
+  };
+
+  window.handleAOILeave = function(ids) {
+    for (const id of ids) {
+      removeEntity(id);
+    }
+  };
+
+  window.setAOIRadius = function(r) {
+    console.log('[AOI] 可見半徑 =', r, 'px');
+  };
+
+  window.setServerSelfState = function(self) {
+    console.log('[AOI] 伺服器端自身狀態:', self);
+    // 將來可用於伺服器端糾正位置
+  };
+
+  // 清除所有 AOI 實體（切換地圖/登出時呼叫）
+  window.clearAOIEntities = function() {
+    for (const ent of aoiEntities.values()) {
+      if (ent.el) ent.el.remove();
+    }
+    aoiEntities.clear();
+    console.log('[AOI] 已清除所有實體');
+  };
+
+  window._aoiTick = tickAOI;
+
+  // 掛鉤到遊戲主循環
+  const origGameLoop = window._gameLoopTick;
+  if (typeof origGameLoop === 'function') {
+    window._gameLoopTick = function(dt) {
+      origGameLoop(dt);
+      tickAOI(dt);
+    };
+  }
+
+  console.log('[v3.0] AOI 實體管理模組已載入');
+})();
+
 })();

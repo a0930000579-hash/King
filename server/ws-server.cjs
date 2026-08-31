@@ -11,6 +11,7 @@
 
 const crypto = require('crypto');
 const { createAIEngine } = require('./ai-engine.cjs');
+const gameWorld = require('./game-world.cjs');
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
@@ -300,9 +301,19 @@ function createWsServer(httpServer) {
 
   // ========== WebSocket 協議 ==========
   function acceptUpgrade(req, socket, head) {
+    // v3.0.0：詳細 log，方便排查 DO App Platform / 反向代理下的 upgrade 問題
+    console.log('[WS][upgrade] 開始處理:');
+    console.log('[WS][upgrade]   url=', req.url);
+    console.log('[WS][upgrade]   method=', req.method);
+    console.log('[WS][upgrade]   headers.upgrade=', req.headers['upgrade']);
+    console.log('[WS][upgrade]   headers.sec-websocket-version=', req.headers['sec-websocket-version']);
+    console.log('[WS][upgrade]   headers.x-forwarded-proto=', req.headers['x-forwarded-proto'] || 'n/a');
+    console.log('[WS][upgrade]   remoteAddress=', socket.remoteAddress);
+    console.log('[WS][upgrade]   socket.encrypted=', !!socket.encrypted);
     const key = req.headers['sec-websocket-key'];
     if (!key) {
       _lastError = 'missing Sec-WebSocket-Key header';
+      console.error('[WS][upgrade] ❌ 缺少 Sec-WebSocket-Key header，回 400');
       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
       socket.destroy();
       return;
@@ -311,13 +322,20 @@ function createWsServer(httpServer) {
       .update(key + WS_GUID)
       .digest('base64');
 
-    socket.write(
-      'HTTP/1.1 101 Switching Protocols\r\n' +
+    // v3.0.0：DO App Platform / 反向代理可能需要的 header
+    const extraHeaders = [];
+    if (req.headers['sec-websocket-protocol']) {
+      extraHeaders.push('Sec-WebSocket-Protocol: ' + req.headers['sec-websocket-protocol']);
+    }
+    const response = 'HTTP/1.1 101 Switching Protocols\r\n' +
       'Upgrade: websocket\r\n' +
       'Connection: Upgrade\r\n' +
       'Sec-WebSocket-Accept: ' + accept + '\r\n' +
-      '\r\n'
-    );
+      (extraHeaders.length ? extraHeaders.join('\r\n') + '\r\n' : '') +
+      '\r\n';
+    socket.write(response, () => {
+      console.log('[WS][upgrade] ✅ 101 Switching Protocols 已發送, key前6=', key.substring(0,6));
+    });
     _handshakeOk = true;
     _lastError = null;
     _totalConnections++;
@@ -585,9 +603,18 @@ function createWsServer(httpServer) {
       client.name = msg.name || account;
       client.classId = msg.classId || 'warrior';
       client.level = msg.level || 1;
-      sendJson(client.socket, { type: 'auth_ok', account, wsId: client.wsId });
+      console.log('[WS][auth] ✅ 認證成功 wsId=', client.wsId, 'account=', account, 'name=', client.name);
+      sendJson(client.socket, { type: 'auth_ok', account, wsId: client.wsId, id: client.wsId });
     } else {
-      sendJson(client.socket, { type: 'auth_fail', error: 'token 無效' });
+      console.warn('[WS][auth] ❌ 認證失敗 wsId=', client.wsId, 'token長度=', (msg.token || '').length, '主動斷線 (code 4001)');
+      sendJson(client.socket, { type: 'auth_fail', error: 'token 無效', reason: 'invalid_token' });
+      // v3.0.0：auth 失敗後主動斷線，避免客戶端卡在「連上了但沒認證」的狀態
+      setTimeout(() => {
+        try {
+          client.socket.end();
+          client.socket.destroy();
+        } catch(e) {}
+      }, 500);
     }
   }
 
@@ -598,168 +625,53 @@ function createWsServer(httpServer) {
 
     // 離開舊地圖
     if (client.mapId && client.serverId) {
-      const oldKey = mapKey(client.serverId, client.mapId);
-      const oldState = mapStates.get(oldKey);
-      if (oldState) {
-        oldState.delete(client.wsId);
-        broadcastToMap(client.serverId, client.mapId, {
-          type: 'player_leave',
-          wsId: client.wsId,
-          playerId: client.playerId,
-          time: Date.now(),
-        });
-      }
+      gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);
     }
 
     client.serverId = serverId;
     client.mapId = mapId;
     client.playerId = msg.playerId || (client.account + ':' + (msg.charIdx || 0));
 
-    const mapState = getMapState(serverId, mapId);
-    mapState.set(client.wsId, client);
-
-    // v2.7.9：第一次有人進地圖時，依伺服器設定確保 AI 存在（持久化優先 + 舊格式遷移）
-    //  與 LP 的 ensureAIForMap 走同一套邏輯，避免 WS/LP 行為不一致
-    const aiState = getAIState(serverId, mapId);
-    if (aiState.size === 0) {
-      let cnt = 8, lv = 1;
-      if (_serverAIConfigProvider) {
-        try {
-          const cfg = _serverAIConfigProvider(serverId) || {};
-          cnt = cfg.aiCount != null ? parseInt(cfg.aiCount) : 8;
-          lv = cfg.initLevel != null ? parseInt(cfg.initLevel) : 1;
-        } catch(e) { console.warn('[WS] 載入伺服器AI設定失敗:', e.message); }
-      }
-      if (cnt > 0) {
-        ensureAIForMap(serverId, mapId, cnt, lv).catch(() => {});
-      }
-    }
-
-    // 回傳當前地圖玩家列表 + AI 快照
-    // v2.8.0：合併 WS + LP 玩家，確保雙通道互通
-    const others = [];
-    const seenIds = new Set();
-    for (const [wid, c] of mapState) {
-      if (wid !== client.wsId && c.playerId) {
-        seenIds.add(c.playerId);
-        others.push({
-          wsId: wid,
-          playerId: c.playerId,
-          name: c.name,
-          classId: c.classId,
-          level: c.level,
-          x: c.x || 1024,
-          y: c.y || 1024,
-          dir: c.dir || 'down',
-          transformId: c.transformId,
-          transport: 'websocket',
-        });
-      }
-    }
-    // 加入 LP 玩家
-    if (typeof _getLpMapPlayers === 'function') {
-      try {
-        const lpMap = _getLpMapPlayers(serverId, mapId);
-        if (lpMap) {
-          for (const [pid, p] of lpMap) {
-            if (seenIds.has(pid)) continue; // 重複跳過
-            if (pid === client.playerId) continue;
-            others.push({
-              playerId: pid,
-              name: p.name || 'Player',
-              classId: p.classId || 'warrior',
-              level: p.level || 1,
-              x: p.x != null ? p.x : 1024,
-              y: p.y != null ? p.y : 1024,
-              dir: p.dir || 'down',
-              hp: p.hp,
-              transformId: p.transformId,
-              transport: 'longpoll',
-            });
-          }
-        }
-      } catch(e) { console.warn('[WS] 取得 LP 玩家列表失敗:', e.message); }
-    }
-
-    const ais = Array.from(aiState.values());
-
-    sendJson(client.socket, {
-      type: 'map_state',
-      serverId, mapId,
-      players: others,
-      ais,
-      time: Date.now(),
-    });
-
-    // 通知其他人有人加入
-    broadcastToMap(serverId, mapId, {
-      type: 'player_join',
-      wsId: client.wsId,
-      playerId: client.playerId,
+    // v3.0.0：透過 game-world 加入，取得 AOI 快照
+    const aiCount = msg.aiCount != null ? msg.aiCount : 8;
+    const initLevel = msg.initLevel != null ? msg.initLevel : 1;
+    const snapshot = gameWorld.playerJoin(serverId, mapId, client.wsId, {
+      account: client.account,
       name: client.name,
       classId: client.classId,
       level: client.level,
-      x: client.x || 1024,
-      y: client.y || 1024,
-      dir: client.dir || 'down',
-      transformId: client.transformId,
+      x: msg.x || 400,
+      y: msg.y || 400,
+      hp: msg.hp,
+      maxHp: msg.maxHp,
+      mp: msg.mp,
+      maxMp: msg.maxMp,
+      nation: msg.nation || '',
+    }, { aiCount, initLevel });
+
+    // 回覆玩家：自己的狀態 + 初始 AOI 快照
+    sendJson(client.socket, {
+      type: 'join_map_ok',
+      serverId,
+      mapId,
+      playerId: client.playerId,
+      wsId: client.wsId,
+      self: snapshot.self,
+      entities: snapshot.entities,
+      aoiRadius: snapshot.aoiRadius,
       time: Date.now(),
-    }, client.wsId);
-    // v2.7.9：WS 玩家加入也通知 LP 玩家（雙通道同屏）
-    if (typeof _lpForwardEvent === 'function') {
-      try {
-        _lpForwardEvent(client.serverId, client.mapId, {
-          type: 'join',
-          playerId: client.playerId,
-          state: {
-            playerId: client.playerId,
-            name: client.name,
-            classId: client.classId,
-            level: client.level,
-            x: client.x, y: client.y, dir: client.dir,
-            transformId: client.transformId,
-          },
-          time: Date.now(),
-        });
-      } catch(e) {}
-    }
+    });
+
+    console.log(`[WS] ${client.account} 加入 ${serverId}/${mapId}, wsId=${client.wsId}, 初始實體數=${snapshot.entities.length}`);
   }
 
   function handleMove(client, msg) {
     if (!client.authenticated || !client.mapId) return;
-    client.x = msg.x != null ? msg.x : client.x;
-    client.y = msg.y != null ? msg.y : client.y;
-    client.dir = msg.dir || client.dir;
-    if (msg.hp != null) client.hp = msg.hp;
-    if (msg.transformId !== undefined) client.transformId = msg.transformId || null;
-    // 廣播給同地圖 WS 玩家
-    broadcastToMap(client.serverId, client.mapId, {
-      type: 'player_move',
-      wsId: client.wsId,
-      playerId: client.playerId,
-      name: client.name,
-      classId: client.classId,
-      level: client.level,
-      x: client.x,
-      y: client.y,
-      dir: client.dir,
-      hp: client.hp,
-      transformId: client.transformId,
-      time: Date.now(),
-    }, client.wsId);
-    // v2.7.9：也通知 LP 玩家（WS↔LP 雙通道同屏）
-    if (typeof _lpForwardEvent === 'function') {
-      try {
-        _lpForwardEvent(client.serverId, client.mapId, {
-          type: 'move',
-          playerId: client.playerId,
-          name: client.name,
-          x: client.x, y: client.y, dir: client.dir,
-          hp: client.hp, transformId: client.transformId,
-          time: Date.now(),
-        });
-      } catch(e) {}
-    }
+    // v3.0.0：Server Authoritative — 客戶端只發送目標點，伺服器驗證並計算移動
+    const x = parseFloat(msg.x);
+    const y = parseFloat(msg.y);
+    if (isNaN(x) || isNaN(y)) return;
+    gameWorld.playerMove(client.serverId, client.mapId, client.wsId, x, y);
   }
 
   function handleChat(client, msg) {
@@ -808,16 +720,23 @@ function createWsServer(httpServer) {
   }
 
   function handleDisconnect(client) {
+    if (!client || clients.get(client.wsId) !== client) return;
     clients.delete(client.wsId);
     if (client.mapId && client.serverId) {
-      const mapState = getMapState(client.serverId, client.mapId);
-      mapState.delete(client.wsId);
-      broadcastToMap(client.serverId, client.mapId, {
-        type: 'player_leave',
-        wsId: client.wsId,
-        playerId: client.playerId,
-        time: Date.now(),
-      });
+      gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);
+    }
+    console.log(`[WS] 客戶端斷線 wsId=${client.wsId} account=${client.account || '未認證'}`);
+  }
+
+  // v3.0.0：單點發送訊息（給 game-world AOI 用）
+  function sendToClient(wsId, msg) {
+    const client = clients.get(wsId);
+    if (!client || !client.socket || client.socket.destroyed) return false;
+    try {
+      sendJson(client.socket, msg);
+      return true;
+    } catch(e) {
+      return false;
     }
   }
 
@@ -1011,6 +930,7 @@ function createWsServer(httpServer) {
     damageAI,
     broadcastToMap,
     broadcastAISnapshot,
+    sendToClient,
     get clientCount() { return clients.size; },
     get authenticatedCount() { return getOnlineCount(); },
     get handshakeOk() { return _handshakeOk; },

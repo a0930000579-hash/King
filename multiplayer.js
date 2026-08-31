@@ -561,9 +561,11 @@
         if (!targetPath.endsWith('/')) targetPath += '/';
 
         wsUrl = wsProto + '//' + pageHost + targetPath;
-        console.log('[WS] 嘗試連線:', wsUrl);
-        console.log('[WS]  - pageProto=' + pageProto + ' pageHost=' + pageHost + ' pagePath=' + pagePath);
-        console.log('[WS]  - serverUrl=' + serverUrl + ' wsPath=' + _wsPath);
+        console.log('[WS] v2.9.1 完整連線資訊:');
+        console.log('[WS]   URL =', wsUrl);
+        console.log('[WS]   proto=', pageProto, 'host=', pageHost, 'pathname=', pagePath);
+        console.log('[WS]   serverUrl=', serverUrl, 'wsPath=', _wsPath);
+        console.log('[WS]   authToken 長度=', authToken ? authToken.length : 0, '前10字=', authToken ? authToken.substring(0,10)+'...' : '空');
       } catch(e) {
         // fallback：簡單字串取代
         wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/?$/, '/');
@@ -572,8 +574,10 @@
       _wsFailureReason = '';
       try {
         ws = new WebSocket(wsUrl);
+        console.log('[WS] WebSocket 物件已建立, readyState=', ws.readyState, '(0=CONNECTING)');
       } catch(e) {
         _wsFailureReason = '建立失敗: ' + (e.message || String(e));
+        console.error('[WS] new WebSocket() 丟出異常:', e.message, e);
         reject(e);
         return;
       }
@@ -587,7 +591,7 @@
       }, 5000);
 
       ws.onopen = () => {
-        console.log('[WS] upgrade 成功，連線已開啟 (onopen)，發送 auth...');
+        console.log('[WS] ✅ onopen - upgrade 成功, readyState=', ws.readyState, '(1=OPEN)。發送 auth...');
         wsSend({
           type: 'auth',
           token: authToken,
@@ -597,21 +601,66 @@
         });
       };
 
+      ws.onerror = (event) => {
+        console.error('[WS] ❌ onerror 觸發');
+        console.error('[WS]   event.type=', event.type);
+        console.error('[WS]   event.target.url=', event.target?.url || 'n/a');
+        console.error('[WS]   readyState=', ws?.readyState);
+        _wsFailureReason = 'onerror 觸發 (詳見 console)';
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(new Error('WebSocket 連線錯誤 (onerror, readyState=' + (ws?.readyState ?? '?') + ')'));
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.warn('[WS] ⚠️ onclose 觸發');
+        console.warn('[WS]   code=', event.code);
+        console.warn('[WS]   reason=', event.reason || '(空)');
+        console.warn('[WS]   wasClean=', event.wasClean);
+        console.warn('[WS]   readyState=', ws?.readyState);
+        wsConnected = false;
+        _wsLastCloseCode = event.code;
+        _wsLastCloseReason = event.reason || '';
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          let reason = '連線被關閉';
+          if (event.code === 1006) reason = '無法連接伺服器（code 1006，代理/防火牆可能不支援 WS Upgrade）';
+          else if (event.code === 1000) reason = '正常關閉';
+          else if (event.code === 1001) reason = '遠端離開（code 1001 Going Away）';
+          else if (event.code === 4001) reason = '認證失敗（code 4001，token 無效）';
+          else reason = '關閉 code=' + event.code + (event.reason ? '：' + event.reason : '');
+          _wsFailureReason = reason;
+          reject(new Error(reason));
+          return;
+        }
+        // 意外斷線：嘗試重連，或降級 long-poll
+        if (useWebSocket && status === STATUS.ONLINE) {
+          console.warn('[WS] 線中斷，降級 long-poll 並嘗試重連');
+          useWebSocket = false;
+          startPollLoop();
+          scheduleWsReconnect();
+        }
+      };
+
       ws.onmessage = (ev) => {
         let msg;
         try { msg = JSON.parse(ev.data); } catch(e) { return; }
         if (!msg || !msg.type) return;
 
-          if (msg.type === 'auth_ok') {
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeout);
-              useWebSocket = true;
-              wsConnected = true;
-              wsReconnectDelay = 1000;
-              console.log('[WS] 認證成功，account=', msg.account, '(WebSocket 模式啟用)');
-              resolve(msg);
-            }
+        if (msg.type === 'auth_ok') {
+          if (!resolved) {
+            resolved = true;
+            console.log('[WS] ✅ auth_ok - 驗證通過, clientId=', msg.id, 'account=', msg.account);
+            clearTimeout(timeout);
+            useWebSocket = true;
+            wsConnected = true;
+            wsReconnectDelay = 1000;
+            console.log('[WS] 認證成功，account=', msg.account, '(WebSocket 模式啟用)');
+            resolve(msg);
+          }
           // 若已經在地圖中，重新 join
           if (currentMapId && myPlayerId) {
             wsSend({
@@ -626,59 +675,19 @@
             });
           }
           return;
-        }
-
-        if (msg.type === 'auth_fail') {
+        } else if (msg.type === 'auth_fail') {
+          console.error('[WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
+          clearTimeout(timeout);
+          _wsFailureReason = 'auth 失敗: ' + (msg.reason || msg.error || 'token 無效');
           if (!resolved) {
             resolved = true;
-            clearTimeout(timeout);
-            reject(new Error(msg.error || '認證失敗'));
+            reject(new Error(_wsFailureReason));
           }
           return;
         }
 
         // 其他事件走統一處理
         handleWsMessage(msg);
-      };
-
-      ws.onerror = (err) => {
-        console.warn('[WS] 錯誤事件 onerror:', err?.message || err, 'readyState=' + (ws?.readyState ?? '?'));
-        _wsFailureReason = '連線錯誤（' + (err?.message || 'network error') + '）';
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          reject(new Error('WebSocket 連線錯誤（' + (err?.message || 'network error') + '）'));
-        }
-      };
-
-      ws.onclose = (ev) => {
-        console.log('[WS] 連線關閉 code=' + ev.code + ' reason=' + (ev.revision || ev.reason || '') + ' wasClean=' + ev.wasClean);
-        wsConnected = false;
-        _wsLastCloseCode = ev.code;
-        _wsLastCloseReason = ev.reason || '';
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          let reason = '連線被關閉';
-          if (ev.code === 1006) reason = '無法連接伺服器（code 1006，代理/防火牆可能不支援 WS Upgrade）';
-          else if (ev.code === 1000) reason = '正常關閉';
-          else if (ev.code === 1001) reason = '遠端離開（code 1001 Going Away）';
-          else if (ev.code === 1002) reason = '協定錯誤（code 1002 Protocol Error）';
-          else if (ev.code === 1003) reason = '伺服器拒絕資料類型（code 1003）';
-          else if (ev.code === 1008) reason = '政策違反（code 1008）';
-          else if (ev.code === 1011) reason = '伺服器內部錯誤（code 1011）';
-          else reason = '關閉 code=' + ev.code + (ev.reason ? '：' + ev.reason : '');
-          _wsFailureReason = reason;
-          reject(new Error(reason));
-          return;
-        }
-        // 意外斷線：嘗試重連，或降級 long-poll
-        if (useWebSocket && status === STATUS.ONLINE) {
-          console.warn('[WS] 線中斷，降級 long-poll 並嘗試重連');
-          useWebSocket = false;
-          startPollLoop();
-          scheduleWsReconnect();
-        }
       };
     });
   }
@@ -689,7 +698,8 @@
     wsReconnectTimer = setTimeout(() => {
       wsReconnectTimer = null;
       if (status !== STATUS.ONLINE && status !== STATUS.RECONNECTING) return;
-      console.log('[WS] 嘗試重連（delay=' + wsReconnectDelay + 'ms）...');
+      console.log('[WS] 🔄 第', (wsReconnectCount || 0) + 1, '次重連 (delay=' + wsReconnectDelay + 'ms)');
+      wsReconnectCount = (wsReconnectCount || 0) + 1;
       tryWebSocket().then(() => {
         wsReconnectDelay = 1000;
         _wsFailureReason = '';
@@ -718,6 +728,36 @@
 
   function handleWsMessage(msg) {
     switch (msg.type) {
+      // v3.0.0：Server Authoritative AOI 事件
+      case 'join_map_ok':
+        console.log('[WS] ✅ join_map_ok - 伺服器確認加入地圖, AOI半徑=', msg.aoiRadius, '初始實體數=', msg.entities?.length || 0);
+        // 設定自己的伺服器端位置
+        if (msg.self && typeof window.setServerSelfState === 'function') {
+          window.setServerSelfState(msg.self);
+        }
+        // 初始 AOI 實體
+        if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIEnter === 'function') {
+          window.handleAOIEnter(msg.entities);
+        }
+        if (msg.aoiRadius && typeof window.setAOIRadius === 'function') {
+          window.setAOIRadius(msg.aoiRadius);
+        }
+        break;
+      case 'aoi_enter':
+        if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIEnter === 'function') {
+          window.handleAOIEnter(msg.entities);
+        }
+        break;
+      case 'aoi_update':
+        if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIUpdate === 'function') {
+          window.handleAOIUpdate(msg.entities);
+        }
+        break;
+      case 'aoi_leave':
+        if (msg.ids && Array.isArray(msg.ids) && typeof window.handleAOILeave === 'function') {
+          window.handleAOILeave(msg.ids);
+        }
+        break;
       case 'player_join':
         if (msg.playerId !== myPlayerId) {
           addOrUpdateRemotePlayer({
