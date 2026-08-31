@@ -1,0 +1,78 @@
+name: Cleanup Old Files (Safe)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reset data files to empty templates
+        run: |
+          echo "=== 重置 data/ 為空模板 ==="
+          mkdir -p data/ai
+          # 這些JSON在v2.8.5強制PostgreSQL後不再存實際數據，只是空模板
+          echo "[]" > data/leaderboard-entries.json
+          echo "[]" > data/accounts.json
+          echo "[]" > data/account-shared.json
+          echo "[]" > data/gm-action-logs.json
+          echo "[]" > data/warehouse-logs.json
+          echo "[]" > data/ai/zeus_village.json
+          echo "[]" > data/ai/cronus_village.json
+          # 保留 data/game-servers.json（GM預設伺服器配置）
+          echo "✓ data/ 已重置為空模板"
+
+      - name: Remove explicitly old asset folders
+        run: |
+          echo "=== 刪除明確標示為old的資料夾 ==="
+          rm -rf assets/12_map_old
+          rm -rf assets/transform_old
+          echo "✓ 舊資產資料夾已刪除"
+
+      - name: Remove backup and debug files
+        run: |
+          echo "=== 刪除備份檔與除錯檔 ==="
+          rm -f server/index.cjs.bak
+          rm -f server/server.cjs.bak_gm
+          rm -f game-bundle.html
+          rm -f diag.html
+          rm -f e2e.html
+          rm -f test-isolation.cjs
+          rm -f ASSETS-FRAME-AUDIT.txt
+          rm -f PARTS-MANIFEST.txt
+          echo "✓ 備份檔與除錯檔已刪除"
+
+      - name: Show what was changed
+        run: |
+          echo "=== 變更摘要 ==="
+          git status --short
+          echo ""
+          echo "=== 注意：以下項目未刪除（有風險）==="
+          echo "  - assets/ 根目錄的hash圖檔（遊戲可能直接引用）"
+          echo "  - 根目錄 equip/ gold/ item/（需確認程式碼是否引用）"
+          echo "  - server/public/socket.io/（需確認前端是否使用）"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "沒有變更，略過提交"
+          else
+            git commit -m "cleanup: remove old/backup/debug files, reset data templates"
+            git push
+            echo "✓ 已提交並推送"
+          fi
