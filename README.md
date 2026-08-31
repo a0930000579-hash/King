@@ -4,10 +4,10 @@
 
 ## 版本資訊
 
-- 目前版本：v2.7.3
-- `/api/health` 回傳 `version: "2.7.3"`，含 `instanceId` / `socketIo` / `webSocket`
-- 離線模式判定：fetch `/api/health` 有回應=已連線(綠)，404/連不到=未連線(紅)並提示「目前伺服器未提供API，可能部署成靜態站而非Web Service」
-- v2.7.3 重點：6 套真系列金變 8 幀重製 / 權威 AI 多人同步持久化 / 商店數量選擇器 / 原生彈窗遊戲化 / 倉庫系統 / buff icon 補齊 / NPC 對話頭像
+- 目前版本：v2.8.5
+- `/api/health` 回傳 `version: "2.8.5"`、`wsCount`、`lpCount`、`onlineCount`
+- v2.8.5 重點：強制 PostgreSQL（DATABASE_URL 存在時禁用 JSON fallback）、WebSocket 主通道修復、怪物精靈零問號、裝備 icon 統一單一入口、data/ 空模板
+- 多人連線：WebSocket 為主通道，long-poll 為斷線降級備援
 
 ---
 
@@ -18,7 +18,17 @@ npm install    # 安裝依賴（首次，含 adm-zip）
 npm start      # 自動解壓 assets 分卷 → 啟動伺服器
 ```
 
-預設監聽 `process.env.PORT`（未設定則 8000）。瀏覽器打開 `http://localhost:8000` 即可遊玩。
+## 環境變數（生產部署必填）
+
+| 變數 | 必填 | 說明 |
+|------|------|------|
+| `DATABASE_URL` | **是（生產）** | PostgreSQL 連線字串，例：`postgresql://user:pass@host:5432/dbname` |
+| `PORT` | 否 | 監聽連接埠，預設 8000 |
+| `GM_ACCOUNT` | 否 | GM 管理員帳號，預設 `admin` |
+| `GM_PASSWORD_HASH` | 否 | GM 密碼 bcrypt hash |
+
+> **v2.8.5 變更：** 設定 `DATABASE_URL` 後**強制使用 PostgreSQL**，連線失敗直接 `process.exit(1)`，不會靜默降級到 JSON 檔案。
+> 請確保部署平台（DO App Platform / Fly.io / Render 等）已正確設定此環境變數。
 
 > 若 `parts/` 目錄有 `assets-part*.zip`，`postinstall` 會自動解壓合併出 `assets/`。
 > 若已有完整 `assets/` 但沒有分卷 zip，也可以直接執行（跳過解壓步驟）。

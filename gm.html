@@ -1634,14 +1634,22 @@ async function loadDashboard() {
       dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
     }
     document.getElementById('assetCount').textContent = health.assetCount || '--';
-    // 同步模式：優先 long-poll（v2.5.0 預設），其次 Socket.IO
+    // v2.8.5：正確顯示即時同步方式 — 優先 WebSocket，其次 long-poll
     const syncEl = document.getElementById('syncMode');
-    if (health.longPoll) {
+    if (health.webSocket && health.wsCount != null && health.wsCount > 0) {
+      syncEl.textContent = 'WebSocket（' + health.wsCount + ' 人在線）';
+      syncEl.style.color = '#60c080';
+    } else if (health.webSocket) {
+      if (health.lpCount != null && health.lpCount > 0) {
+        syncEl.textContent = 'LP降級（' + health.lpCount + ' 人在線）';
+        syncEl.style.color = '#e0c060';
+      } else {
+        syncEl.textContent = 'WebSocket（閒置）';
+        syncEl.style.color = '#60c080';
+      }
+    } else if (health.longPoll) {
       syncEl.textContent = '長輪詢（已啟用）';
-      syncEl.style.color = '#60c080';
-    } else if (health.socketIo) {
-      syncEl.textContent = 'Socket.IO（已啟用）';
-      syncEl.style.color = '#60c080';
+      syncEl.style.color = '#c8a868';
     } else {
       syncEl.textContent = '未啟用';
       syncEl.style.color = '#e06060';

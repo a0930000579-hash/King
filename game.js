@@ -299,20 +299,22 @@ function _buildRevIndex(manifest) {
 }
 function loadAssetsManifest() {
   if (ASSETS_MANIFEST_LOADED) return Promise.resolve(ASSETS_MANIFEST);
-  return fetch('/assets/assets-manifest.json', { cache: 'no-cache' })
+  // v2.8.5：用相對路徑，DO 子路徑部署也能正確載入（/app/xxx/ 下絕對路徑會 404）
+  const manifestPath = (window.__assetBase || 'assets/') + 'assets-manifest.json';
+  return fetch(manifestPath, { cache: 'no-cache' })
     .then(r => { if (!r.ok) throw new Error('manifest HTTP ' + r.status); return r.json(); })
     .then(data => {
       ASSETS_MANIFEST = data || {};
       ASSETS_REV_INDEX = _buildRevIndex(ASSETS_MANIFEST);
       ASSETS_MANIFEST_LOADED = true;
-      console.log('[Assets] manifest 載入成功，共', Object.keys(ASSETS_MANIFEST).length, '筆；反向索引', Object.keys(ASSETS_REV_INDEX).length, '筆');
+      console.log('[Assets] manifest 載入成功，路徑=' + manifestPath + '，共', Object.keys(ASSETS_MANIFEST).length, '筆');
       return ASSETS_MANIFEST;
     })
     .catch(e => {
       ASSETS_MANIFEST = null;
       ASSETS_REV_INDEX = null;
       ASSETS_MANIFEST_LOADED = true;
-      console.warn('[Assets] manifest 缺失，使用分類目錄 fallback:', e.message);
+      console.warn('[Assets] manifest 載入失敗，路徑=' + manifestPath + '，使用分類目錄 fallback:', e.message);
       return null;
     });
 }
@@ -380,11 +382,15 @@ function assetUrl(id) {
     return 'assets/' + pureId + '.png';
   }
   // v2.4.0：語意路徑優先走 manifest；若不在 manifest，嘗試 jpg/png 並以 manifest 結果為準
-  // 對於有 / 的語意路徑，優先嘗試 .jpg（多數美術圖為 jpg），其次 .png
+  // v2.8.5：monster/ /sprite/ /npc/ /hero/ 預設 .png（實際檔案都是 png），其他預設 .jpg
   if (id.indexOf('/') !== -1) {
     // 有副檔名 → 直接拼接
     if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
-    // 沒副檔名 → 先嘗試 .jpg（多數美術資源），fallback 到 .png（onerror 鏈接續）
+    // 沒副檔名 → 依路徑前綴決定預設副檔名
+    const lowId = id.toLowerCase();
+    if (lowId.startsWith('monster/') || lowId.startsWith('sprite/') || lowId.startsWith('npc/') || lowId.startsWith('hero/') || lowId.startsWith('pet/') || lowId.startsWith('transform/') || lowId.startsWith('boss/') || lowId.startsWith('warrior/') || lowId.startsWith('mage/') || lowId.startsWith('archer/')) {
+      return 'assets/' + pureId + '.png';
+    }
     return 'assets/' + pureId + '.jpg';
   }
   const cat = getSpriteCategory(pureId);
@@ -445,6 +451,25 @@ function handleImgError(img) {
       img.src = idleImg.src;
       img.style.opacity = '1';
       img.style.visibility = 'visible';
+      return;
+    }
+    // v2.8.5：連 idle frame 自己都失敗 → 用暗色漸層 + 文字符號兜底，絕不顯示問號方塊
+    if (idleImg && idleImg === img) {
+      img.dataset.errFallback = 'sprite_fixed';
+      img.classList.add('frame-error');
+      // 把 img 換成 div 形式的兜底（避免顯示破損圖示）
+      const wrap = img.parentElement;
+      if (wrap) {
+        // 用 CSS 偽元素或直接替換為背景兜底
+        img.style.display = 'none';
+        const fallback = document.createElement('div');
+        fallback.className = 'sprite-error-fallback';
+        const unitName = unitEl ? unitEl.querySelector('.unit-name')?.textContent || '' : '';
+        const fallbackChar = unitName ? unitName.charAt(0) : '✦';
+        fallback.textContent = fallbackChar;
+        fallback.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:900;color:#e0c060;text-shadow:0 2px 4px rgba(0,0,0,0.8);background:linear-gradient(180deg,#2a1a0a,#1a0f05);border-radius:6px;font-size:18px;letter-spacing:1px';
+        wrap.appendChild(fallback);
+      }
       return;
     }
     // 連 idle 都找不到 → 最少要確保不透明不閃爍

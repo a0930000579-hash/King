@@ -35,8 +35,8 @@ async function ensureSchema() {
 async function init() {
   lastError = null;
   if (process.env.DATABASE_URL) {
-    console.log('[DB] 偵測到 DATABASE_URL，嘗試連接 PostgreSQL...');
-    // 嘗試載入 pg 模組（若未安裝，明確報錯並退回 JSON）
+    console.log('[DB] 偵測到 DATABASE_URL，強制使用 PostgreSQL（v2.8.5 禁用 JSON fallback）...');
+    // 嘗試載入 pg 模組（若未安裝，明確報錯並**直接退出**，不 fallback 到 JSON）
     let Pool;
     try {
       const pg = require('pg');
@@ -44,14 +44,14 @@ async function init() {
     } catch (e) {
       lastError = 'pg 模組未安裝：' + e.message + '。請確認 package.json 已包含 pg 依賴並執行 npm install。';
       console.error('========================================');
-      console.error('[DB][嚴重] 無法載入 pg 模組（PostgreSQL 驅動）');
+      console.error('[DB][致命] 無法載入 pg 模組（PostgreSQL 驅動）');
       console.error('[DB] 錯誤：', e.message);
       console.error('[DB] 原因：package.json 缺少 pg 依賴，或 npm install 未執行');
-      console.error('[DB] 處理：已自動退回 JSON 檔案模式');
+      console.error('[DB] v2.8.5 變更：DATABASE_URL 存在時強制 PG，不再靜默退回 JSON');
       console.error('[DB] 修復：在專案根目錄執行 → npm install pg@^8.12.0');
       console.error('========================================');
-      backend = 'json';
-      return 'json';
+      // v2.8.5：致命錯誤，直接退出，不讓伺服器以 JSON 模式偷偷跑
+      process.exit(1);
     }
 
     try {
@@ -60,7 +60,7 @@ async function init() {
         ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
         max: 10,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 8000,
       });
       console.log('[DB] 建立連線池，執行 SELECT 1 連通測試...');
       await pgPool.query('SELECT 1'); // 測試連線
@@ -75,19 +75,20 @@ async function init() {
       const code = e.code || '';
       lastError = msg + (code ? ' (code=' + code + ')' : '');
       console.error('========================================');
-      console.error('[DB][嚴重] PostgreSQL 連線失敗，退回 JSON 檔案模式');
+      console.error('[DB][致命] PostgreSQL 連線失敗，v2.8.5 不再 fallback 到 JSON');
       console.error('[DB] 錯誤訊息：', msg);
       if (code) console.error('[DB] 錯誤代碼：', code);
       if (e.detail) console.error('[DB] 細節：', e.detail);
-      console.error('[DB] 已自動退回 JSON 檔案模式');
+      console.error('[DB] 請檢查 DATABASE_URL 環境變數是否正確');
+      console.error('[DB] 伺服器無法啟動，正在退出...');
       console.error('========================================');
       if (pgPool) { try { pgPool.end(); } catch (_) {} pgPool = null; }
-      backend = 'json';
-      _migrationsResolve(false); // 失敗也解鎖，讓呼叫端落到 json 分支
-      return 'json';
+      // v2.8.5：致命錯誤，直接退出
+      process.exit(1);
     }
   } else {
     console.log('[DB] 未設 DATABASE_URL，使用 JSON 檔案模式（離線）');
+    console.warn('[DB] 警告：生產環境請務必設定 DATABASE_URL 環境變數');
     backend = 'json';
     _migrationsResolve(false);
     return 'json';

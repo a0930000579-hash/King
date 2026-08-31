@@ -818,7 +818,7 @@ async function handleApi(req, res, pathname, query) {
     const assetCount = assetIndex.size;
     const backend = db.getBackend();
     const dbErr = db.getLastError ? db.getLastError() : null;
-    // v2.8.4：線上人數明細（WS + LP 分開計，總數去重）
+    // v2.8.5：線上人數明細（WS + LP 分開計，總數去重）
     let wsCount = 0, lpCount = 0;
     try { wsCount = (wsServer && typeof wsServer.getOnlineCount === 'function') ? wsServer.getOnlineCount() : 0; } catch(e) {}
     try { lpCount = onlinePlayers ? onlinePlayers.size : 0; } catch(e) {}
@@ -834,9 +834,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.8.4',
-      build: '2.8.4-2608311800',
-      buildId: '2.8.4-2608311800',
+      version: '2.8.5',
+      build: '2.8.5-2608311800',
+      buildId: '2.8.5-2608311800',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
