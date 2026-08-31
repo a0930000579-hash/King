@@ -7,7 +7,7 @@
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v2.8.5</title>
+  <title>君主之刃 v2.9.0</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1a0f05" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -491,19 +491,9 @@
           <span class="menu-text">國家</span>
           <span class="menu-arrow">›</span>
         </button>
-        <button class="side-menu-item" data-menu="class">
-          <span class="menu-icon menu-icon-text" data-label="職"></span>
-          <span class="menu-text">職業</span>
-          <span class="menu-arrow">›</span>
-        </button>
         <button class="side-menu-item" data-menu="warehouse">
           <span class="menu-icon menu-icon-text" data-label="倉"></span>
           <span class="menu-text">倉庫</span>
-          <span class="menu-arrow">›</span>
-        </button>
-        <button class="side-menu-item" data-menu="ranking">
-          <span class="menu-icon menu-icon-text" data-label="榜"></span>
-          <span class="menu-text">排行榜</span>
           <span class="menu-arrow">›</span>
         </button>
         <button class="side-menu-item" id="menu-codex-btn">
@@ -528,7 +518,7 @@
         </button>
       </div>
       <div class="side-menu-footer">
-        <div class="export-tip">君主之刃 v2.7.7</div>
+        <div class="export-tip">君主之刃 v2.9.0</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -797,7 +787,7 @@
           </div>
          <div style="border-top:1px solid rgba(139,105,20,0.3);margin:16px 0;padding-top:14px">
             <div style="font-size:12px;font-weight:700;color:var(--gold-bright);margin-bottom:8px">多人連線</div>
-            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">同網址自動長輪詢連線，無需手動設定</div>
+            <div style="font-size:10px;color:var(--parchment-dark);margin-bottom:8px;line-height:1.4">WebSocket 優先，斷線自動降級長輪詢</div>
             <div class="settings-row">
               <span class="settings-label">連線狀態</span>
               <span id="mp-status-text" class="mp-status-text mp-status-offline">連線中</span>
@@ -841,6 +831,7 @@
         </div>
         </div>
         <div style="flex-shrink:0;margin-top:12px;display:flex;flex-direction:column;gap:8px">
+          <button class="lang-btn" id="settings-switch-char-btn" style="width:100%;padding:8px;background:linear-gradient(180deg,#4a3a20,#2a1e0a);border:1px solid #8a7040;color:#d0b880;font-weight:600">更 換 角 色</button>
           <button class="lang-btn" id="settings-logout-btn" style="width:100%;padding:8px;background:linear-gradient(180deg,#8a4020,#5a2a10);border:1px solid #c05020;color:#ffd0a0;font-weight:600">登 出 / 返 回 首 頁</button>
           <button class="lang-btn" id="settings-close-btn" style="width:100%;padding:6px">關閉</button>
         </div>

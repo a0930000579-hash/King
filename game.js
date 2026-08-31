@@ -7869,51 +7869,27 @@ function createAISprite(ai) {
   const isEnemy = ai.nation && GS.nation && ai.nation !== GS.nation;
   if (isEnemy) elDiv.classList.add('enemy-ai');
   const s = ai.sprite || SPRITE.warrior;
-  const isImg = !!s.useImg;
   const filter = `drop-shadow(0 0 4px ${s.glow || '#ffe090'}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
-  // 名字標籤：國旗+名稱
+  // v2.9.0：統一用 buildSpriteHTML 完整 8 幀結構，AI 移動/攻擊有正確動畫，不再是單張靜止圖
+  const isMulti = !!(s && s.multiFrame);
+  elDiv.innerHTML = buildSpriteHTML(s, 'hero', !isMulti);
+  if (isMulti) {
+    initUnitAnimState(ai.uid);
+    setUnitAnimState(ai.uid, 'idle', { dir: ai.dir || 'down' });
+  }
+  // 名字標籤：國旗+名稱（覆蓋 buildSpriteHTML 的預設）
+  const nameEl = elDiv.querySelector('.unit-name');
   const n = NATIONS.find(nn => nn.id === ai.nation);
   const flagImg = n ? safeFlagImg(ai.nation, 12) : '';
-  const nameEl = document.createElement('div');
-  nameEl.className = 'unit-info';
-  nameEl.innerHTML = `
-    <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:${isEnemy ? '#ff5050' : '#50c8ff'}"></div></div>
-    <div class="unit-name" style="color:${isEnemy ? '#ff8080' : '#80d0ff'};font-size:10px">${flagImg}${ai.name}</div>
-    <div class="unit-level-tag" style="display:none"></div>
-  `;
-  elDiv.appendChild(nameEl);
-  // 精灵图（真實圖片優先，emoji 備用）— 尺寸與玩家一致
-  const wrap = document.createElement('div');
-  wrap.className = 'unit-sprite-wrap';
-  wrap.style.width = '64px';
-  wrap.style.height = '80px';
-  if (isImg) {
-    const imgIdle = document.createElement('img');
-    imgIdle.className = 'unit-sprite-img sprite-frame-idle';
-    imgIdle.src = s.idle;
-    imgIdle.style.filter = filter;
-    imgIdle.alt = '';
-    imgIdle.loading = 'lazy';
-    imgIdle.onerror = function() { if (!this.dataset.err) { this.dataset.err='1'; this.classList.add('frame-error'); } };
-    wrap.appendChild(imgIdle);
-    const tomb = document.createElement('div');
-    tomb.className = 'unit-sprite-tomb';
-    tomb.textContent = '墓';
-    tomb.style.display = 'none';
-    wrap.appendChild(tomb);
-  } else {
-    const emoji = document.createElement('div');
-    emoji.className = 'unit-sprite-emoji';
-    emoji.textContent = s.idle || '技';
-    emoji.dataset.spriteIdle = s.idle || '技';
-    emoji.dataset.spriteAttack = s.attack || s.idle || '技';
-    emoji.dataset.spriteDead = '墓';
-    emoji.style.color = s.color || '#c0a060';
-    emoji.style.fontSize = '52px';
-    emoji.style.filter = filter;
-    wrap.appendChild(emoji);
+  if (nameEl) {
+    nameEl.style.color = isEnemy ? '#ff8080' : '#80d0ff';
+    nameEl.style.fontSize = '10px';
+    nameEl.innerHTML = flagImg + (ai.name || 'AI');
   }
-  elDiv.appendChild(wrap);
+  const hpFill = elDiv.querySelector('.unit-hp-fill');
+  if (hpFill) hpFill.style.background = isEnemy ? '#ff5050' : '#50c8ff';
+  const lvTag = elDiv.querySelector('.unit-level-tag');
+  if (lvTag) lvTag.style.display = 'none';
   // 阴影
   const shadow = document.createElement('div');
   shadow.className = 'unit-shadow';
@@ -26018,6 +25994,21 @@ function bindEvents() {
       location.reload();
     }
   });
+  // v2.9.0：更換角色按鈕（返回角色選擇頁，不登出帳號）
+  const settingsSwitchCharBtn = $('settings-switch-char-btn');
+  if (settingsSwitchCharBtn) settingsSwitchCharBtn.addEventListener('click', () => {
+    if (!confirm('確定要更換角色嗎？當前進度將自動保存。')) return;
+    el.settingsPanel.classList.remove('open');
+    // 調用角色選擇頁顯示函數（由 auth.js 提供或由 game.js 橋接）
+    if (window.AuthSystem && typeof window.AuthSystem.showCharSelect === 'function') {
+      window.AuthSystem.showCharSelect();
+    } else if (typeof window.showCharacterSelectScreen === 'function') {
+      window.showCharacterSelectScreen();
+    } else {
+      // fallback：重整後 auth.js 會顯示角色選擇
+      location.reload();
+    }
+  });
   // 自動道具：設置面板關閉時統一保存一次
   if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', saveAutoItemsConfig);
   // 自動戰鬥 toggle
@@ -27070,11 +27061,31 @@ function updateServerAIs(dt) {
     const dx = ai.targetX - ai.x;
     const dy = ai.targetY - ai.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < 1) return;
-    const speed = 120; // px/s（與玩家接近）
-    const step = Math.min(dist, speed * dt / 1000);
-    ai.x += (dx / dist) * step;
-    ai.y += (dy / dist) * step;
+    const wasMoving = ai._wasMoving;
+    const isMoving = dist >= 1.5;
+    ai._wasMoving = isMoving;
+    if (isMoving) {
+      const speed = 120; // px/s（與玩家接近）
+      const step = Math.min(dist, speed * dt / 1000);
+      ai.x += (dx / dist) * step;
+      ai.y += (dy / dist) * step;
+      // v2.9.0：移動中 → walk 動畫
+      if (ai.state !== 'walking' && ai.sprite?.multiFrame) {
+        ai.state = 'walking';
+        // 初始化動畫狀態（若尚未）
+        if (unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
+          setUnitAnimState(ai.uid, 'walk', { dir: ai.dir || 'down' });
+        }
+      }
+    } else {
+      // 停下 → idle
+      if (ai.state !== 'idle' && ai.sprite?.multiFrame) {
+        ai.state = 'idle';
+        if (unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
+          setUnitAnimState(ai.uid, 'idle', { dir: ai.dir || 'down' });
+        }
+      }
+    }
     // 更新 DOM 位置
     if (typeof window.positionUnit === 'function') {
       try { positionUnit(ai.el, ai.x, ai.y, 'ai'); } catch(e) {}

@@ -1614,10 +1614,11 @@ async function resetAllAI() {
 
 // ===== 儀表板 =====
 async function loadDashboard() {
-  const [health, online, players] = await Promise.all([
+  const [health, online, players, stats] = await Promise.all([
     apiCall('/api/health'),
     apiCall('/api/gm/online'),
     apiCall('/api/gm/players?page=1&pageSize=1'),
+    apiCall('/api/gm/admin/stats').catch(() => null),
   ]);
 
   if (health && health.status) {
@@ -1634,7 +1635,7 @@ async function loadDashboard() {
       dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
     }
     document.getElementById('assetCount').textContent = health.assetCount || '--';
-    // v2.8.5：正確顯示即時同步方式 — 優先 WebSocket，其次 long-poll
+    // v2.9.0：正確顯示即時同步方式 — 優先 WebSocket，其次 long-poll
     const syncEl = document.getElementById('syncMode');
     if (health.webSocket && health.wsCount != null && health.wsCount > 0) {
       syncEl.textContent = 'WebSocket（' + health.wsCount + ' 人在線）';
@@ -1659,8 +1660,13 @@ async function loadDashboard() {
     const list = online.players || online.list || [];
     const cnt = online.count != null ? online.count : list.length;
     document.getElementById('statOnline').textContent = cnt;
+  } else if (stats && stats.onlineCount != null) {
+    document.getElementById('statOnline').textContent = stats.onlineCount;
   }
-  if (players && players.total != null) {
+  if (stats && stats.totalAccounts != null) {
+    // v2.9.0：優先用 admin/stats（從 PG 查的），最準確
+    document.getElementById('statTotal').textContent = stats.totalAccounts;
+  } else if (players && players.total != null) {
     document.getElementById('statTotal').textContent = players.total;
   } else if (health && health.totalAccounts != null) {
     document.getElementById('statTotal').textContent = health.totalAccounts;

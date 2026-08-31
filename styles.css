@@ -693,56 +693,53 @@ img { display: block; pointer-events: none; }
   will-change: transform;
 }
 
-/* v2.8.2：全單位統一「墓碑形」(上下雙拱)
-   頂部半圓拱 + 底部半圓拱 + 左右垂直邊
-   border-radius 規則：50% 50% 50% 50% / 40% 40% 40% 40% 為上下對稱橢圓
+/* v2.9.0：全單位透明精靈，移除墓碑形邊框，只保留光暈環繞
    尺寸：普通單位 64×80、英雄/變身 72×96、BOSS 96×120 */
 .world-unit .unit-sprite-wrap {
   width: 64px;
   height: 80px;
-  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
-  overflow: hidden;
-  /* 墓碑邊框（內嵌深色石邊 + 外圍半透明輝光） */
-  box-shadow:
-    inset 0 0 0 1.5px rgba(255, 220, 140, 0.18),
-    inset 0 2px 4px rgba(0, 0, 0, 0.4),
-    0 0 8px rgba(0, 0, 0, 0.5);
+  overflow: visible;
+  background: transparent !important;
+  border: none;
+  box-shadow: none;
   -webkit-mask-image: none;
           mask-image: none;
 }
-/* hero / 變身：72×96，墓碑比例跟著拉高 */
+/* hero / 變身：72×96 */
 .world-unit.hero .unit-sprite-wrap {
   width: 72px !important;
   height: 96px !important;
-  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
-  box-shadow:
-    inset 0 0 0 1.5px rgba(255, 220, 140, 0.22),
-    inset 0 3px 6px rgba(0, 0, 0, 0.4),
-    0 0 10px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
+  border: none;
+  overflow: visible;
 }
 /* BOSS 單位更大：96×120 */
 .world-unit.boss-unit .unit-sprite-wrap {
   width: 96px !important;
   height: 120px !important;
-  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
-  box-shadow:
-    inset 0 0 0 2px rgba(255, 100, 100, 0.3),
-    inset 0 3px 6px rgba(0, 0, 0, 0.45),
-    0 0 14px rgba(0, 0, 0, 0.6);
+  box-shadow: none;
+  border: none;
+  overflow: visible;
 }
 
-/* 橢圓品質光暈（單位外圈的柔和發光邊，放在 ::before 做 radial 光環，限制在墓碑框內）*/
+/* 品質光暈（單位外圈的柔和發光環）*/
 .world-unit .unit-sprite-wrap::before {
   content: '';
   position: absolute;
-  inset: -2px -3px -2px -3px;
-  border-radius: 50% 50% 50% 50% / 40% 40% 40% 40%;
-  background: radial-gradient(ellipse at 50% 45%,
-    rgba(255, 220, 140, 0.0) 58%,
-    rgba(255, 210, 120, 0.18) 74%,
-    rgba(255, 200, 100, 0.12) 84%,
-    transparent 96%);
+  left: 50%;
+  bottom: 0;
+  width: 80%;
+  height: 30%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center,
+    rgba(255, 220, 140, 0.45) 0%,
+    rgba(255, 200, 100, 0.2) 40%,
+    transparent 70%);
+  filter: blur(4px);
   pointer-events: none;
+  z-index: -1;
+}
   z-index: 0;
   filter: blur(1.5px);
 }
@@ -797,8 +794,14 @@ img { display: block; pointer-events: none; }
 
 /* 變身光環：放在 sprite-wrap 外作為兄弟元素，position:absolute 完全不影響文檔流 */
 .world-unit.hero .transform-aura {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 72px;
+  height: 96px;
+  margin-left: -36px;
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
   /* 用 visibility 而非 display:none，避免潛在重排；opacity:0 也確保看不見 */
   visibility: hidden;
   opacity: 0;
@@ -811,8 +814,8 @@ img { display: block; pointer-events: none; }
   position: absolute;
   top: 0; left: 0;
   width: 100%; height: 100%;
-  object-fit: cover;
-  object-position: center 30%;
+  object-fit: contain;
+  object-position: center bottom;
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
@@ -822,8 +825,8 @@ img { display: block; pointer-events: none; }
   border-radius: 0;
   transition: none;
   /* 變身前後圖片尺寸與對齊完全一致，避免視覺偏移 */
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.8)) brightness(1.03) contrast(1.05);
-  transform: translateX(0) translateY(0) scale(0.92);
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)) brightness(1.03) contrast(1.05);
+  transform: translateX(0) translateY(0);
   margin: 0 !important;
   padding: 0 !important;
 }

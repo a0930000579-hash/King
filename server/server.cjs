@@ -818,7 +818,7 @@ async function handleApi(req, res, pathname, query) {
     const assetCount = assetIndex.size;
     const backend = db.getBackend();
     const dbErr = db.getLastError ? db.getLastError() : null;
-    // v2.8.5：線上人數明細（WS + LP 分開計，總數去重）
+    // v2.9.0：線上人數明細（WS + LP 分開計，總數去重）
     let wsCount = 0, lpCount = 0;
     try { wsCount = (wsServer && typeof wsServer.getOnlineCount === 'function') ? wsServer.getOnlineCount() : 0; } catch(e) {}
     try { lpCount = onlinePlayers ? onlinePlayers.size : 0; } catch(e) {}
@@ -834,9 +834,9 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.8.5',
-      build: '2.8.5-2608311800',
-      buildId: '2.8.5-2608311800',
+      version: '2.9.0',
+      build: '2.9.0-2608311800',
+      buildId: '2.9.0-2608311800',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1527,22 +1527,26 @@ async function handleApi(req, res, pathname, query) {
     if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
     try {
       const stats = await db.getStats();
-      // v2.8.3：附加線上玩家數（WS + LP 合計）與註冊總數
-      let onlineCount = 0;
+      // v2.9.0：線上人數去重計算（WS + LP 同一帳號只算一次），附加明細
+      let wsCount = 0, lpCount = 0;
+      try { wsCount = (wsServer && typeof wsServer.getOnlineCount === 'function') ? wsServer.getOnlineCount() : 0; } catch(e) {}
+      try { lpCount = onlinePlayers ? onlinePlayers.size : 0; } catch(e) {}
+      const uniqueAccounts = new Set();
       try {
-        if (typeof wsServer.getOnlineCount === 'function') {
-          onlineCount += wsServer.getOnlineCount();
+        if (wsServer && typeof wsServer.getOnlinePlayers === 'function') {
+          for (const c of wsServer.getOnlinePlayers()) { if (c.account) uniqueAccounts.add(c.account); }
         }
       } catch(e) {}
-      try {
-        onlineCount += (onlinePlayers ? onlinePlayers.size : 0);
-      } catch(e) {}
+      for (const p of onlinePlayers.values()) { uniqueAccounts.add(p.account); }
+      const onlineCount = uniqueAccounts.size;
       const totalAccounts = stats.accounts != null ? stats.accounts : 0;
       return sendJson(res, 200, {
         ok: true,
         stats,
         backend: db.getBackend(),
         onlineCount,
+        wsCount,
+        lpCount,
         totalAccounts,
       });
     } catch (e) {
