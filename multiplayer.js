@@ -18,6 +18,16 @@
   let onMonsterKilled = null;
   let onGainReward = null;
 
+  // ========== v3.1.6：WS 診斷日誌（遊戲中可見） ==========
+  const _wsDiagLog = [];
+  function _wsDiag(msg) {
+    const ts = new Date().toLocaleTimeString('zh-TW', {hour12: false}) + '.' + String(Date.now() % 1000).padStart(3, '0');
+    const entry = ts + ' ' + msg;
+    _wsDiagLog.push(entry);
+    if (_wsDiagLog.length > 60) _wsDiagLog.shift();
+    console.log('[WS-DIAG]', entry);
+  }
+
   let serverUrl = '';
   let authToken = '';
   let myPlayerId = null;
@@ -573,6 +583,7 @@
    }
 
    function tryWebSocket() {
+     _wsDiag('tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -605,6 +616,7 @@
        _wsFailureReason = '';
        try {
          ws = new WebSocket(wsUrl);
+         _wsDiag('WebSocket 物件已建立, readyState=' + ws.readyState + ' URL=' + wsUrl);
          console.log('[GAME-WS] WebSocket 物件已建立, readyState=', ws.readyState, '(0=CONNECTING)');
        } catch(e) {
          _wsFailureReason = '建立失敗: ' + (e.message || String(e));
@@ -617,25 +629,31 @@
       let resolved = false;
       const timeout = setTimeout(() => {
         if (!resolved) {
+          _wsDiag('⏰ 逾時! 5秒內未收到auth_ok/auth_fail。ws.readyState=' + (ws ? ws.readyState : '無ws'));
           resolved = true;
           reject(new Error('WebSocket 連線逾時'));
         }
-      }, 5000);
+      }, 8000);
 
        ws.onopen = () => {
+         _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
+         _wsDiag('發送 auth: token長度=' + (authToken ? authToken.length : 0) + ' token前10=' + (authToken ? authToken.substring(0,10) : '空'));
          console.log('[GAME-WS] ✅ onopen - upgrade 成功, readyState=', ws.readyState, '(1=OPEN)。發送 auth...');
          _updateWsBadge('connecting', 'WS驗證中');
-         wsSend({
+         const authMsg = {
            type: 'auth',
            token: authToken,
            name: GS?.player?.name || 'Player',
            classId: GS?.player?.classId || 'warrior',
            level: GS?.player?.level || 1,
-         });
+         };
+         const sent = wsSend(authMsg);
+         _wsDiag('auth 發送結果: ' + (sent ? '成功' : '失敗(ws未就緒)') + ' 訊息長度=' + JSON.stringify(authMsg).length);
          console.log('[GAME-WS] 已發送 auth, token 長度=', authToken ? authToken.length : 0);
        };
 
        ws.onerror = (event) => {
+         _wsDiag('❌ onerror 觸發: type=' + event.type);
          console.error('[GAME-WS] ❌ onerror 觸發');
          console.error('[GAME-WS]   event.type=', event.type);
          console.error('[GAME-WS]   event.target.url=', event.target?.url || 'n/a');
@@ -650,6 +668,7 @@
       };
 
        ws.onclose = (event) => {
+         _wsDiag('⚠️ onclose: code=' + event.code + ' reason=' + (event.reason || '空') + ' wasClean=' + event.wasClean);
          console.warn('[GAME-WS] ⚠️ onclose 觸發');
          console.warn('[GAME-WS]   code=', event.code);
          console.warn('[GAME-WS]   reason=', event.reason || '(空)');
@@ -683,8 +702,9 @@
 
       ws.onmessage = (ev) => {
         let msg;
-        try { msg = JSON.parse(ev.data); } catch(e) { return; }
-        if (!msg || !msg.type) return;
+        try { msg = JSON.parse(ev.data); } catch(e) { _wsDiag('❌ onmessage JSON解析失敗: ' + e.message); return; }
+        if (!msg || !msg.type) { _wsDiag('❌ onmessage 無type欄位'); return; }
+        _wsDiag('📥 收到訊息: type=' + msg.type + ' 長度=' + (ev.data ? ev.data.length : 0));
 
          if (msg.type === 'auth_ok') {
            if (!resolved) {
@@ -1423,6 +1443,7 @@
   }
   function _showNetworkDiagnostics() {
     try {
+      const logText = _wsDiagLog.length > 0 ? _wsDiagLog.slice(-25).join('\n') : '(尚無日誌)';
       const info = [
         '===== 網路診斷 =====',
         '狀態: ' + _wsBadgeLabel,
@@ -1433,12 +1454,14 @@
         'Long-Poll使用中: ' + (pollRunning ? '是' : '否'),
         '伺服器URL: ' + (serverUrl || '未設定'),
         'Token長度: ' + (authToken ? authToken.length : 0),
+        'Token前15: ' + (authToken ? authToken.substring(0,15) : '空'),
         'WS失敗原因: ' + (_wsFailureReason || '無'),
         '當前地圖: ' + (currentMapId || '無'),
         '我的PlayerID: ' + (myPlayerId || '無'),
         '遠端玩家數: ' + (remotePlayers ? remotePlayers.size : 0),
         '',
-        '提示: 如果顯示LP但WS應該可用，請檢查console中[GAME-WS]日誌',
+        '===== WS 連線日誌（最新25筆）=====',
+        logText,
       ].join('\n');
       alert(info);
     } catch(e) {
