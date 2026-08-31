@@ -588,6 +588,10 @@ function createWsServer(httpServer) {
           }
         }
         break;
+      // v3.1.0：客戶端主動要求切換地圖（回城卷軸、NPC 傳送等）
+      case 'change_map':
+        handleChangeMap(client, msg);
+        break;
       default:
         break;
     }
@@ -649,8 +653,9 @@ function createWsServer(httpServer) {
       nation: msg.nation || '',
     }, { aiCount, initLevel });
 
-    // 回覆玩家：自己的狀態 + 初始 AOI 快照
-    sendJson(client.socket, {
+    // v3.1.0：一併回傳地圖配置（客戶端用於顯示傳送點、地圖尺寸等）
+    const mapCfg = gameWorld.getMapConfig ? gameWorld.getMapConfig(mapId) : null;
+    const reply = {
       type: 'join_map_ok',
       serverId,
       mapId,
@@ -660,10 +665,77 @@ function createWsServer(httpServer) {
       entities: snapshot.entities,
       aoiRadius: snapshot.aoiRadius,
       time: Date.now(),
-    });
+    };
+    if (mapCfg) {
+      reply.mapConfig = {
+        mapId: mapCfg.mapId,
+        name: mapCfg.name,
+        width: mapCfg.width,
+        height: mapCfg.height,
+        background: mapCfg.background,
+        teleports: mapCfg.teleports || [],
+        npcs: mapCfg.npcs || [],
+        type: mapCfg.type,
+        bgm: mapCfg.bgm,
+      };
+    }
+    sendJson(client.socket, reply);
 
     console.log(`[WS] ${client.account} 加入 ${serverId}/${mapId}, wsId=${client.wsId}, 初始實體數=${snapshot.entities.length}`);
   }
+
+  // v3.1.0：客戶端主動切換地圖
+  function handleChangeMap(client, msg) {
+    if (!client.authenticated || !client.mapId || !client.serverId) return;
+    const targetMap = msg.targetMap;
+    if (!targetMap) return;
+
+    const targetX = msg.targetX != null ? msg.targetX : null;
+    const targetY = msg.targetY != null ? msg.targetY : null;
+    const fromMap = client.mapId;
+
+    const result = gameWorld.playerChangeMap(
+      client.serverId, fromMap, targetMap, client.wsId, targetX, targetY
+    );
+
+    if (result.success) {
+      // 更新 client 狀態
+      client.mapId = targetMap;
+      const payload = {
+        type: 'map_change',
+        fromMap,
+        targetMap,
+        targetX: result.snapshot.self.x,
+        targetY: result.snapshot.self.y,
+        mapConfig: result.targetMapConfig ? {
+          mapId: result.targetMapConfig.mapId,
+          name: result.targetMapConfig.name,
+          width: result.targetMapConfig.width,
+          height: result.targetMapConfig.height,
+          background: result.targetMapConfig.background,
+          teleports: result.targetMapConfig.teleports || [],
+          npcs: result.targetMapConfig.npcs || [],
+          type: result.targetMapConfig.type,
+          bgm: result.targetMapConfig.bgm,
+        } : null,
+        self: result.snapshot.self,
+        entities: result.snapshot.entities,
+        aoiRadius: result.snapshot.aoiRadius,
+        time: Date.now(),
+      };
+      sendJson(client.socket, payload);
+      console.log(`[WS] 玩家 ${client.account} 主動切換地圖 ${fromMap} → ${targetMap}`);
+    } else {
+      sendJson(client.socket, {
+        type: 'change_map_fail',
+        targetMap,
+        error: result.error || '切換失敗',
+        time: Date.now(),
+      });
+    }
+  }
+
+  // 給 game-world 呼叫的廣播函數（被動傳送觸發時由 game-world 直接用 _wsSendToClient）
 
   function handleMove(client, msg) {
     if (!client.authenticated || !client.mapId) return;

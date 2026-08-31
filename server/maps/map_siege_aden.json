@@ -1,0 +1,17 @@
+{
+  "mapId": "siege_aden",
+  "name": "阿斯嘉德城·攻城戰",
+  "type": "castle_siege",
+  "width": 2048,
+  "height": 2048,
+  "background": "/assets/map/siege.jpg",
+  "spawn": { "x": 1024, "y": 1024 },
+  "safeZone": null,
+  "levelMin": 50,
+  "levelMax": 99,
+  "castle": "aden",
+  "teleports": [],
+  "monsterSpawns": [],
+  "npcs": [],
+  "bgm": "/assets/audio/bgm_siege.mp3"
+}

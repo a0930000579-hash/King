@@ -758,6 +758,17 @@
           window.handleAOILeave(msg.ids);
         }
         break;
+      // v3.1.0：Zone Server 地圖切換事件
+      case 'map_change':
+        console.log('[WS] 🗺️ map_change - 從', msg.fromMap, '到', msg.targetMap, '實體數=', msg.entities?.length || 0);
+        // 通知 game.js 切換地圖
+        if (typeof window.handleMapChange === 'function') {
+          window.handleMapChange(msg);
+        }
+        break;
+      case 'change_map_fail':
+        console.warn('[WS] 切換地圖失敗:', msg.error, '(target:', msg.targetMap, ')');
+        break;
       case 'player_join':
         if (msg.playerId !== myPlayerId) {
           addOrUpdateRemotePlayer({

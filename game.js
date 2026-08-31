@@ -13173,7 +13173,200 @@ function loadMap(mapId) {
   renderPlayer();
 }
 
-function renderNPCs(map) {
+// ==================== v3.1.0 Zone Server 地圖切換 ====================
+// 伺服器主動推送的 map_change 事件處理（被動傳送、主動切換都走這個）
+function handleMapChange(msg) {
+  if (!msg || !msg.targetMap) return;
+  const targetMap = msg.targetMap;
+
+  console.log(`[handleMapChange] ${msg.fromMap || '?'} → ${targetMap} (${msg.mapConfig?.name || ''})`);
+
+  // 1. fade out 過渡
+  const overlay = _getMapTransitionOverlay();
+  overlay.style.opacity = '1';
+
+  setTimeout(() => {
+    // 2. 更新地圖配置（寬高、背景圖）
+    if (msg.mapConfig) {
+      CAMERA.worldWidth = msg.mapConfig.width || 2496;
+      CAMERA.worldHeight = msg.mapConfig.height || 1664;
+      if (msg.mapConfig.background && sceneBg) {
+        safeBackgroundUrl(sceneBg, msg.mapConfig.background);
+        sceneBg.style.backgroundRepeat = 'no-repeat';
+      }
+      if (msg.mapConfig.name && el.locationName) {
+        el.locationName.textContent = msg.mapConfig.name;
+        if (el.minimapTitle) el.minimapTitle.textContent = msg.mapConfig.name;
+      }
+      // BGM 切換
+      if (msg.mapConfig.bgm && window.AudioSystem) {
+        AudioSystem.changeMapMusic(targetMap);
+      }
+    }
+
+    // 3. 清場（移除舊地圖的所有實體）
+    _fullMapCleanupForZone();
+
+    // 4. 更新 GS.currentMap
+    GS.currentMap = targetMap;
+
+    // 5. 更新玩家位置（伺服器權威位置）
+    if (msg.self && GS.player) {
+      GS.player.x = msg.self.x || GS.player.x;
+      GS.player.y = msg.self.y || GS.player.y;
+      GS.player.hp = msg.self.hp != null ? msg.self.hp : GS.player.hp;
+      GS.player.maxHp = msg.self.maxHp != null ? msg.self.maxHp : GS.player.maxHp;
+      GS.player.mp = msg.self.mp != null ? msg.self.mp : GS.player.mp;
+      GS.player.maxMp = msg.self.maxMp != null ? msg.self.maxMp : GS.player.maxMp;
+      GS.player.state = msg.self.state || 'idle';
+      GS.player.dir = msg.self.dir || 'down';
+      if (typeof window.setServerSelfState === 'function') {
+        window.setServerSelfState(msg.self);
+      }
+    }
+
+    // 6. 重建 NPC（從 mapConfig 讀取）
+    if (msg.mapConfig && Array.isArray(msg.mapConfig.npcs) && msg.mapConfig.npcs.length > 0) {
+      // 用伺服器的 NPC 配置渲染
+      _renderNPCsFromConfig(msg.mapConfig.npcs);
+    } else {
+      // fallback：用本地 getAllMaps() 的配置
+      const allMaps = getAllMaps();
+      const map = allMaps[targetMap];
+      if (map) renderNPCs(map);
+    }
+
+    // 7. 重置 AOI 可見實體（清空舊地圖的 seenEntities）
+    if (window.MultiplayerClient && typeof MultiplayerClient._clearAll === 'function') {
+      MultiplayerClient._clearAll();
+    }
+
+    // 8. 新地圖的初始 AOI 實體
+    if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIEnter === 'function') {
+      window.handleAOIEnter(msg.entities);
+    }
+
+    // 9. 更新 AOI 半徑
+    if (msg.aoiRadius && typeof window.setAOIRadius === 'function') {
+      window.setAOIRadius(msg.aoiRadius);
+    }
+
+    // 10. 重新渲染玩家
+    renderPlayer();
+    if (typeof updateCamera === 'function') updateCamera();
+
+    // 11. fade in
+    setTimeout(() => {
+      overlay.style.opacity = '0';
+    }, 150);
+
+    console.log(`[handleMapChange] 切換完成，新地圖=${targetMap}，AOI 實體數=${msg.entities?.length || 0}`);
+  }, 200);
+}
+
+// 地圖切換過渡遮罩
+function _getMapTransitionOverlay() {
+  let overlay = document.getElementById('map-transition-overlay');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'map-transition-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:9999;transition:opacity 0.2s ease;';
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+// Zone 架構下的完整清場（只清世界實體，保留玩家 sprite）
+function _fullMapCleanupForZone() {
+  // 特效層清空
+  if (el.effectLayer) el.effectLayer.innerHTML = '';
+  if (el.siegeEffectLayer) el.siegeEffectLayer.innerHTML = '';
+  // 世界層：移除非玩家單位
+  if (worldLayer) {
+    worldLayer.querySelectorAll('.world-unit:not(.player-sprite):not(.hero)').forEach(n => n.remove());
+  }
+  // NPC 層清空
+  if (el.npcLayer) el.npcLayer.innerHTML = '';
+  // 動畫狀態快取清空
+  if (typeof unitAnimState === 'object' && unitAnimState instanceof Map) {
+    unitAnimState.clear();
+  }
+  // 遠端玩家（多人連線）
+  if (window.MultiplayerClient && typeof MultiplayerClient._clearAll === 'function') {
+    try { MultiplayerClient._clearAll(); } catch(e) {}
+  }
+  // 目標引用重置
+  if (typeof GS !== 'undefined') {
+    GS.targetAiUid = null;
+    GS.targetMonsterUid = null;
+    GS.targetPlayerUid = null;
+  }
+  // 清空 AI 和怪物（本地的，Zone 架構下這些由伺服器 AOI 同步）
+  if (Array.isArray(GS.aiPlayers)) {
+    GS.aiPlayers.forEach(ai => { if (ai && ai.el) { ai.el.remove(); ai.el = null; } });
+    GS.aiPlayers = [];
+  }
+  if (Array.isArray(GS.monsters)) {
+    GS.monsters.forEach(m => {
+      if (!m) return;
+      const elDiv = worldLayer ? worldLayer.querySelector('[data-id="' + m.uid + '"]') : null;
+      if (elDiv) elDiv.remove();
+    });
+    GS.monsters = [];
+  }
+  // 召喚物
+  document.querySelectorAll('.world-unit.summon').forEach(el => el.remove());
+  if (typeof summonedDemon !== 'undefined') summonedDemon = null;
+}
+
+// 從伺服器 mapConfig 渲染 NPC
+function _renderNPCsFromConfig(npcs) {
+  if (!el.npcLayer) return;
+  el.npcLayer.innerHTML = '';
+  // 使用現有 NPC sprite 映射（從 renderNPCs 借用）
+  const npcSprites = {
+    shop:       { emoji: '🛒', color: '#8B4513' },
+    blacksmith: { emoji: '⚒️', color: '#666' },
+    warehouse:  { emoji: '📦', color: '#8B6914' },
+    inn:        { emoji: '🏨', color: '#B8860B' },
+    bulletin:   { emoji: '📋', color: '#DEB887' },
+    quest:      { emoji: '📜', color: '#FFD700' },
+    dungeon_master: { emoji: '🗡️', color: '#8B0000' },
+    premium_shop:   { emoji: '💎', color: '#9400D3' },
+    main_quest:     { emoji: '✨', color: '#FFD700' },
+    guard:      { emoji: '🛡️', color: '#4682B4' },
+    trader:     { emoji: '💰', color: '#DAA520' },
+  };
+  for (const npc of npcs) {
+    const npcEl = document.createElement('div');
+    npcEl.className = 'npc-unit';
+    npcEl.dataset.id = npc.npcId || npc.id;
+    npcEl.style.cssText = `
+      position:absolute;
+      left:${npc.x}px;
+      top:${npc.y}px;
+      transform:translate(-50%, -100%);
+      width:40px;
+      height:48px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:2px;
+      cursor:pointer;
+      z-index:10;
+    `;
+    const sprite = npcSprites[npc.npcId || npc.id] || { emoji: '👤', color: '#888' };
+    npcEl.innerHTML = `
+      <div style="font-size:20px;line-height:1;">${sprite.emoji}</div>
+      <div style="font-size:10px;color:#fff;background:rgba(0,0,0,0.6);padding:1px 4px;border-radius:2px;white-space:nowrap;">${npc.name}</div>
+    `;
+    npcEl.onclick = () => { if (typeof handleNPCClick === 'function') handleNPCClick(npc); };
+    el.npcLayer.appendChild(npcEl);
+  }
+}
+
+// 暴露給 multiplayer.js 的全域函數
+window.handleMapChange = handleMapChange;
+
   npcLayer.innerHTML = '';
   if (!map.npcs) return;
   // NPC id 到 SPRITE key 的映射
