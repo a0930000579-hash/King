@@ -434,40 +434,6 @@ async function handleMpApi(req, res, pathname, query, account) {
   if (!account) { sendJson(res, 401, { error: '未登入' }); return; }
 
   // POST /api/mp/join 加入世界（帶 serverId，按伺服器隔離）
-  // POST /api/mp/auth — HTTP認證，返回短sessionId（避免WebSocket大幀被截斷）v3.5.0
-  if (req.method === 'POST' && pathname === '/api/mp/auth') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body || '{}');
-        const token = data.token || '';
-        const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
-        if (!account) {
-          sendJson(res, 401, { error: 'token無效' });
-          return;
-        }
-        // 生成短sessionId，存入全域session map
-        const sessionId = 's' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
-        if (!global._wsSessions) global._wsSessions = new Map();
-        global._wsSessions.set(sessionId, {
-          account: account,
-          name: data.name || 'Player',
-          classId: data.classId || 'warrior',
-          level: data.level || 1,
-          createdAt: Date.now(),
-        });
-        // sessionId 10分鐘過期
-        setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(sessionId); }, 10 * 60 * 1000);
-        console.log('[AUTH-HTTP] account=' + account + ' sessionId=' + sessionId);
-        sendJson(res, 200, { ok: true, sessionId: sessionId });
-      } catch(e) {
-        sendJson(res, 400, { error: e.message });
-      }
-    });
-    return;
-  }
-
   if (req.method === 'POST' && pathname === '/api/mp/join') {
     const body = await parseJsonBody(req);
     const mapId = body.mapId || 'village_01';
@@ -989,9 +955,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '3.5.1',
-      build: '3.5.1-2609020500',
-      buildId: '3.5.1-2609020500',
+      version: '3.5.2',
+      build: '3.5.2-2609020600',
+      buildId: '3.5.2-2609020600',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1011,36 +977,38 @@ async function handleApi(req, res, pathname, query) {
 
   // === 多人連線 API（long-poll，v2.4.0）===
   if (pathname.startsWith('/api/mp/')) {
-    // v3.5.1：公開的HTTP認證端點（不需要預先認證，用body中的token換取短sessionId）
+    // v3.5.2：公開的HTTP認證端點（使用parseJsonBody，增加詳細日誌）
     if (req.method === 'POST' && pathname === '/api/mp/auth') {
-      let body = '';
-      req.on('data', c => body += c);
-      req.on('end', () => {
-        try {
-          const data = JSON.parse(body || '{}');
-          const token = data.token || '';
-          const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
-          if (!account) {
-            sendJson(res, 401, { error: 'token無效' });
-            return;
-          }
-          const sessionId = 's' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
-          if (!global._wsSessions) global._wsSessions = new Map();
-          global._wsSessions.set(sessionId, {
-            account: account,
-            name: data.name || 'Player',
-            classId: data.classId || 'warrior',
-            level: data.level || 1,
-            createdAt: Date.now(),
-          });
-          setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(sessionId); }, 10 * 60 * 1000);
-          console.log('[AUTH-HTTP] account=' + account + ' sessionId=' + sessionId);
-          sendJson(res, 200, { ok: true, sessionId: sessionId });
-        } catch(e) {
-          sendJson(res, 400, { error: e.message });
+      console.log('[AUTH-HTTP] 收到請求, method=' + req.method + ' path=' + pathname);
+      try {
+        const data = await parseJsonBody(req);
+        console.log('[AUTH-HTTP] 解析body成功, token長度=' + (data.token ? data.token.length : 0));
+        const token = data.token || '';
+        const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
+        console.log('[AUTH-HTTP] verifyToken結果=' + (account || 'null'));
+        if (!account) {
+          console.log('[AUTH-HTTP] 返回401 token無效');
+          sendJson(res, 401, { error: 'token無效', ok: false });
+          return;
         }
-      });
-      return;
+        const sessionId = 's' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+        if (!global._wsSessions) global._wsSessions = new Map();
+        global._wsSessions.set(sessionId, {
+          account: account,
+          name: data.name || 'Player',
+          classId: data.classId || 'warrior',
+          level: data.level || 1,
+          createdAt: Date.now(),
+        });
+        setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(sessionId); }, 10 * 60 * 1000);
+        console.log('[AUTH-HTTP] 成功 account=' + account + ' sessionId=' + sessionId);
+        sendJson(res, 200, { ok: true, sessionId: sessionId });
+        return;
+      } catch(e) {
+        console.log('[AUTH-HTTP] 異常: ' + e.message);
+        sendJson(res, 400, { error: e.message, ok: false });
+        return;
+      }
     }
     const account = await getAuthAccount(req);
     await handleMpApi(req, res, pathname, query, account);
