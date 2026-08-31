@@ -542,24 +542,31 @@
   function _wsChunkId() {
     return 'c' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   }
+  // v3.2.1：大訊息自動分片（chunkSize=50，確保每個chunk <100位元組）
   function wsSend(msg) {
     if (!ws || ws.readyState !== 1) return false;
     try {
       const raw = JSON.stringify(msg);
-      if (raw.length < 100) {
+      if (raw.length < 50) {
+        _wsDiag('wsSend 小訊息直接發送 len=' + raw.length + ' type=' + (msg.type||msg.t||'?'));
         ws.send(raw);
         return true;
       }
       const cid = _wsChunkId();
-      const chunkSize = 70;
+      const chunkSize = 30;
       const total = Math.ceil(raw.length / chunkSize);
+      _wsDiag('wsSend 大訊息分片 len=' + raw.length + ' -> ' + total + ' chunks, cid=' + cid);
       for (let i = 0; i < total; i++) {
         const part = raw.substring(i * chunkSize, (i + 1) * chunkSize);
         const chunkMsg = JSON.stringify({ t: '__c', c: cid, i: i, n: total, d: part });
+        _wsDiag('  發送 chunk ' + (i+1) + '/' + total + ' chunkLen=' + chunkMsg.length);
         ws.send(chunkMsg);
       }
       return true;
-    } catch(e) { return false; }
+    } catch(e) {
+      _wsDiag('wsSend 錯誤: ' + e.message);
+      return false;
+    }
   }
 
    // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
