@@ -538,13 +538,29 @@
   };
 
   // ========== v2.7.2：WebSocket 連線（優先通道，失敗降級 long-poll） ==========
-   function wsSend(msg) {
-     if (!ws || ws.readyState !== 1) return false;
-     try {
-       ws.send(JSON.stringify(msg));
-       return true;
-     } catch(e) { return false; }
-   }
+  // v3.2.0：大訊息自動分片發送（每個chunk <126位元組，避免DO proxy截斷大幀）
+  function _wsChunkId() {
+    return 'c' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  }
+  function wsSend(msg) {
+    if (!ws || ws.readyState !== 1) return false;
+    try {
+      const raw = JSON.stringify(msg);
+      if (raw.length < 100) {
+        ws.send(raw);
+        return true;
+      }
+      const cid = _wsChunkId();
+      const chunkSize = 70;
+      const total = Math.ceil(raw.length / chunkSize);
+      for (let i = 0; i < total; i++) {
+        const part = raw.substring(i * chunkSize, (i + 1) * chunkSize);
+        const chunkMsg = JSON.stringify({ t: '__c', c: cid, i: i, n: total, d: part });
+        ws.send(chunkMsg);
+      }
+      return true;
+    } catch(e) { return false; }
+  }
 
    // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
    function _startWsWithRetry() {

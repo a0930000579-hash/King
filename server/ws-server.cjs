@@ -584,9 +584,45 @@ function createWsServer(httpServer) {
   }
 
   // ========== 訊息處理 ==========
-  function handleMessage(client, msg) {
-    if (!msg || typeof msg !== 'object' || !msg.type) return;
+  // v3.2.0：chunk組裝緩衝區
+  const chunkBuffers = new Map();
 
+  function handleMessage(client, msg) {
+    if (!msg || typeof msg !== 'object') return;
+
+    // v3.2.0：處理分片chunk
+    if (msg.t === '__c') {
+      const cid = msg.c;
+      const idx = msg.i;
+      const total = msg.n;
+      const data = msg.d || '';
+      _wsLog('chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      if (!chunkBuffers.has(cid)) {
+        chunkBuffers.set(cid, { parts: new Map(), total: total, received: 0 });
+      }
+      const buf = chunkBuffers.get(cid);
+      if (!buf.parts.has(idx)) {
+        buf.parts.set(idx, data);
+        buf.received++;
+      }
+      if (buf.received >= buf.total) {
+        let full = '';
+        for (let i = 0; i < buf.total; i++) {
+          full += buf.parts.get(i) || '';
+        }
+        chunkBuffers.delete(cid);
+        _wsLog('chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        try {
+          const fullMsg = JSON.parse(full);
+          handleMessage(client, fullMsg);
+        } catch(e) {
+          _wsLog('[ERROR] chunk組裝後JSON失敗: ' + e.message);
+        }
+      }
+      return;
+    }
+
+    if (!msg.type) return;
     switch (msg.type) {
       case 'auth':
         handleAuth(client, msg);

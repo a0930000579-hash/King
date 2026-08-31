@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Debug 診斷頁面 v3.1.9</title>
+  <title>Debug 診斷頁面 v3.2.0</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -157,7 +157,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>🛠️ Debug 診斷頁面<span class="ver">v3.1.9</span></h1>
+    <h1>🛠️ Debug 診斷頁面<span class="ver">v3.2.0</span></h1>
     <div>
       <button class="btn" onclick="runAllTests()">🔄 重新測試</button>
       <a class="back-link" href="./">← 返回遊戲</a>
@@ -515,7 +515,7 @@ const tests = [
       statusEl.innerHTML = '⏳ 測試中...';
       try {
         // 嘗試多個可能的路徑
-         // v3.1.9：優先靜態檔 assets/maps/（所有平台都支援），其次 API 端點
+         // v3.2.0：優先靜態檔 assets/maps/（所有平台都支援），其次 API 端點
          const paths = ['./assets/maps/map_village.json', './api/map/village', './maps/map_village.json', './server/maps/map_village.json'];
         let config = null;
         let usedPath = '';
