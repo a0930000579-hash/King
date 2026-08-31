@@ -663,13 +663,29 @@ function createWsServer(httpServer) {
 
   function handleAuth(client, msg) {
     try {
-      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId);
-      // 簡單 token 校驗（與 long-poll 共用 verifyToken）
-      const token = msg.token || '';
-      _wsLog(' token長度=' + token.length + ' token前15=' + (token ? token.substring(0,15) : '空'));
-      _wsLog(' global._wsVerifyToken 存在=' + (typeof global._wsVerifyToken === 'function'));
-      const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
-      _wsLog(' verifyToken 結果=' + (account || 'null'));
+      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasSessionId=' + !!msg.sessionId);
+      let account = null;
+      // v3.5.0：優先使用sessionId（HTTP POST認證後返回的短ID）
+      if (msg.sessionId && global._wsSessions) {
+        const sess = global._wsSessions.get(msg.sessionId);
+        if (sess) {
+          account = sess.account;
+          msg.name = sess.name || msg.name;
+          msg.classId = sess.classId || msg.classId;
+          msg.level = sess.level || msg.level;
+          global._wsSessions.delete(msg.sessionId);
+          _wsLog(' sessionId驗證成功 account=' + account);
+        } else {
+          _wsLog(' sessionId無效或已過期');
+        }
+      }
+      // 後備：直接token驗證（相容舊版）
+      if (!account && msg.token) {
+        const token = msg.token || '';
+        _wsLog(' token長度=' + token.length);
+        account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
+        _wsLog(' verifyToken 結果=' + (account || 'null'));
+      }
       if (account) {
         client.account = account;
         client.authenticated = true;
