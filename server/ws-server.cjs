@@ -9,27 +9,20 @@
  *  - Long-Poll 回調（AI 變動時通知 LP 玩家）
  */
 
-
-// v3.1.8：WS 診斷日誌緩衝區（供 /api/ws-diag 查詢）
-const _wsDiagBuffer = [];
-function _wsDiagLog(msg) {
-  const ts = new Date().toISOString();
-  const entry = ts + ' ' + msg;
-  _wsDiagBuffer.push(entry);
-  if (_wsDiagBuffer.length > 100) _wsDiagBuffer.shift();
-  _wsDiagLog('', msg);
-}
-function getWsDiagLogs() {
-  return _wsDiagBuffer.slice(-50);
-}
-module.exports.getWsDiagLogs = getWsDiagLogs;
-
-
 const crypto = require('crypto');
 const { createAIEngine } = require('./ai-engine.cjs');
 const gameWorld = require('./game-world.cjs');
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+
+// v3.1.9：全域WS診斷日誌緩衝區（不修改module.exports）
+if (!global._wsDiagLogs) global._wsDiagLogs = [];
+function _wsLog(msg) {
+  const entry = new Date().toISOString() + ' ' + msg;
+  global._wsDiagLogs.push(entry);
+  if (global._wsDiagLogs.length > 100) global._wsDiagLogs.shift();
+  console.log('[WS-DIAG]', msg);
+}
 
 function createWsServer(httpServer) {
   const clients = new Map(); // wsId -> { socket, account, name, serverId, mapId, playerId, ... }
@@ -380,11 +373,11 @@ function createWsServer(httpServer) {
 
     socket.on('data', (chunk) => {
       try {
-        _wsDiagLog(' 收到 data chunk, 長度=' + chunk.length + ', wsId=' + client.wsId);
+        _wsLog(' 收到 data chunk, 長度=' + chunk.length + ', wsId=' + client.wsId);
         client.buffer = Buffer.concat([client.buffer, chunk]);
         processWsBuffer(client);
       } catch(e) {
-        _wsDiagLog('[ERROR]  ❌ data 處理異常:', e.message, e.stack);
+        _wsLog('[ERROR]  ❌ data 處理異常:', e.message, e.stack);
       }
     });
 
@@ -498,12 +491,12 @@ function createWsServer(httpServer) {
 
       // v2.7.10：資料幀（text=0x1, binary=0x2, continuation=0x0）
       if (opcode === 0x1 || opcode === 0x2) {
-        _wsDiagLog(' 解析幀: opcode=' + opcode + ' fin=' + fin + ' masked=' + masked + ' payloadLen=' + payloadLen + ' decodedLen=' + decoded.length + ' wsId=' + client.wsId);
+        _wsLog(' 解析幀: opcode=' + opcode + ' fin=' + fin + ' masked=' + masked + ' payloadLen=' + payloadLen + ' decodedLen=' + decoded.length + ' wsId=' + client.wsId);
         // 起始幀
         if (fin) {
           // 單幀訊息，直接處理
           if (opcode === 0x1) {
-            _wsDiagLog(' text frame 前50字=' + decoded.toString('utf8').substring(0, 50));
+            _wsLog(' text frame 前50字=' + decoded.toString('utf8').substring(0, 50));
             handleTextMessage(client, decoded);
           } else {
             // binary 幀目前保留（未使用，安全忽略）
@@ -544,15 +537,15 @@ function createWsServer(httpServer) {
     let msg;
     try {
       msg = JSON.parse(buf.toString('utf8'));
-      _wsDiagLog(' ✅ JSON 解析成功, type=' + msg.type + ' wsId=' + client.wsId);
+      _wsLog(' ✅ JSON 解析成功, type=' + msg.type + ' wsId=' + client.wsId);
     } catch (e) {
-      _wsDiagLog('[ERROR]  ❌ JSON 解析失敗:', e.message, 'buf前50=' + buf.toString('utf8').substring(0, 50), 'wsId=' + client.wsId);
+      _wsLog('[ERROR]  ❌ JSON 解析失敗:', e.message, 'buf前50=' + buf.toString('utf8').substring(0, 50), 'wsId=' + client.wsId);
       return;
     }
     try {
       handleMessage(client, msg);
     } catch(e) {
-      _wsDiagLog('[ERROR]  ❌ handleMessage 異常:', e.message, e.stack);
+      _wsLog('[ERROR]  ❌ handleMessage 異常:', e.message, e.stack);
     }
   }
 
@@ -581,12 +574,12 @@ function createWsServer(httpServer) {
 
   function sendJson(socket, obj) {
     try {
-      _wsDiagLog(' sendJson: type=' + obj.type + ' socket.writable=' + socket.writable + ' socket.destroyed=' + socket.destroyed);
+      _wsLog(' sendJson: type=' + obj.type + ' socket.writable=' + socket.writable + ' socket.destroyed=' + socket.destroyed);
       const data = Buffer.from(JSON.stringify(obj), 'utf8');
       sendFrame(socket, 0x1, data);
-      _wsDiagLog(' sendJson 完成, dataLen=' + data.length);
+      _wsLog(' sendJson 完成, dataLen=' + data.length);
     } catch(e) {
-      _wsDiagLog('[ERROR]  ❌ sendJson 異常:', e.message, e.stack);
+      _wsLog('[ERROR]  ❌ sendJson 異常:', e.message, e.stack);
     }
   }
 
@@ -634,13 +627,13 @@ function createWsServer(httpServer) {
 
   function handleAuth(client, msg) {
     try {
-      _wsDiagLog(' handleAuth 被呼叫, wsId=' + client.wsId);
+      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId);
       // 簡單 token 校驗（與 long-poll 共用 verifyToken）
       const token = msg.token || '';
-      _wsDiagLog(' token長度=' + token.length + ' token前15=' + (token ? token.substring(0,15) : '空'));
-      _wsDiagLog(' global._wsVerifyToken 存在=' + (typeof global._wsVerifyToken === 'function'));
+      _wsLog(' token長度=' + token.length + ' token前15=' + (token ? token.substring(0,15) : '空'));
+      _wsLog(' global._wsVerifyToken 存在=' + (typeof global._wsVerifyToken === 'function'));
       const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
-      _wsDiagLog(' verifyToken 結果=' + (account || 'null'));
+      _wsLog(' verifyToken 結果=' + (account || 'null'));
       if (account) {
         client.account = account;
         client.authenticated = true;
@@ -649,15 +642,15 @@ function createWsServer(httpServer) {
         client.level = msg.level || 1;
         console.log('[WS][auth] ✅ 認證成功 wsId=', client.wsId, 'account=', account, 'name=', client.name);
         const resp = { type: 'auth_ok', account, wsId: client.wsId, id: client.wsId };
-        _wsDiagLog(' 發送 auth_ok, socket.writable=' + client.socket.writable);
+        _wsLog(' 發送 auth_ok, socket.writable=' + client.socket.writable);
         sendJson(client.socket, resp);
-        _wsDiagLog(' auth_ok 已發送');
+        _wsLog(' auth_ok 已發送');
       } else {
         console.warn('[WS][auth] ❌ 認證失敗 wsId=', client.wsId, 'token長度=', (msg.token || '').length, '主動斷線 (code 4001)');
         const resp = { type: 'auth_fail', error: 'token 無效', reason: 'invalid_token' };
-        _wsDiagLog(' 發送 auth_fail');
+        _wsLog(' 發送 auth_fail');
         sendJson(client.socket, resp);
-        _wsDiagLog(' auth_fail 已發送');
+        _wsLog(' auth_fail 已發送');
         // v3.0.0：auth 失敗後主動斷線，避免客戶端卡在「連上了但沒認證」的狀態
         setTimeout(() => {
           try {
@@ -667,7 +660,7 @@ function createWsServer(httpServer) {
         }, 500);
       }
     } catch(e) {
-      _wsDiagLog('[ERROR]  ❌ handleAuth 異常:', e.message, e.stack);
+      _wsLog('[ERROR]  ❌ handleAuth 異常:', e.message, e.stack);
       try {
         sendJson(client.socket, { type: 'auth_fail', error: 'server_error', reason: e.message });
       } catch(e2) {}

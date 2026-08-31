@@ -955,9 +955,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '3.1.8',
-      build: '3.1.8-2609012000',
-      buildId: '3.1.8-2609012000',
+      version: '3.1.9',
+      build: '3.1.9-2609012100',
+      buildId: '3.1.9-2609012100',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1012,12 +1012,11 @@ async function handleApi(req, res, pathname, query) {
    }
 
    // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
-   // GET /api/ws-diag — WS 診斷日誌（v3.1.8）
+   // GET /api/ws-diag — WS 診斷日誌（v3.1.9，讀取全域緩衝區）
   if (req.method === 'GET' && pathname === '/api/ws-diag') {
     try {
-      const { getWsDiagLogs } = require('./ws-server.cjs');
-      const logs = getWsDiagLogs();
-      sendJson(res, 200, { ok: true, logs, count: logs.length });
+      const logs = global._wsDiagLogs || [];
+      sendJson(res, 200, { ok: true, logs: logs.slice(-50), count: logs.length });
     } catch(e) {
       sendJson(res, 500, { error: e.message });
     }
