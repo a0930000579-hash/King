@@ -131,17 +131,21 @@
     },
 
     // 連線：token 從遊戲端傳入（與 cookie 同步）
-    connect(url, token) {
-      const u = (url || '').trim();
-      if (!u) {
-        setStatus(STATUS.ERROR);
-        return Promise.reject(new Error('伺服器位址為空'));
-      }
-      serverUrl = u.replace(/\/+$/, '');
-      MultiplayerClient.saveServerUrl(u);
-      authToken = token || '';
+     connect(url, token) {
+       const u = (url || '').trim();
+       if (!u) {
+         setStatus(STATUS.ERROR);
+         return Promise.reject(new Error('伺服器位址為空'));
+       }
+       serverUrl = u.replace(/\/+$/, '');
+       MultiplayerClient.saveServerUrl(u);
+       authToken = token || '';
 
-      // 先斷開舊的
+       console.log('[GAME-WS] ===== MultiplayerClient.connect() 被呼叫 =====');
+       console.log('[GAME-WS]   serverUrl =', serverUrl);
+       console.log('[GAME-WS]   token 長度 =', authToken ? authToken.length : 0);
+
+       // 先斷開舊的
       if (pollAbortController) {
         try { pollAbortController.abort(); } catch(e) {}
         pollAbortController = null;
@@ -158,90 +162,68 @@
       useWebSocket = false;
       setStatus(STATUS.CONNECTING);
 
-      // 用 health 檢查伺服器是否活著，並決定是否用 WS
-      return fetch(serverUrl + '/api/health')
-        .then(r => r.json())
-        .then(data => {
-          if (data && data.status === 'online') {
-            setStatus(STATUS.ONLINE);
-            console.info('[Multi] 伺服器連線成功:', data.version, 'WS=', data.webSocket || data.socketIo);
-            // v2.7.10：從伺服器取得 WS upgrade 路徑（預設 '/'）
-            _wsPath = data.wsTransportPath || '/';
+       // 用 health 檢查伺服器是否活著，並決定是否用 WS
+       // v3.1.2：即使 health 失敗也嘗試 WS（有些平台 proxy 會擋 /api/health 但 WS upgrade 正常）
+       return fetch(serverUrl + '/api/health')
+         .then(r => r.json())
+         .then(data => {
+           if (data && data.status === 'online') {
+             setStatus(STATUS.ONLINE);
+             console.info('[Multi] 伺服器連線成功:', data.version, 'WS=', data.webSocket || data.socketIo);
+             // v2.7.10：從伺服器取得 WS upgrade 路徑（預設 '/'）
+             _wsPath = data.wsTransportPath || '/';
 
-            // v2.7.7：伺服器在線就先把 AI 模式切到 server（防止本地 AI 偷生）
-            //  joinWorld 還沒完成、AI 還沒到也沒關係 — setServerAIs 會在後續到達時補渲染
-            if (typeof window.setServerOnline === 'function') {
-              // 此時 serverId 還沒確定（joinWorld 才會設），先傳佔位符
-              window.setServerOnline(currentServerId || 'pending', null);
-            }
-            if (typeof window.setOfflineMode === 'function') {
-              window.setOfflineMode(false);
-            }
+             // v2.7.7：伺服器在線就先把 AI 模式切到 server（防止本地 AI 偷生）
+             if (typeof window.setServerOnline === 'function') {
+               window.setServerOnline(currentServerId || 'pending', null);
+             }
+             if (typeof window.setOfflineMode === 'function') {
+               window.setOfflineMode(false);
+             }
 
              // v2.7.2：若伺服器支援 WebSocket，優先連 WS（失敗自動 fallback long-poll）
-             // v3.1.1：失敗時自動重試最多 3 次，再降級 LP
+             // v3.1.2：health 有 webSocket 才連；沒有的話直接 LP
              if (data.webSocket || data.socketIo) {
-               let wsRetryCount = 0;
-               const MAX_WS_RETRIES = 3;
-               function tryWsWithRetry() {
-                 return tryWebSocket().catch(e => {
-                   wsRetryCount++;
-                   console.warn('[Multi] WebSocket 第', wsRetryCount, '次連線失敗:', e.message);
-                   if (wsRetryCount < MAX_WS_RETRIES) {
-                     const delay = 1000 * wsRetryCount;
-                     console.warn('[Multi] ', delay, 'ms 後重試 WS (剩餘', MAX_WS_RETRIES - wsRetryCount, '次)');
-                     return new Promise(function(resolve) { setTimeout(resolve, delay); })
-                       .then(tryWsWithRetry);
-                   } else {
-                     console.warn('[Multi] WS 連線失敗已達', MAX_WS_RETRIES, '次，降級 long-poll');
-                     _wsFailureReason = e.message || 'WS 連線失敗';
-                     useWebSocket = false;
-                     // v3.1.1：在遊戲畫面上顯示 WS 失敗提示
-                     if (typeof window.addLog === 'function') {
-                       try {
-                         addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
-                       } catch(_) {}
-                     }
-                     startPollLoop();
-                   }
-                 });
-               }
-               tryWsWithRetry().catch(function() { /* 最終失敗也不中斷連線流程 */ });
+               _startWsWithRetry();
              } else {
-              // 沒有 WS 支援，直接 long-poll
-              _wsFailureReason = '伺服器未啟用 WebSocket';
-              startPollLoop();
-            }
-            // 若已有玩家資料，自動 join
-            if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
-              return MultiplayerClient.joinWorld().then(result => {
-                // v2.7.7：joinWorld 失敗才切離線模式（讓本地 AI 接管）
-                if (!result) {
-                  console.warn('[Multi] joinWorld 失敗，退回離線模式');
-                  setStatus(STATUS.ERROR);
-                  if (typeof window.setOfflineMode === 'function') {
-                    window.setOfflineMode(true);
-                  }
-                }
-                return result;
-              });
-            }
-            return null;
-          } else {
-            setStatus(STATUS.ERROR);
-            // v2.8.2：health 失敗就標記離線，讓狀態指示器正確顯示 OFF 而非假 ON
-            if (typeof window.setOfflineMode === 'function') window.setOfflineMode(true);
-            throw new Error('伺服器狀態異常');
-          }
-        })
-        .catch(err => {
-          console.warn('[Multi] 連線失敗:', err.message);
-          setStatus(STATUS.ERROR);
-          // v2.8.2：連線失敗標記離線，避免狀態指示器顯示假 ON
-          if (typeof window.setOfflineMode === 'function') window.setOfflineMode(true);
-          throw err;
-        });
-    },
+               _wsFailureReason = '伺服器未啟用 WebSocket';
+               startPollLoop();
+             }
+           } else {
+             // health 回來但 status 不是 online → 仍嘗試 WS + LP
+             console.warn('[Multi] health 回應異常，仍嘗試 WS 連線');
+             _startWsWithRetry();
+             startPollLoop();
+           }
+           // 若已有玩家資料，自動 join
+           if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
+             return MultiplayerClient.joinWorld().then(result => {
+               if (!result) {
+                 console.warn('[Multi] joinWorld 失敗，退回離線模式');
+                 setStatus(STATUS.ERROR);
+                 if (typeof window.setOfflineMode === 'function') {
+                   window.setOfflineMode(true);
+                 }
+               }
+               return result;
+             });
+           }
+           return null;
+         })
+         .catch(err => {
+           // v3.1.2：health fetch 失敗（可能被 proxy 擋）也不要放棄 — 仍嘗試 WS + LP
+           console.warn('[Multi] /api/health 失敗:', err.message, '仍嘗試 WS 連線');
+           setStatus(STATUS.CONNECTING);
+           _updateWsBadge('connecting', 'WS連線中');
+           _startWsWithRetry();
+           startPollLoop();
+           if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
+             return MultiplayerClient.joinWorld().catch(() => null);
+           }
+           return null;
+         });
+     },
+
 
     disconnect() {
       if (currentMapId) {
@@ -546,63 +528,91 @@
   };
 
   // ========== v2.7.2：WebSocket 連線（優先通道，失敗降級 long-poll） ==========
-  function wsSend(msg) {
-    if (!ws || ws.readyState !== 1) return false;
-    try {
-      ws.send(JSON.stringify(msg));
-      return true;
-    } catch(e) { return false; }
-  }
+   function wsSend(msg) {
+     if (!ws || ws.readyState !== 1) return false;
+     try {
+       ws.send(JSON.stringify(msg));
+       return true;
+     } catch(e) { return false; }
+   }
 
-  function tryWebSocket() {
-    return new Promise((resolve, reject) => {
-      if (typeof WebSocket === 'undefined') {
-        _wsFailureReason = '瀏覽器不支援 WebSocket';
-        reject(new Error(_wsFailureReason));
-        return;
-      }
-       // v3.1.1：修復 DO 子路徑部署下 WS URL 錯誤
-       //  邏輯：用頁面 pathname 當基礎，去掉最後的 .html 檔名
-       //  確保 wss://host/app/app_xxx/ 與頁面同源
-       let wsUrl;
-       try {
-         const pageProto = (typeof window !== 'undefined' && window.location && window.location.protocol) || 'http:';
-         const pageHost = (typeof window !== 'undefined' && window.location && window.location.host) || '';
-         const pagePath = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
-
-         const wsProto = pageProto === 'https:' ? 'wss:' : 'ws:';
-
-         // 以頁面 pathname 為基礎（DO 子路徑部署時正確）
-         let targetPath = pagePath;
-         // 如果是 .html 檔，去掉檔名，保留目錄
-         if (targetPath.endsWith('.html')) {
-           targetPath = targetPath.substring(0, targetPath.lastIndexOf('/') + 1);
+   // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
+   function _startWsWithRetry() {
+     if (typeof WebSocket === 'undefined') {
+       startPollLoop();
+       return;
+     }
+     let wsRetryCount = 0;
+     const MAX_WS_RETRIES = 3;
+     _updateWsBadge('connecting', 'WS連線中');
+     function tryWsWithRetry() {
+       return tryWebSocket().catch(e => {
+         wsRetryCount++;
+         console.warn('[GAME-WS] 第', wsRetryCount, '次連線失敗:', e.message);
+         if (wsRetryCount < MAX_WS_RETRIES) {
+           const delay = 1000 * wsRetryCount;
+           console.warn('[GAME-WS] ', delay, 'ms 後重試 WS (剩餘', MAX_WS_RETRIES - wsRetryCount, '次)');
+           _updateWsBadge('reconnecting', 'WS重試' + wsRetryCount);
+           return new Promise(function(resolve) { setTimeout(resolve, delay); })
+             .then(tryWsWithRetry);
+         } else {
+           console.warn('[GAME-WS] WS 連線失敗已達', MAX_WS_RETRIES, '次，降級 long-poll');
+           _wsFailureReason = e.message || 'WS 連線失敗';
+           useWebSocket = false;
+           _updateWsBadge('offline', 'WS離線');
+           if (typeof window.addLog === 'function') {
+             try {
+               addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
+             } catch(_) {}
+           }
+           startPollLoop();
          }
-         // 確保以 / 結尾
-         if (!targetPath.endsWith('/')) targetPath += '/';
+       });
+     }
+     tryWsWithRetry().catch(function() { /* 最終失敗也不中斷連線流程 */ });
+   }
 
-         wsUrl = wsProto + '//' + pageHost + targetPath;
-         console.log('[WS] v3.1.1 WebSocket URL 建構:');
-         console.log('[WS]   頁面 URL =', window.location.href);
-         console.log('[WS]   proto=', pageProto, 'host=', pageHost, 'pathname=', pagePath);
-         console.log('[WS]   WS URL =', wsUrl);
-         console.log('[WS]   wsTransportPath(health)=', _wsPath || '(空，預設 /)');
-         console.log('[WS]   authToken 長度=', authToken ? authToken.length : 0);
-      } catch(e) {
-        // fallback：簡單字串取代
-        wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/?$/, '/');
-        console.warn('[WS] URL 構建異常，使用 fallback:', wsUrl, e.message);
-      }
-      _wsFailureReason = '';
-      try {
-        ws = new WebSocket(wsUrl);
-        console.log('[WS] WebSocket 物件已建立, readyState=', ws.readyState, '(0=CONNECTING)');
-      } catch(e) {
-        _wsFailureReason = '建立失敗: ' + (e.message || String(e));
-        console.error('[WS] new WebSocket() 丟出異常:', e.message, e);
-        reject(e);
-        return;
-      }
+   function tryWebSocket() {
+     return new Promise((resolve, reject) => {
+       if (typeof WebSocket === 'undefined') {
+         _wsFailureReason = '瀏覽器不支援 WebSocket';
+         reject(new Error(_wsFailureReason));
+         return;
+       }
+        // v3.1.2：修復 DO 子路徑部署下 WS URL 錯誤 — 永遠用 origin root
+        //  原因：Node server 監聽在根路徑 /，upgrade handler 不區分 path
+        //  之前用 pathname 導致 wss://host/subpath/，upgrade 請求被 DO proxy 導到靜態檔伺服器
+        //  正確方式：wss:// + host + / (與頁面 origin 同源的根)
+        let wsUrl;
+        try {
+          const pageProto = (typeof window !== 'undefined' && window.location && window.location.protocol) || 'http:';
+          const pageHost = (typeof window !== 'undefined' && window.location && window.location.host) || '';
+          const pagePath = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
+          const wsProto = pageProto === 'https:' ? 'wss:' : 'ws:';
+          // v3.1.2：直接用根路徑 /，避免子路徑部署下 upgrade 失敗
+          wsUrl = wsProto + '//' + pageHost + '/';
+          console.log('[GAME-WS] ========== WebSocket 連線開始 ==========');
+          console.log('[GAME-WS] 頁面 URL =', window.location.href);
+          console.log('[GAME-WS]   proto=', pageProto, 'host=', pageHost, 'pathname=', pagePath);
+          console.log('[GAME-WS]   serverUrl(origin)=', serverUrl);
+          console.log('[GAME-WS]   WS URL =', wsUrl);
+          console.log('[GAME-WS]   authToken 長度=', authToken ? authToken.length : 0, 'token 前6字=', authToken ? authToken.substring(0,6)+'...' : '空');
+       } catch(e) {
+         // fallback：serverUrl 直接換協議
+         wsUrl = (serverUrl || '').replace(/^http/, 'ws').replace(/\/?$/, '/');
+         console.warn('[GAME-WS] URL 構建異常，使用 fallback:', wsUrl, e.message);
+       }
+       _wsFailureReason = '';
+       try {
+         ws = new WebSocket(wsUrl);
+         console.log('[GAME-WS] WebSocket 物件已建立, readyState=', ws.readyState, '(0=CONNECTING)');
+       } catch(e) {
+         _wsFailureReason = '建立失敗: ' + (e.message || String(e));
+         console.error('[GAME-WS] ❌ new WebSocket() 丟出異常:', e.message, e);
+         _updateWsBadge('error', 'WS異常');
+         reject(e);
+         return;
+       }
 
       let resolved = false;
       const timeout = setTimeout(() => {
@@ -612,23 +622,26 @@
         }
       }, 5000);
 
-      ws.onopen = () => {
-        console.log('[WS] ✅ onopen - upgrade 成功, readyState=', ws.readyState, '(1=OPEN)。發送 auth...');
-        wsSend({
-          type: 'auth',
-          token: authToken,
-          name: GS?.player?.name || 'Player',
-          classId: GS?.player?.classId || 'warrior',
-          level: GS?.player?.level || 1,
-        });
-      };
+       ws.onopen = () => {
+         console.log('[GAME-WS] ✅ onopen - upgrade 成功, readyState=', ws.readyState, '(1=OPEN)。發送 auth...');
+         _updateWsBadge('connecting', 'WS驗證中');
+         wsSend({
+           type: 'auth',
+           token: authToken,
+           name: GS?.player?.name || 'Player',
+           classId: GS?.player?.classId || 'warrior',
+           level: GS?.player?.level || 1,
+         });
+         console.log('[GAME-WS] 已發送 auth, token 長度=', authToken ? authToken.length : 0);
+       };
 
-      ws.onerror = (event) => {
-        console.error('[WS] ❌ onerror 觸發');
-        console.error('[WS]   event.type=', event.type);
-        console.error('[WS]   event.target.url=', event.target?.url || 'n/a');
-        console.error('[WS]   readyState=', ws?.readyState);
-        _wsFailureReason = 'onerror 觸發 (詳見 console)';
+       ws.onerror = (event) => {
+         console.error('[GAME-WS] ❌ onerror 觸發');
+         console.error('[GAME-WS]   event.type=', event.type);
+         console.error('[GAME-WS]   event.target.url=', event.target?.url || 'n/a');
+         console.error('[GAME-WS]   readyState=', ws?.readyState);
+         _updateWsBadge('error', 'WS錯誤');
+         _wsFailureReason = 'onerror 觸發 (詳見 console)';
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
@@ -636,13 +649,13 @@
         }
       };
 
-       ws.onclose = function(event) {
-         console.warn('[WS] ⚠️ onclose 觸發');
-         console.warn('[WS]   code=', event.code);
-         console.warn('[WS]   reason=', event.reason || '(空)');
-         console.warn('[WS]   wasClean=', event.wasClean);
-         console.warn('[WS]   readyState=', ws?.readyState);
-         console.warn('[WS]   URL=', wsUrl);
+       ws.onclose = (event) => {
+         console.warn('[GAME-WS] ⚠️ onclose 觸發');
+         console.warn('[GAME-WS]   code=', event.code);
+         console.warn('[GAME-WS]   reason=', event.reason || '(空)');
+         console.warn('[GAME-WS]   wasClean=', event.wasClean);
+         console.warn('[GAME-WS]   readyState=', ws?.readyState);
+         console.warn('[GAME-WS]   URL=', wsUrl);
          wsConnected = false;
         _wsLastCloseCode = event.code;
         _wsLastCloseReason = event.reason || '';
@@ -673,17 +686,18 @@
         try { msg = JSON.parse(ev.data); } catch(e) { return; }
         if (!msg || !msg.type) return;
 
-        if (msg.type === 'auth_ok') {
-          if (!resolved) {
-            resolved = true;
-            console.log('[WS] ✅ auth_ok - 驗證通過, clientId=', msg.id, 'account=', msg.account);
-            clearTimeout(timeout);
-            useWebSocket = true;
-            wsConnected = true;
-            wsReconnectDelay = 1000;
-            console.log('[WS] 認證成功，account=', msg.account, '(WebSocket 模式啟用)');
-            resolve(msg);
-          }
+         if (msg.type === 'auth_ok') {
+           if (!resolved) {
+             resolved = true;
+             console.log('[GAME-WS] ✅ auth_ok - 驗證通過, clientId=', msg.id, 'account=', msg.account);
+             clearTimeout(timeout);
+             useWebSocket = true;
+             wsConnected = true;
+             wsReconnectDelay = 1000;
+             console.log('[GAME-WS] 認證成功，WebSocket 模式啟用');
+             _updateWsBadge('online', 'WS在線');
+             resolve(msg);
+           }
            // 若已經在地圖中，重新 join
            if (currentMapId && myPlayerId) {
              wsSend({
@@ -703,14 +717,15 @@
                maxMp: GS?.player?.mpMax,
                nation: GS?.player?.nation || '',
              });
-             console.log('[WS] auth_ok 後自動 join_map, mapId=' + currentMapId + ', playerId=' + myPlayerId);
+             console.log('[GAME-WS] auth_ok 後自動 join_map, mapId=' + currentMapId + ', playerId=' + myPlayerId);
            }
-          return;
+           return;
          } else if (msg.type === 'auth_fail') {
-           console.error('[WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
+           console.error('[GAME-WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
            clearTimeout(timeout);
            _wsFailureReason = 'auth 失敗: ' + (msg.reason || msg.error || 'token 無效');
-           // v3.1.1：auth 失敗時顯示明確提示給玩家（不是只在 console）
+           _updateWsBadge('error', 'WS驗證失敗');
+           // v3.1.2：auth 失敗時顯示明確提示給玩家
            if (typeof window.addLog === 'function') {
              try { addLog('system', '⚠️ 伺服器驗證失敗：' + (msg.reason || msg.error || 'token 無效')); } catch(e) {}
            }
@@ -1352,7 +1367,38 @@
     }
   }
 
-  // ========== 暴露到全域 ==========
+   // v3.1.2：遊戲畫面左上角 WS 狀態標籤（肉眼可見，不只在 console）
+   let _wsBadgeEl = null;
+   function _ensureWsBadge() {
+     if (_wsBadgeEl) return;
+     try {
+       const badge = document.createElement('div');
+       badge.id = 'ws-status-badge';
+       badge.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99999;padding:2px 6px;font-size:10px;font-family:monospace;border-radius:3px;pointer-events:none;opacity:0.85;';
+       badge.textContent = 'WS離線';
+       badge.style.background = '#333';
+       badge.style.color = '#aaa';
+       document.body.appendChild(badge);
+       _wsBadgeEl = badge;
+     } catch(e) {}
+   }
+   function _updateWsBadge(state, label) {
+     _ensureWsBadge();
+     if (!_wsBadgeEl) return;
+     _wsBadgeEl.textContent = label || 'WS';
+     const colors = {
+       online:    { bg: '#1a4d2e', color: '#4ecdc4' },
+       connecting:{ bg: '#3d3d1a', color: '#ffd93d' },
+       error:     { bg: '#4d1a1a', color: '#ff6b6b' },
+       offline:   { bg: '#333',    color: '#aaa' },
+       reconnecting: { bg: '#3d3d1a', color: '#ffd93d' },
+     };
+     const c = colors[state] || colors.offline;
+     _wsBadgeEl.style.background = c.bg;
+     _wsBadgeEl.style.color = c.color;
+   }
+
+   // ========== 暴露到全域 ==========
   window.MultiplayerClient = MultiplayerClient;
 
   // 頁面關閉/刷新前主動斷線

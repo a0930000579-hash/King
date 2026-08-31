@@ -111,6 +111,63 @@ function buildAssetIndex(dir) {
  let cleanedManifest = null;
  let cleanedManifestMissing = 0;
  let cleanedManifestOriginal = 0;
+ // v3.1.2：從磁碟重新生成 manifest（只包含實際存在的檔案）
+ //  解決 manifest 引用已刪除資料夾（transform_old / 12_map_old 等）的問題
+ let regeneratedManifest = null;
+ function regenerateManifestFromDisk() {
+   const result = {};
+   let count = 0;
+   function walk(dir, relBase) {
+     let entries;
+     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch(e) { return; }
+     for (const ent of entries) {
+       const full = path.join(dir, ent.name);
+       const rel = relBase ? relBase + '/' + ent.name : ent.name;
+       if (ent.isDirectory()) {
+         // 跳過 zips 資料夾（更新包）和 data 資料夾
+         if (ent.name === 'zips' || ent.name === 'data') continue;
+         walk(full, rel);
+       } else {
+         // 只加入圖片/音訊/字型/json 等資源檔
+         const ext = path.extname(ent.name).toLowerCase();
+         const allowedExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp',
+                              '.mp3', '.wav', '.ogg', '.m4a',
+                              '.ttf', '.otf', '.woff', '.woff2',
+                              '.json', '.mp4', '.webm'];
+         if (allowedExts.includes(ext) || ent.name.endsWith('-manifest.json')) {
+           // key 用檔名（不含副檔名），value 用相對於 ROOT_DIR 的路徑
+           const key = ent.name.replace(/\.[^.]+$/, '');
+           const value = 'assets/' + rel;
+           // 避免重複 key（罕見）
+           if (!result[key]) {
+             result[key] = value;
+           } else {
+             // 同名檔用完整路徑當 key
+             result['assets/' + rel] = value;
+           }
+           count++;
+         }
+       }
+     }
+   }
+   if (fs.existsSync(ASSETS_DIR)) {
+     walk(ASSETS_DIR, '');
+   }
+   regeneratedManifest = result;
+   console.log('[Manifest] 從磁碟重新生成完成: 總共 ' + count + ' 個檔案');
+   // v3.1.2：將重新生成的 manifest 寫回磁碟（替換舊檔案）
+   //  確保客戶端拿到的就是最新、無失效引用的版本
+   try {
+     const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
+     const sorted = {};
+     Object.keys(result).sort().forEach(function(k) { sorted[k] = result[k]; });
+     fs.writeFileSync(manifestPath, JSON.stringify(sorted, null, 2), 'utf8');
+     console.log('[Manifest] 已寫入 assets-manifest.json, 共 ' + Object.keys(sorted).length + ' 項');
+   } catch(e) {
+     console.warn('[Manifest] 寫入失敗:', e.message);
+   }
+   return result;
+ }
  function cleanManifest() {
    const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
    if (!fs.existsSync(manifestPath)) { cleanedManifest = null; return; }
@@ -140,6 +197,7 @@ function buildAssetIndex(dir) {
    }
  }
  cleanManifest();
+ regenerateManifestFromDisk();
  function countFiles(dir) {
   if (!fs.existsSync(dir)) return 0;
   let n = 0;
@@ -868,9 +926,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-       version: '3.1.1',
-       build: '3.1.1-2608311500',
-       buildId: '3.1.1-2608311500',
+      version: '3.1.2',
+      build: '3.1.2-2608311500',
+      buildId: '3.1.2-2608311500',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1026,6 +1084,7 @@ async function handleApi(req, res, pathname, query) {
         manifestOriginalCount: manifestOriginal,
         manifestCleanedCount: manifestCleanedCount,
         manifestMissingOnDisk: manifestMissingOnDisk,
+        manifestRegeneratedCount: regeneratedManifest ? Object.keys(regeneratedManifest).length : 0,
        manifestMissingSamples: manifestMissingSamples,
        dataDir: DATA_DIR,
        dataDirExists: fs.existsSync(DATA_DIR),
