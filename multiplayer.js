@@ -1398,7 +1398,7 @@
     if (!_wsBadgeEl) return;
     _wsBadgeState = state;
     _wsBadgeLabel = label || state;
-    const transport = useWebSocket ? 'WS' : (pollingActive ? 'LP' : '?');
+    const transport = useWebSocket ? 'WS' : (pollRunning ? 'LP' : '?');
     _wsTransport = transport;
     const count = _wsOnlineCount;
     const stateLabel = {
@@ -1430,7 +1430,7 @@
         '在線人數: ' + _wsOnlineCount,
         'WS已連線: ' + (wsConnected ? '是' : '否'),
         'WS使用中: ' + (useWebSocket ? '是' : '否'),
-        'Long-Poll使用中: ' + (pollingActive ? '是' : '否'),
+        'Long-Poll使用中: ' + (pollRunning ? '是' : '否'),
         '伺服器URL: ' + (serverUrl || '未設定'),
         'Token長度: ' + (authToken ? authToken.length : 0),
         'WS失敗原因: ' + (_wsFailureReason || '無'),
