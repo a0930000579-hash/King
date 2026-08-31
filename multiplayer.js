@@ -1455,6 +1455,7 @@
         '伺服器URL: ' + (serverUrl || '未設定'),
         'Token長度: ' + (authToken ? authToken.length : 0),
         'Token前15: ' + (authToken ? authToken.substring(0,15) : '空'),
+        'Token格式: ' + (authToken ? (authToken.split('.').length + '段, 各段長度=' + authToken.split('.').map(s=>s.length).join(',')) : '空'),
         'WS失敗原因: ' + (_wsFailureReason || '無'),
         '當前地圖: ' + (currentMapId || '無'),
         '我的PlayerID: ' + (myPlayerId || '無'),

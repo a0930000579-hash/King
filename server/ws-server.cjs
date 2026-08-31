@@ -363,8 +363,13 @@ function createWsServer(httpServer) {
     clients.set(wsId, client);
 
     socket.on('data', (chunk) => {
-      client.buffer = Buffer.concat([client.buffer, chunk]);
-      processWsBuffer(client);
+      try {
+        console.log('[WS-DIAG] 收到 data chunk, 長度=' + chunk.length + ', wsId=' + client.wsId);
+        client.buffer = Buffer.concat([client.buffer, chunk]);
+        processWsBuffer(client);
+      } catch(e) {
+        console.error('[WS-DIAG] ❌ data 處理異常:', e.message, e.stack);
+      }
     });
 
     socket.on('close', () => {
@@ -477,10 +482,12 @@ function createWsServer(httpServer) {
 
       // v2.7.10：資料幀（text=0x1, binary=0x2, continuation=0x0）
       if (opcode === 0x1 || opcode === 0x2) {
+        console.log('[WS-DIAG] 解析幀: opcode=' + opcode + ' fin=' + fin + ' masked=' + masked + ' payloadLen=' + payloadLen + ' decodedLen=' + decoded.length + ' wsId=' + client.wsId);
         // 起始幀
         if (fin) {
           // 單幀訊息，直接處理
           if (opcode === 0x1) {
+            console.log('[WS-DIAG] text frame 前50字=' + decoded.toString('utf8').substring(0, 50));
             handleTextMessage(client, decoded);
           } else {
             // binary 幀目前保留（未使用，安全忽略）
@@ -521,10 +528,16 @@ function createWsServer(httpServer) {
     let msg;
     try {
       msg = JSON.parse(buf.toString('utf8'));
+      console.log('[WS-DIAG] ✅ JSON 解析成功, type=' + msg.type + ' wsId=' + client.wsId);
     } catch (e) {
+      console.error('[WS-DIAG] ❌ JSON 解析失敗:', e.message, 'buf前50=' + buf.toString('utf8').substring(0, 50), 'wsId=' + client.wsId);
       return;
     }
-    handleMessage(client, msg);
+    try {
+      handleMessage(client, msg);
+    } catch(e) {
+      console.error('[WS-DIAG] ❌ handleMessage 異常:', e.message, e.stack);
+    }
   }
 
   function sendFrame(socket, opcode, payload) {
@@ -551,8 +564,14 @@ function createWsServer(httpServer) {
   }
 
   function sendJson(socket, obj) {
-    const data = Buffer.from(JSON.stringify(obj), 'utf8');
-    sendFrame(socket, 0x1, data);
+    try {
+      console.log('[WS-DIAG] sendJson: type=' + obj.type + ' socket.writable=' + socket.writable + ' socket.destroyed=' + socket.destroyed);
+      const data = Buffer.from(JSON.stringify(obj), 'utf8');
+      sendFrame(socket, 0x1, data);
+      console.log('[WS-DIAG] sendJson 完成, dataLen=' + data.length);
+    } catch(e) {
+      console.error('[WS-DIAG] ❌ sendJson 異常:', e.message, e.stack);
+    }
   }
 
   // ========== 訊息處理 ==========
@@ -598,27 +617,44 @@ function createWsServer(httpServer) {
   }
 
   function handleAuth(client, msg) {
-    // 簡單 token 校驗（與 long-poll 共用 verifyToken）
-    const token = msg.token || '';
-    const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
-    if (account) {
-      client.account = account;
-      client.authenticated = true;
-      client.name = msg.name || account;
-      client.classId = msg.classId || 'warrior';
-      client.level = msg.level || 1;
-      console.log('[WS][auth] ✅ 認證成功 wsId=', client.wsId, 'account=', account, 'name=', client.name);
-      sendJson(client.socket, { type: 'auth_ok', account, wsId: client.wsId, id: client.wsId });
-    } else {
-      console.warn('[WS][auth] ❌ 認證失敗 wsId=', client.wsId, 'token長度=', (msg.token || '').length, '主動斷線 (code 4001)');
-      sendJson(client.socket, { type: 'auth_fail', error: 'token 無效', reason: 'invalid_token' });
-      // v3.0.0：auth 失敗後主動斷線，避免客戶端卡在「連上了但沒認證」的狀態
-      setTimeout(() => {
-        try {
-          client.socket.end();
-          client.socket.destroy();
-        } catch(e) {}
-      }, 500);
+    try {
+      console.log('[WS-DIAG] handleAuth 被呼叫, wsId=' + client.wsId);
+      // 簡單 token 校驗（與 long-poll 共用 verifyToken）
+      const token = msg.token || '';
+      console.log('[WS-DIAG] token長度=' + token.length + ' token前15=' + (token ? token.substring(0,15) : '空'));
+      console.log('[WS-DIAG] global._wsVerifyToken 存在=' + (typeof global._wsVerifyToken === 'function'));
+      const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
+      console.log('[WS-DIAG] verifyToken 結果=' + (account || 'null'));
+      if (account) {
+        client.account = account;
+        client.authenticated = true;
+        client.name = msg.name || account;
+        client.classId = msg.classId || 'warrior';
+        client.level = msg.level || 1;
+        console.log('[WS][auth] ✅ 認證成功 wsId=', client.wsId, 'account=', account, 'name=', client.name);
+        const resp = { type: 'auth_ok', account, wsId: client.wsId, id: client.wsId };
+        console.log('[WS-DIAG] 發送 auth_ok, socket.writable=' + client.socket.writable);
+        sendJson(client.socket, resp);
+        console.log('[WS-DIAG] auth_ok 已發送');
+      } else {
+        console.warn('[WS][auth] ❌ 認證失敗 wsId=', client.wsId, 'token長度=', (msg.token || '').length, '主動斷線 (code 4001)');
+        const resp = { type: 'auth_fail', error: 'token 無效', reason: 'invalid_token' };
+        console.log('[WS-DIAG] 發送 auth_fail');
+        sendJson(client.socket, resp);
+        console.log('[WS-DIAG] auth_fail 已發送');
+        // v3.0.0：auth 失敗後主動斷線，避免客戶端卡在「連上了但沒認證」的狀態
+        setTimeout(() => {
+          try {
+            client.socket.end();
+            client.socket.destroy();
+          } catch(e) {}
+        }, 500);
+      }
+    } catch(e) {
+      console.error('[WS-DIAG] ❌ handleAuth 異常:', e.message, e.stack);
+      try {
+        sendJson(client.socket, { type: 'auth_fail', error: 'server_error', reason: e.message });
+      } catch(e2) {}
     }
   }
 

@@ -955,9 +955,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '3.1.6',
-      build: '3.1.6-2609011800',
-      buildId: '3.1.6-2609011800',
+      version: '3.1.7',
+      build: '3.1.7-2609011900',
+      buildId: '3.1.7-2609011900',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
