@@ -105,8 +105,42 @@ function buildAssetIndex(dir) {
   walk(dir, '');
   return map;
 }
-let assetIndex = buildAssetIndex(ASSETS_DIR);
-function countFiles(dir) {
+ let assetIndex = buildAssetIndex(ASSETS_DIR);
+ // v3.1.1：清理 manifest 中磁碟不存在的條目（舊資料夾刪除後殘留的引用）
+ //  不修改原始檔案，只在記憶體中過濾，提供給 /api/diag 和 /assets/assets-manifest.json 用
+ let cleanedManifest = null;
+ let cleanedManifestMissing = 0;
+ let cleanedManifestOriginal = 0;
+ function cleanManifest() {
+   const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
+   if (!fs.existsSync(manifestPath)) { cleanedManifest = null; return; }
+   try {
+     const raw = fs.readFileSync(manifestPath, 'utf8');
+     const m = JSON.parse(raw);
+     cleanedManifestOriginal = Object.keys(m).length;
+     const clean = {};
+     let missing = 0;
+     for (const key of Object.keys(m)) {
+       const v = m[key];
+       // 檔案可能在 ASSETS_DIR 下或 ROOT_DIR 下，都檢查
+       const p1 = path.join(ASSETS_DIR, v);
+       const p2 = path.join(ROOT_DIR, v);
+       if (fs.existsSync(p1) || fs.existsSync(p2)) {
+         clean[key] = v;
+       } else {
+         missing++;
+       }
+     }
+     cleanedManifest = clean;
+     cleanedManifestMissing = missing;
+     console.log('[Manifest] 清理完成: 原始 ' + cleanedManifestOriginal + ' 項 → 清理後 ' + Object.keys(clean).length + '項 (移除 ' + missing + ' 項不存在的引用)');
+   } catch(e) {
+     console.warn('[Manifest] 清理失敗:', e.message);
+     cleanedManifest = null;
+   }
+ }
+ cleanManifest();
+ function countFiles(dir) {
   if (!fs.existsSync(dir)) return 0;
   let n = 0;
   function walk(d) {
@@ -831,12 +865,12 @@ async function handleApi(req, res, pathname, query) {
     for (const p of onlinePlayers.values()) { uniqueAccounts.add(p.account); }
     const onlineCount = uniqueAccounts.size;
 
-    return sendJson(res, 200, {
-      status: 'online',
-      server: 'monarch-blade',
-      version: '3.0.0',
-      build: '3.0.0-2608311800',
-      buildId: '3.0.0-2608311800',
+     return sendJson(res, 200, {
+       status: 'online',
+       server: 'monarch-blade',
+       version: '3.1.1',
+       build: '3.1.1-2608311500',
+       buildId: '3.1.1-2608311500',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -874,34 +908,54 @@ async function handleApi(req, res, pathname, query) {
     const hashSamplePath = path.join(ASSETS_DIR, hashSampleRel);
     const hashSampleExists = fs.existsSync(hashSamplePath);
 
-    // manifest 核對
-    let manifestReferenced = 0;
-    let manifestMissingOnDisk = 0;
-    let manifestMissingSamples = [];
-    const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
-    let manifestExistsOnDisk = fs.existsSync(manifestPath);
-    let manifestLoadedOk = false;
-    let manifestSize = 0;
-    let clientAssetBase = '/assets/ (相對)';
-    try {
-      if (manifestExistsOnDisk) {
-        const raw = fs.readFileSync(manifestPath, 'utf-8');
-        manifestSize = raw.length;
-        const m = JSON.parse(raw);
-        manifestLoadedOk = true;
-        manifestReferenced = Object.keys(m).length;
-        for (const key of Object.keys(m)) {
-          const v = m[key];
-          const full = path.join(ROOT_DIR, v);
-          if (!fs.existsSync(full)) {
-            manifestMissingOnDisk++;
-            if (manifestMissingSamples.length < 10) manifestMissingSamples.push(v);
-          }
-        }
-      }
-    } catch (e) {
-      manifestLoadedOk = false;
-    }
+     // manifest 核對（使用清理後的版本）
+     let manifestReferenced = 0;
+     let manifestMissingOnDisk = 0;
+     let manifestOriginal = 0;
+     let manifestMissingSamples = [];
+     const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
+     let manifestExistsOnDisk = fs.existsSync(manifestPath);
+     let manifestLoadedOk = false;
+     let manifestSize = 0;
+     let clientAssetBase = '/assets/ (相對)';
+     let manifestCleanedCount = 0;
+     try {
+       if (manifestExistsOnDisk) {
+         const raw = fs.readFileSync(manifestPath, 'utf8');
+         manifestSize = raw.length;
+         const m = JSON.parse(raw);
+         manifestLoadedOk = true;
+         manifestReferenced = Object.keys(m).length;
+         manifestOriginal = manifestReferenced;
+         // v3.1.1：使用已清理的 manifest 統計
+         if (cleanedManifest) {
+           manifestCleanedCount = Object.keys(cleanedManifest).length;
+           manifestMissingOnDisk = manifestOriginal - manifestCleanedCount;
+         } else {
+           for (const key of Object.keys(m)) {
+             const v = m[key];
+             const full = path.join(ROOT_DIR, v);
+             if (!fs.existsSync(full)) {
+               manifestMissingOnDisk++;
+               if (manifestMissingSamples.length < 10) manifestMissingSamples.push(v);
+             }
+           }
+         }
+         // 收集缺失樣本
+         if (cleanedManifest && manifestMissingOnDisk > 0 && manifestMissingSamples.length === 0) {
+           const cleanSet = new Set(Object.keys(cleanedManifest));
+           let count = 0;
+           for (const key of Object.keys(m)) {
+             if (!cleanSet.has(key)) {
+               manifestMissingSamples.push(m[key]);
+               if (++count >= 10) break;
+             }
+           }
+         }
+       }
+     } catch (e) {
+       manifestLoadedOk = false;
+     }
 
     // v2.7.3：實例與多人連線概況
     const uptime = Date.now() - SERVER_START_TIME;
@@ -964,12 +1018,14 @@ async function handleApi(req, res, pathname, query) {
        hashSampleAsset: '/assets/' + hashSampleRel,
        hashSampleAssetExists: hashSampleExists,
        clientAssetBase: clientAssetBase,
-       manifestPath: manifestPath,
-       manifestExistsOnDisk: manifestExistsOnDisk,
-       manifestLoadedOk: manifestLoadedOk,
-       manifestSizeBytes: manifestSize,
-       manifestReferenced: manifestReferenced,
-       manifestMissingOnDisk: manifestMissingOnDisk,
+        manifestPath: manifestPath,
+        manifestExistsOnDisk: manifestExistsOnDisk,
+        manifestLoadedOk: manifestLoadedOk,
+        manifestSizeBytes: manifestSize,
+        manifestReferenced: manifestReferenced,
+        manifestOriginalCount: manifestOriginal,
+        manifestCleanedCount: manifestCleanedCount,
+        manifestMissingOnDisk: manifestMissingOnDisk,
        manifestMissingSamples: manifestMissingSamples,
        dataDir: DATA_DIR,
        dataDirExists: fs.existsSync(DATA_DIR),
@@ -978,18 +1034,20 @@ async function handleApi(req, res, pathname, query) {
        nodeVersion: process.version,
        platform: process.platform,
        listenHost: '0.0.0.0',
-       wsClientCount: wsServer.clientCount,
-       wsAuthenticatedCount: wsServer.authenticatedCount,
-       wsHandshakeOk: wsServer.handshakeOk !== false,
-       wsLastError: wsServer.lastError || null,
-       wsLastCloseCode: wsServer.lastCloseCode || null,
-       wsLastCloseReason: wsServer.lastCloseReason || '',
-       wsTotalConnections: wsServer.totalConnections || 0,
-       wsKeepaliveEnabled: wsServer.keepaliveEnabled !== false,
-       wsKeepaliveIntervalMs: wsServer.keepaliveIntervalMs || 0,
-       wsKeepaliveTimeoutMs: wsServer.keepaliveTimeoutMs || 0,
-       upgradeHandlerRegistered: true,
-      wsTransportPath: '/',
+        wsClientCount: wsServer.clientCount,
+        wsAuthenticatedCount: wsServer.authenticatedCount,
+        wsHandshakeOk: wsServer.handshakeOk !== false,
+        wsLastError: wsServer.lastError || null,
+        wsLastCloseCode: wsServer.lastCloseCode || null,
+        wsLastCloseReason: wsServer.lastCloseReason || '',
+        wsTotalConnections: wsServer.totalConnections || 0,
+        wsKeepaliveEnabled: wsServer.keepaliveEnabled !== false,
+        wsKeepaliveIntervalMs: wsServer.keepaliveIntervalMs || 0,
+        wsKeepaliveTimeoutMs: wsServer.keepaliveTimeoutMs || 0,
+        upgradeHandlerRegistered: true,
+        wsUpgradeRequestCount: global._wsUpgradeCount || 0,
+        wsUpgradeErrorCount: global._wsUpgradeErrors || 0,
+       wsTransportPath: '/',
       servers: serverSummaries,
     });
   }
@@ -2793,27 +2851,40 @@ wsServer.setServerAIConfigProvider(async (serverId) => {
   return { aiCount: 8, initLevel: 1, status: 'open' };
 });
 
-server.on('upgrade', (req, socket, head) => {
-  const upgradeHeader = (req.headers['upgrade'] || '').toLowerCase();
-  console.log('[WS][upgrade] 收到 upgrade 請求:');
-  console.log('[WS][upgrade]   url=', req.url);
-  console.log('[WS][upgrade]   method=', req.method);
-  console.log('[WS][upgrade]   upgrade=', upgradeHeader);
-  console.log('[WS][upgrade]   x-forwarded-proto=', req.headers['x-forwarded-proto'] || 'n/a');
-  console.log('[WS][upgrade]   x-forwarded-for=', req.headers['x-forwarded-for'] || 'n/a');
-  if (upgradeHeader === 'websocket') {
-    console.log('[WS][upgrade] ✅ 是 WebSocket upgrade，交給 wsServer.acceptUpgrade 處理');
-    try {
-      wsServer.acceptUpgrade(req, socket, head);
-    } catch(e) {
-      console.error('[WS][upgrade] ❌ acceptUpgrade 丟出異常:', e.message);
-      socket.destroy();
-    }
-  } else {
-    console.warn('[WS][upgrade] ⚠️ upgrade header 不是 websocket，摧毀 socket');
-    socket.destroy();
-  }
-});
+ server.on('upgrade', (req, socket, head) => {
+   const upgradeHeader = (req.headers['upgrade'] || '').toLowerCase();
+   const ts = new Date().toISOString();
+   console.log('[WS][upgrade] ' + ts + ' 收到 upgrade 請求:');
+   console.log('[WS][upgrade]   url=', req.url);
+   console.log('[WS][upgrade]   method=', req.method);
+   console.log('[WS][upgrade]   upgrade=', upgradeHeader);
+   console.log('[WS][upgrade]   x-forwarded-proto=', req.headers['x-forwarded-proto'] || 'n/a');
+   console.log('[WS][upgrade]   x-forwarded-for=', req.headers['x-forwarded-for'] || 'n/a');
+   console.log('[WS][upgrade]   sec-websocket-key=', req.headers['sec-websocket-key'] ? '(存在, 長度=' + req.headers['sec-websocket-key'].length + ')' : '缺失');
+   console.log('[WS][upgrade]   sec-websocket-version=', req.headers['sec-websocket-version'] || 'n/a');
+   console.log('[WS][upgrade]   connection=', req.headers['connection'] || 'n/a');
+   // v3.1.1：累計 upgrade 請求數（診斷用）
+   global._wsUpgradeCount = (global._wsUpgradeCount || 0) + 1;
+   if (upgradeHeader === 'websocket') {
+     console.log('[WS][upgrade] ✅ 是 WebSocket upgrade，交給 wsServer.acceptUpgrade 處理');
+     try {
+       wsServer.acceptUpgrade(req, socket, head);
+     } catch(e) {
+       console.error('[WS][upgrade] ❌ acceptUpgrade 丟出異常:', e.message, e.stack);
+       global._wsUpgradeErrors = (global._wsUpgradeErrors || 0) + 1;
+       try {
+         socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+         socket.destroy();
+       } catch(_) {}
+     }
+   } else {
+     console.warn('[WS][upgrade] ⚠️ upgrade header 不是 websocket (實際值: "' + upgradeHeader + '"), url=' + req.url);
+     try {
+       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+       socket.destroy();
+     } catch(_) {}
+   }
+ });
 
 // ========== v2.7.3：伺服器級 AI（權威生成 + GM 聯動 + 持久化） ==========
 //  所有地圖的 AI 由伺服器統一管理，客戶端只負責渲染

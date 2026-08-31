@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Debug 診斷頁面 v3.1.1</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0f;
+    color: #d0d0d0;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 20px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #2a2a3a;
+  }
+  .header h1 {
+    font-size: 18px;
+    color: #e8e8f0;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+  .header h1 .ver { color: #4ecdc4; font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .btn {
+    background: linear-gradient(180deg, #2a6090, #1a4060);
+    color: #fff;
+    border: 1px solid #3a80c0;
+    padding: 8px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition: all 0.2s;
+  }
+  .btn:hover { background: linear-gradient(180deg, #3a70a0, #2a5080); }
+  .btn:active { transform: translateY(1px); }
+  .section {
+    margin-bottom: 12px;
+    border: 1px solid #1e1e2e;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #0f0f18;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #13131f;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid #1e1e2e;
+  }
+  .section-header:hover { background: #181828; }
+  .section-header .icon {
+    font-size: 14px;
+    width: 16px;
+    text-align: center;
+  }
+  .section-header .title {
+    flex: 1;
+    font-weight: 600;
+    color: #e0e0e8;
+  }
+  .section-header .status {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .section-header .arrow {
+    color: #666;
+    transition: transform 0.2s;
+    font-size: 10px;
+  }
+  .section.collapsed .arrow { transform: rotate(-90deg); }
+  .section.collapsed .section-body { display: none; }
+  .section-body {
+    padding: 12px 14px;
+    font-size: 12px;
+  }
+  .row {
+    display: flex;
+    padding: 4px 0;
+    border-bottom: 1px solid #1a1a26;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .key {
+    width: 200px;
+    color: #888;
+    flex-shrink: 0;
+  }
+  .row .val {
+    flex: 1;
+    color: #c0c0c8;
+    word-break: break-all;
+  }
+  .pass { color: #4ecdc4; }
+  .fail { color: #ff6b6b; }
+  .warn { color: #ffd93d; }
+  .info { color: #6ab7ff; }
+  .subtest {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #0a0a12;
+    border-radius: 4px;
+    border-left: 3px solid #3a3a5a;
+  }
+  .subtest.pass { border-left-color: #4ecdc4; }
+  .subtest.fail { border-left-color: #ff6b6b; }
+  .subtest.warn { border-left-color: #ffd93d; }
+  .subtest .st-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+  .log {
+    margin-top: 6px;
+    padding: 8px;
+    background: #05050a;
+    border-radius: 3px;
+    font-size: 11px;
+    color: #888;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .log .log-line { margin: 2px 0; }
+  .log .log-info { color: #6ab7ff; }
+  .log .log-ok { color: #4ecdc4; }
+  .log .log-err { color: #ff6b6b; }
+  .log .log-warn { color: #ffd93d; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .js-file-list {
+    max-height: 200px;
+    overflow-y: auto;
+    columns: 2;
+    font-size: 11px;
+  }
+  .js-file-list div { padding: 2px 0; break-inside: avoid; }
+  .back-link {
+    color: #6ab7ff;
+    text-decoration: none;
+    font-size: 12px;
+    margin-left: 12px;
+  }
+  .back-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>🛠️ Debug 診斷頁面<span class="ver">v3.1.1</span></h1>
+    <div>
+      <button class="btn" onclick="runAllTests()">🔄 重新測試</button>
+      <a class="back-link" href="./">← 返回遊戲</a>
+    </div>
+  </div>
+
+  <div id="sections"></div>
+
+<script>
+// ============================================================
+//  全域錯誤攔截
+// ============================================================
+const jsErrors = [];
+window.onerror = function(msg, url, line, col, error) {
+  jsErrors.push({ msg, url, line, col, error: error ? error.stack : String(error) });
+  updateErrorSection();
+  return false;
+};
+window.addEventListener('unhandledrejection', function(e) {
+  jsErrors.push({ msg: 'Unhandled Promise Rejection: ' + (e.reason?.message || e.reason), url: '', line: '', col: '', error: e.reason?.stack || '' });
+  updateErrorSection();
+});
+
+// ============================================================
+//  工具函數
+// ============================================================
+function $(id) { return document.getElementById(id); }
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function statusIcon(s) {
+  return s === 'pass' ? '<span class="pass">✅</span>'
+       : s === 'fail' ? '<span class="fail">❌</span>'
+       : s === 'warn' ? '<span class="warn">⚠️</span>'
+       : '<span class="info">ℹ️</span>';
+}
+
+function addLog(logEl, type, msg) {
+  const line = document.createElement('div');
+  line.className = 'log-line log-' + type;
+  line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ============================================================
+//  測試定義
+// ============================================================
+const tests = [
+  // 1. 伺服器健康檢查
+  {
+    id: 'health',
+    title: '1. 伺服器健康檢查 /api/health',
+    run: async function(bodyEl, statusEl) {
+      statusEl.innerHTML = '⏳ 測試中...';
+      try {
+        const t0 = performance.now();
+        const r = await fetch('./api/health', { cache: 'no-store' });
+        const dt = (performance.now() - t0).toFixed(0);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const isOk = data.status === 'online';
+        statusEl.innerHTML = statusIcon(isOk ? 'pass' : 'fail') + (isOk ? ' 線上' : ' 離線');
+        bodyEl.innerHTML = `
+          <div class="row"><div class="key">HTTP 狀態</div><div class="val ${isOk ? 'pass' : 'fail'}">${r.status} (${dt}ms)</div></div>
+          <div class="row"><div class="key">status</div><div class="val">${esc(data.status)}</div></div>
+          <div class="row"><div class="key">version</div><div class="val">${esc(data.version || 'n/a')}</div></div>
+          <div class="row"><div class="key">build</div><div class="val">${esc(data.build || data.buildId || 'n/a')}</div></div>
+          <div class="row"><div class="key">dbBackend</div><div class="val">${esc(data.dbBackend || 'n/a')}</div></div>
+          <div class="row"><div class="key">wsCount</div><div class="val">${esc(data.wsCount ?? 'n/a')}</div></div>
+          <div class="row"><div class="key">lpCount</div><div class="val">${esc(data.lpCount ?? 'n/a')}</div></div>
+          <div class="row"><div class="key">onlineCount</div><div class="val">${esc(data.onlineCount ?? 'n/a')}</div></div>
+          <div class="row"><div class="key">assetCount</div><div class="val">${esc(data.assetCount ?? 'n/a')}</div></div>
+          <div class="row"><div class="key">webSocket</div><div class="val">${data.webSocket ? '<span class="pass">enabled</span>' : '<span class="fail">disabled</span>'}</div></div>
+          <div class="row"><div class="key">wsTransportPath</div><div class="val">${esc(data.wsTransportPath || '/')}</div></div>
+          <div class="row"><div class="key">instanceId</div><div class="val">${esc(data.instanceId || 'n/a')}</div></div>
+        `;
+        window._healthData = data;
+        return isOk ? 'pass' : 'fail';
+      } catch (e) {
+        statusEl.innerHTML = statusIcon('fail') + ' 失敗';
+        bodyEl.innerHTML = `<div class="fail">錯誤：${esc(e.message)}</div>`;
+        return 'fail';
+      }
+    }
+  },
+
+  // 2. 伺服器診斷
+  {
+    id: 'diag',
+    title: '2. 伺服器診斷 /api/diag',
+    run: async function(bodyEl, statusEl) {
+      statusEl.innerHTML = '⏳ 測試中...';
+      try {
+        const r = await fetch('./api/diag', { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const missing = data.manifestMissingOnDisk || 0;
+        const isOk = missing < 100;
+        statusEl.innerHTML = statusIcon(isOk ? 'pass' : (missing < 500 ? 'warn' : 'fail'))
+          + ' manifest 缺失 ' + missing + ' 項';
+        let rows = '';
+        const keys = ['wsClientCount', 'wsAuthenticatedCount', 'wsHandshakeOk', 'wsTotalConnections',
+                      'wsLastError', 'manifestReferenced', 'manifestMissingOnDisk', 'cwd',
+                      'assetsDir', 'assetFileCount', 'uptimeMs'];
+        for (const k of keys) {
+          if (data[k] !== undefined) {
+            let v = data[k];
+            if (k === 'uptimeMs') v = Math.floor(v / 1000) + 's (' + Math.floor(v / 60000) + 'm)';
+            rows += `<div class="row"><div class="key">${esc(k)}</div><div class="val">${esc(v)}</div></div>`;
+          }
+        }
+        if (data.manifestMissingSamples && data.manifestMissingSamples.length) {
+          rows += `<div class="row"><div class="key">缺失樣本</div><div class="val fail" style="font-size:11px;">${data.manifestMissingSamples.map(esc).join('<br>')}</div></div>`;
+        }
+        bodyEl.innerHTML = rows;
+        return isOk ? 'pass' : (missing < 500 ? 'warn' : 'fail');
+      } catch (e) {
+        statusEl.innerHTML = statusIcon('fail') + ' 失敗';
+        bodyEl.innerHTML = `<div class="fail">錯誤：${esc(e.message)}</div>`;
+        return 'fail';
+      }
+    }
+  },
+
+  // 3. WebSocket 連線測試
+  {
+    id: 'ws',
+    title: '3. WebSocket 連線測試',
+    run: async function(bodyEl, statusEl) {
+      statusEl.innerHTML = '⏳ 連線中...';
+      bodyEl.innerHTML = `
+        <div class="row"><div class="key">嘗試 URL</div><div class="val" id="ws-url">-</div></div>
+        <div class="row"><div class="key">readyState</div><div class="val" id="ws-state">0 (CONNECTING)</div></div>
+        <div class="row"><div class="key">升級結果</div><div class="val" id="ws-upgrade">-</div></div>
+        <div class="row"><div class="key">auth 結果</div><div class="val" id="ws-auth">-</div></div>
+        <div class="row"><div class="key">ping 測試</div><div class="val" id="ws-ping">-</div></div>
+        <div class="log" id="ws-log"></div>
+      `;
+      const logEl = document.getElementById('ws-log');
+
+      return new Promise(function(resolve) {
+        let ws;
+        let wsUrl;
+        try {
+          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const host = location.host;
+          let path = location.pathname;
+          if (path.endsWith('.html')) path = path.substring(0, path.lastIndexOf('/') + 1);
+          if (!path.endsWith('/')) path += '/';
+          wsUrl = proto + '//' + host + path;
+        } catch(e) {
+          wsUrl = location.href.replace(/^http/, 'ws').replace(/\/[^\/]*\.html.*$/, '/');
+        }
+
+        document.getElementById('ws-url').textContent = wsUrl;
+        addLog(logEl, 'info', '建構 URL = ' + wsUrl);
+
+        try {
+          ws = new WebSocket(wsUrl);
+          addLog(logEl, 'info', '建立 WebSocket 物件, readyState=' + ws.readyState);
+        } catch(e) {
+          addLog(logEl, 'err', 'new WebSocket() 丟出異常: ' + e.message);
+          statusEl.innerHTML = statusIcon('fail') + ' 建立失敗';
+          resolve('fail');
+          return;
+        }
+
+        const stateEl = document.getElementById('ws-state');
+        function updateState() {
+          const names = { 0: 'CONNECTING', 1: 'OPEN', 2: 'CLOSING', 3: 'CLOSED' };
+          stateEl.textContent = ws.readyState + ' (' + (names[ws.readyState] || '?') + ')';
+        }
+        updateState();
+
+        const upgradeEl = document.getElementById('ws-upgrade');
+        const authEl = document.getElementById('ws-auth');
+        const pingEl = document.getElementById('ws-ping');
+
+        let done = false;
+        const timeout = setTimeout(() => {
+          if (!done) {
+            done = true;
+            addLog(logEl, 'err', '連線逾時 (5s)');
+            statusEl.innerHTML = statusIcon('fail') + ' 逾時';
+            try { ws.close(); } catch(e) {}
+            resolve('fail');
+          }
+        }, 5000);
+
+        // 30 秒後自動關閉
+        const autoClose = setTimeout(() => {
+          addLog(logEl, 'warn', '30 秒到，自動關閉測試連線');
+          try { ws.close(); } catch(e) {}
+        }, 30000);
+
+        ws.onopen = function() {
+          updateState();
+          upgradeEl.innerHTML = '<span class="pass">✅ 升級成功 (101)</span>';
+          addLog(logEl, 'ok', 'onopen - upgrade 成功, readyState=' + ws.readyState);
+          // 發送 ping 測試雙向通訊
+          try {
+            ws.send(JSON.stringify({ type: 'ping', time: Date.now() }));
+            addLog(logEl, 'info', '發送 ping');
+            pingEl.innerHTML = '<span class="info">⏳ 等待 pong...</span>';
+          } catch(e) {
+            addLog(logEl, 'err', '發送 ping 失敗: ' + e.message);
+          }
+        };
+
+        ws.onerror = function(event) {
+          updateState();
+          addLog(logEl, 'err', 'onerror 觸發');
+          addLog(logEl, 'err', '  event.type = ' + event.type);
+          addLog(logEl, 'err', '  target.url = ' + (event.target?.url || 'n/a'));
+          upgradeEl.innerHTML = '<span class="fail">❌ 連線錯誤</span>';
+          if (!done) {
+            done = true;
+            clearTimeout(timeout);
+            statusEl.innerHTML = statusIcon('fail') + ' 連線錯誤';
+            resolve('fail');
+          }
+        };
+
+        ws.onclose = function(event) {
+          updateState();
+          addLog(logEl, 'warn', 'onclose - code=' + event.code + ', reason=' + (event.reason || '(空)') + ', wasClean=' + event.wasClean);
+          if (!done) {
+            done = true;
+            clearTimeout(timeout);
+            clearTimeout(autoClose);
+            // 如果是 code 1006 通常是連不上伺服器
+            if (event.code === 1006) {
+              statusEl.innerHTML = statusIcon('fail') + ' 無法連接';
+              upgradeEl.innerHTML = '<span class="fail">❌ 無法連接 (code 1006)</span>';
+              resolve('fail');
+            } else if (event.code === 4001) {
+              statusEl.innerHTML = statusIcon('fail') + ' auth 失敗';
+              authEl.innerHTML = '<span class="fail">❌ 失敗 (code 4001)</span>';
+              resolve('fail');
+            } else if (event.code === 1000 || event.wasClean) {
+              statusEl.innerHTML = statusIcon('pass') + ' 正常關閉';
+              resolve('pass');
+            } else {
+              statusEl.innerHTML = statusIcon('warn') + ' 已關閉 (code ' + event.code + ')';
+              resolve('warn');
+            }
+          }
+        };
+
+        ws.onmessage = function(ev) {
+          let msg;
+          try { msg = JSON.parse(ev.data); } catch(e) { return; }
+          addLog(logEl, 'info', '收到訊息 type=' + (msg?.type || '?'));
+          if (msg.type === 'pong') {
+            const rtt = Date.now() - msg.time;
+            pingEl.innerHTML = '<span class="pass">✅ pong 收到, RTT=' + rtt + 'ms</span>';
+            addLog(logEl, 'ok', 'pong 收到, RTT=' + rtt + 'ms');
+          }
+          // 3秒後關閉
+          setTimeout(() => { try { ws.close(1000, 'debug test complete'); } catch(e) {} }, 3000);
+        };
+      });
+    }
+  },
+
+  // 4. 圖資載入測試
+  {
+    id: 'assets',
+    title: '4. 圖資載入測試',
+    run: async function(bodyEl, statusEl) {
+      statusEl.innerHTML = '⏳ 測試中...';
+      const testImages = [
+        { url: './assets/1YPfWK8cKg.png', desc: '樣本精靈圖 (1YPfWK8cKg.png)' },
+        { url: './assets/class/warrior/attack.jpg', desc: '戰士攻擊幀 (class/warrior/attack.jpg)' },
+      ];
+      let allPass = true;
+      let html = '';
+
+      for (const t of testImages) {
+        const t0 = performance.now();
+        try {
+          const { ok, w, h, status } = await loadImage(t.url);
+          const dt = (performance.now() - t0).toFixed(0);
+          const cls = ok ? 'pass' : 'fail';
+          if (!ok) allPass = false;
+          html += `
+            <div class="subtest ${cls}">
+              <div class="st-title"><span class="${cls}">${ok ? '✅' : '❌'}</span> ${esc(t.desc)}</div>
+              <div class="row"><div class="key">URL</div><div class="val">${esc(t.url)}</div></div>
+              <div class="row"><div class="key">HTTP / 狀態</div><div class="val">${esc(status || 'n/a')}</div></div>
+              <div class="row"><div class="key">載入時間</div><div class="val">${dt}ms</div></div>
+              ${ok ? `<div class="row"><div class="key">尺寸</div><div class="val">${w} × ${h}</div></div>` : ''}
+            </div>
+          `;
+        } catch (e) {
+          allPass = false;
+          html += `
+            <div class="subtest fail">
+              <div class="st-title">❌ ${esc(t.desc)}</div>
+              <div class="row"><div class="key">錯誤</div><div class="val fail">${esc(e.message)}</div></div>
+            </div>
+          `;
+        }
+      }
+
+      // manifest 測試
+      try {
+        const t0 = performance.now();
+        const r = await fetch('./assets/assets-manifest.json', { cache: 'no-store' });
+        const dt = (performance.now() - t0).toFixed(0);
+        if (r.ok) {
+          const data = await r.json();
+          const count = Object.keys(data).length;
+          html += `
+            <div class="subtest pass">
+              <div class="st-title">✅ assets-manifest.json</div>
+              <div class="row"><div class="key">HTTP 狀態</div><div class="val">${r.status} (${dt}ms)</div></div>
+              <div class="row"><div class="key">引用數量</div><div class="val">${count}</div></div>
+            </div>
+          `;
+        } else {
+          allPass = false;
+          html += `
+            <div class="subtest fail">
+              <div class="st-title">❌ assets-manifest.json</div>
+              <div class="row"><div class="key">HTTP 狀態</div><div class="val">${r.status}</div></div>
+            </div>
+          `;
+        }
+      } catch (e) {
+        allPass = false;
+        html += `
+          <div class="subtest fail">
+            <div class="st-title">❌ assets-manifest.json</div>
+            <div class="row"><div class="key">錯誤</div><div class="val">${esc(e.message)}</div></div>
+          </div>
+        `;
+      }
+
+      bodyEl.innerHTML = html;
+      statusEl.innerHTML = statusIcon(allPass ? 'pass' : 'fail') + (allPass ? ' 全部通過' : ' 有失敗');
+      return allPass ? 'pass' : 'fail';
+    }
+  },
+
+  // 5. 地圖配置測試
+  {
+    id: 'maps',
+    title: '5. 地圖配置測試',
+    run: async function(bodyEl, statusEl) {
+      statusEl.innerHTML = '⏳ 測試中...';
+      try {
+        // 嘗試多個可能的路徑
+        const paths = ['./server/maps/map_village.json', './maps/map_village.json', './assets/maps/map_village.json'];
+        let config = null;
+        let usedPath = '';
+        let lastErr = '';
+        for (const p of paths) {
+          try {
+            const r = await fetch(p, { cache: 'no-store' });
+            if (r.ok) {
+              config = await r.json();
+              usedPath = p;
+              break;
+            } else {
+              lastErr = 'HTTP ' + r.status + ' (' + p + ')';
+            }
+          } catch(e) { lastErr = e.message + ' (' + p + ')'; }
+        }
+
+        if (!config) {
+          statusEl.innerHTML = statusIcon('fail') + ' 讀取失敗';
+          bodyEl.innerHTML = `
+            <div class="fail">無法讀取地圖配置</div>
+            <div class="row"><div class="key">最後錯誤</div><div class="val">${esc(lastErr)}</div></div>
+            <div class="row"><div class="key">嘗試路徑</div><div class="val">${paths.map(esc).join('<br>')}</div></div>
+          `;
+          return 'fail';
+        }
+
+        // 測試背景圖
+        let bgOk = false, bgW = 0, bgH = 0;
+        try {
+          const bgUrl = config.background;
+          if (bgUrl) {
+            const fullBg = bgUrl.startsWith('/') ? ('.' + bgUrl) : bgUrl;
+            const res = await loadImage(fullBg);
+            bgOk = res.ok;
+            bgW = res.w;
+            bgH = res.h;
+          }
+        } catch(e) {}
+
+        const allOk = bgOk;
+        statusEl.innerHTML = statusIcon(allOk ? 'pass' : (config ? 'warn' : 'fail'))
+          + (allOk ? ' 正常' : (config ? ' 背景圖失敗' : ' 配置失敗'));
+
+        bodyEl.innerHTML = `
+          <div class="row"><div class="key">配置來源</div><div class="val">${esc(usedPath)}</div></div>
+          <div class="row"><div class="key">mapId</div><div class="val">${esc(config.mapId || 'n/a')}</div></div>
+          <div class="row"><div class="key">名稱</div><div class="val">${esc(config.name || 'n/a')}</div></div>
+          <div class="row"><div class="key">尺寸</div><div class="val">${esc(config.width || '?')} × ${esc(config.height || '?')}</div></div>
+          <div class="row"><div class="key">背景圖</div><div class="val">${esc(config.background || 'n/a')}</div></div>
+          <div class="row"><div class="key">背景圖載入</div><div class="val ${bgOk ? 'pass' : 'fail'}">${bgOk ? `✅ ${bgW}×${bgH}` : '❌ 失敗'}</div></div>
+          <div class="row"><div class="key">傳送點數量</div><div class="val">${(config.teleports || []).length}</div></div>
+          <div class="row"><div class="key">怪物生成點</div><div class="val">${(config.monsterSpawns || []).length}</div></div>
+          <div class="row"><div class="key">NPC 數量</div><div class="val">${(config.npcs || []).length}</div></div>
+        `;
+        return allOk ? 'pass' : 'warn';
+      } catch (e) {
+        statusEl.innerHTML = statusIcon('fail') + ' 錯誤';
+        bodyEl.innerHTML = `<div class="fail">${esc(e.message)}</div>`;
+        return 'fail';
+      }
+    }
+  },
+
+  // 6. JS 錯誤 & 載入檔案
+  {
+    id: 'js',
+    title: '6. 客戶端 JS 錯誤 & 載入檔案',
+    run: async function(bodyEl, statusEl) {
+      // 列出已載入的 JS 檔案
+      const scripts = Array.from(document.querySelectorAll('script[src]')).map(s => s.src);
+      const csses = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(l => l.href);
+
+      const errorCount = jsErrors.length;
+      const isOk = errorCount === 0;
+      statusEl.innerHTML = statusIcon(isOk ? 'pass' : 'fail')
+        + (isOk ? ' 無錯誤' : ` ${errorCount} 個錯誤`);
+
+      let errHtml = '';
+      if (errorCount > 0) {
+        errHtml = '<div style="margin-bottom:10px;">';
+        for (const e of jsErrors) {
+          errHtml += `
+            <div class="subtest fail">
+              <div class="st-title">❌ ${esc(e.msg)}</div>
+              ${e.url ? `<div class="row"><div class="key">檔案</div><div class="val">${esc(e.url)}</div></div>` : ''}
+              ${e.line ? `<div class="row"><div class="key">行號</div><div class="val">第 ${esc(e.line)} 行, 第 ${esc(e.col)} 欄</div></div>` : ''}
+              ${e.error ? `<div class="row"><div class="key">堆疊</div><div class="val" style="font-size:10px;">${esc(e.error).substring(0, 500)}</div></div>` : ''}
+            </div>
+          `;
+        }
+        errHtml += '</div>';
+      }
+
+      bodyEl.innerHTML = `
+        ${errHtml}
+        <div style="margin-bottom:8px;font-weight:600;">已載入 JS 檔案 (${scripts.length})：</div>
+        <div class="js-file-list">
+          ${scripts.map(s => {
+            const fn = s.split('/').pop();
+            const isVer = fn.includes('?v=');
+            return '<div>' + (isVer ? '<span class="pass">' : '') + esc(fn) + (isVer ? '</span>' : '') + '</div>';
+          }).join('')}
+        </div>
+        <div style="margin:10px 0 8px;font-weight:600;">已載入 CSS 檔案 (${csses.length})：</div>
+        <div class="js-file-list">
+          ${csses.map(s => '<div>' + esc(s.split('/').pop()) + '</div>').join('')}
+        </div>
+      `;
+      return isOk ? 'pass' : 'fail';
+    }
+  },
+
+  // 7. 版本核對
+  {
+    id: 'version',
+    title: '7. 版本核對',
+    run: async function(bodyEl, statusEl) {
+      statusEl.innerHTML = '⏳ 核對中...';
+
+      // 從 script/link 標籤抽取 ?v=
+      const verSet = new Set();
+      document.querySelectorAll('script[src], link[href]').forEach(el => {
+        const src = el.src || el.href;
+        const m = src.match(/[?&]v=([^&]+)/);
+        if (m) verSet.add(m[1]);
+      });
+      const versions = Array.from(verSet);
+      const clientVer = versions.length > 0 ? versions[0] : 'unknown';
+      const multiVer = versions.length > 1;
+
+      // 伺服器版本
+      let serverVer = 'n/a';
+      if (window._healthData && window._healthData.version) {
+        serverVer = window._healthData.version;
+      } else {
+        try {
+          const r = await fetch('./api/health', { cache: 'no-store' });
+          if (r.ok) {
+            const d = await r.json();
+            serverVer = d.version || 'n/a';
+          }
+        } catch(e) {}
+      }
+
+      const match = clientVer === serverVer;
+      statusEl.innerHTML = statusIcon(match ? 'pass' : 'warn')
+        + (match ? ' 版本一致' : ' 版本不一致');
+
+      bodyEl.innerHTML = `
+        <div class="row"><div class="key">客戶端版本 (?v=)</div><div class="val">${esc(clientVer)}${multiVer ? ' <span class="warn">(多個版本: ' + esc(versions.join(', ')) + ')</span>' : ''}</div></div>
+        <div class="row"><div class="key">伺服器版本</div><div class="val">${esc(serverVer)}</div></div>
+        <div class="row"><div class="key">是否一致</div><div class="val ${match ? 'pass' : 'warn'}">${match ? '✅ 一致' : '⚠️ 不一致 (可能有快取)'}</div></div>
+        <div class="row"><div class="key">頁面 URL</div><div class="val">${esc(location.href)}</div></div>
+        <div class="row"><div class="key">User Agent</div><div class="val" style="font-size:11px;">${esc(navigator.userAgent.substring(0, 100))}...</div></div>
+      `;
+      return match ? 'pass' : 'warn';
+    }
+  },
+];
+
+// ============================================================
+//  圖片載入 helper
+// ============================================================
+function loadImage(url) {
+  return new Promise(function(resolve) {
+    const img = new Image();
+    img.onload = function() { resolve({ ok: true, w: img.naturalWidth, h: img.naturalHeight, status: '200 OK' }); };
+    img.onerror = function() { resolve({ ok: false, w: 0, h: 0, status: 'error' }); };
+    img.src = url;
+  });
+}
+
+// ============================================================
+//  渲染
+// ============================================================
+function renderSections() {
+  const container = document.getElementById('sections');
+  container.innerHTML = tests.map((t, i) => `
+    <div class="section" id="sec-${t.id}" data-collapsed="false">
+      <div class="section-header" onclick="toggleSection('${t.id}')">
+        <span class="arrow">▼</span>
+        <span class="icon" id="icon-${t.id}">⏳</span>
+        <span class="title">${t.title}</span>
+        <span class="status" id="status-${t.id}">待測試</span>
+      </div>
+      <div class="section-body" id="body-${t.id}">
+        <div style="color:#666;">點擊「重新測試」開始診斷...</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleSection(id) {
+  const sec = document.getElementById('sec-' + id);
+  sec.classList.toggle('collapsed');
+}
+
+function updateErrorSection() {
+  const bodyEl = document.getElementById('body-js');
+  const statusEl = document.getElementById('status-js');
+  if (bodyEl && statusEl && tests.find(t => t.id === 'js')) {
+    tests.find(t => t.id === 'js').run(bodyEl, statusEl);
+  }
+}
+
+// ============================================================
+//  執行所有測試
+// ============================================================
+async function runAllTests() {
+  // 重置
+  for (const t of tests) {
+    const icon = document.getElementById('icon-' + t.id);
+    const status = document.getElementById('status-' + t.id);
+    const body = document.getElementById('body-' + t.id);
+    if (icon) icon.textContent = '⏳';
+    if (status) status.textContent = '測試中...';
+    if (body) body.innerHTML = '<div style="color:#666;">正在測試...</div>';
+  }
+
+  // 按順序執行
+  for (const t of tests) {
+    try {
+      const bodyEl = document.getElementById('body-' + t.id);
+      const statusEl = document.getElementById('status-' + t.id);
+      const iconEl = document.getElementById('icon-' + t.id);
+      const result = await t.run(bodyEl, statusEl);
+      if (iconEl) {
+        iconEl.innerHTML = result === 'pass' ? '<span class="pass">✅</span>'
+                         : result === 'fail' ? '<span class="fail">❌</span>'
+                         : '<span class="warn">⚠️</span>';
+      }
+    } catch (e) {
+      console.error('Test', t.id, 'failed:', e);
+      const statusEl = document.getElementById('status-' + t.id);
+      const bodyEl = document.getElementById('body-' + t.id);
+      if (statusEl) statusEl.innerHTML = '<span class="fail">❌ 執行錯誤</span>';
+      if (bodyEl) bodyEl.innerHTML = `<div class="fail">${esc(e.message)}</div>`;
+    }
+  }
+}
+
+// 初始化
+renderSections();
+runAllTests();
+</script>
+</body>
+</html>

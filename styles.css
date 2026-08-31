@@ -580,12 +580,13 @@ img { display: block; pointer-events: none; }
   overflow: hidden;
   cursor: crosshair;
 }
-.scene-bg {
-  position: absolute; inset: 0;
-  background-size: cover;
-  background-position: center;
-  transition: background-image 0.5s ease;
-}
+ .scene-bg {
+   position: absolute; inset: 0;
+   background: radial-gradient(ellipse at 50% 40%, #1a120a 0%, #0a0604 100%);
+   background-size: cover;
+   background-position: center;
+   transition: background-image 0.5s ease;
+ }
 .iso-canvas {
   position: absolute;
   inset: 0;

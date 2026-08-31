@@ -7119,8 +7119,12 @@ function _initCore() {
   // 绑定事件
   bindEvents();
 
-  // 載入地圖
-  loadMap('village');
+  // v3.1.1：用 GS.currentMap 載入地圖，不再硬編碼 village
+  //  若 currentMap 為空或無效，才 fallback 到 village
+  const allMaps = getAllMaps();
+  const initialMap = (GS.currentMap && allMaps[GS.currentMap]) ? GS.currentMap : 'village';
+  console.log('[Init] 初始地圖:', initialMap, '(currentMap=' + GS.currentMap + ')');
+  loadMap(initialMap);
 
   GS.player.x = worldW / 2;
   GS.player.y = worldH * 0.75;

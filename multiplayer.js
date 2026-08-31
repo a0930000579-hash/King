@@ -178,15 +178,36 @@
               window.setOfflineMode(false);
             }
 
-            // v2.7.2：若伺服器支援 WebSocket，優先連 WS（失敗自動 fallback long-poll）
-            if (data.webSocket || data.socketIo) {
-              tryWebSocket().catch(e => {
-                console.warn('[Multi] WebSocket 連線失敗，降級 long-poll:', e.message);
-                useWebSocket = false;
-                // v2.7.7：WS 失敗仍然在線（走 LP），不切離線
-                startPollLoop();
-              });
-            } else {
+             // v2.7.2：若伺服器支援 WebSocket，優先連 WS（失敗自動 fallback long-poll）
+             // v3.1.1：失敗時自動重試最多 3 次，再降級 LP
+             if (data.webSocket || data.socketIo) {
+               let wsRetryCount = 0;
+               const MAX_WS_RETRIES = 3;
+               function tryWsWithRetry() {
+                 return tryWebSocket().catch(e => {
+                   wsRetryCount++;
+                   console.warn('[Multi] WebSocket 第', wsRetryCount, '次連線失敗:', e.message);
+                   if (wsRetryCount < MAX_WS_RETRIES) {
+                     const delay = 1000 * wsRetryCount;
+                     console.warn('[Multi] ', delay, 'ms 後重試 WS (剩餘', MAX_WS_RETRIES - wsRetryCount, '次)');
+                     return new Promise(function(resolve) { setTimeout(resolve, delay); })
+                       .then(tryWsWithRetry);
+                   } else {
+                     console.warn('[Multi] WS 連線失敗已達', MAX_WS_RETRIES, '次，降級 long-poll');
+                     _wsFailureReason = e.message || 'WS 連線失敗';
+                     useWebSocket = false;
+                     // v3.1.1：在遊戲畫面上顯示 WS 失敗提示
+                     if (typeof window.addLog === 'function') {
+                       try {
+                         addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
+                       } catch(_) {}
+                     }
+                     startPollLoop();
+                   }
+                 });
+               }
+               tryWsWithRetry().catch(function() { /* 最終失敗也不中斷連線流程 */ });
+             } else {
               // 沒有 WS 支援，直接 long-poll
               _wsFailureReason = '伺服器未啟用 WebSocket';
               startPollLoop();
@@ -309,19 +330,28 @@
           if (!useWebSocket) {
             startPollLoop();
           }
-          // 若 WS 已連線，也 join_map
-          if (ws && wsConnected) {
-            wsSend({
-              type: 'join_map',
-              serverId,
-              mapId,
-              playerId: myPlayerId,
-              name: GS.player?.name || 'Player',
-              classId: GS.player?.classId || 'warrior',
-              level: GS.player?.level || 1,
-              charIdx: currentCharIdx,
-            });
-          }
+           // v3.1.1：WS 連上後，若已 joinWorld 完成（有 myPlayerId），立即發 join_map
+           //  修復：WS auth 比 LP join 慢時，auth_ok 後不會自動 join_map 的 bug
+           if (ws && wsConnected) {
+             wsSend({
+               type: 'join_map',
+               serverId,
+               mapId,
+               playerId: myPlayerId,
+               name: GS.player?.name || 'Player',
+               classId: GS.player?.classId || 'warrior',
+               level: GS.player?.level || 1,
+               charIdx: currentCharIdx,
+               x: GS.player?.x,
+               y: GS.player?.y,
+               hp: GS.player?.hp,
+               maxHp: GS.player?.hpMax,
+               mp: GS.player?.mp,
+               maxMp: GS.player?.mpMax,
+               nation: GS.player?.nation || '',
+             });
+             console.log('[Multi] WS join_map 已發送 (LP join 完成後)');
+           }
           console.info('[Multi] 加入地圖 ' + mapId + '，在線 ' + ((data.others||[]).length+1) + ' 人');
           return data;
         } else {
@@ -531,41 +561,33 @@
         reject(new Error(_wsFailureReason));
         return;
       }
-      // v2.8.3：修復 DO / HTTPS 環境 WS 連線
-      //  - 協議用 window.location.protocol 判斷（頁面是 https 就用 wss）
-      //  - path 以頁面當前 pathname 為基準，確保反向代理子路徑正確
-      //  - 詳細 log 方便排查 upgrade 結果
-      let wsUrl;
-      try {
-        // 以當前頁面的 origin 為準，避免 serverUrl 與頁面不一致
-        const pageProto = (typeof window !== 'undefined' && window.location && window.location.protocol) || 'http:';
-        const pageHost = (typeof window !== 'undefined' && window.location && window.location.host) || '';
-        const pagePath = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
+       // v3.1.1：修復 DO 子路徑部署下 WS URL 錯誤
+       //  邏輯：用頁面 pathname 當基礎，去掉最後的 .html 檔名
+       //  確保 wss://host/app/app_xxx/ 與頁面同源
+       let wsUrl;
+       try {
+         const pageProto = (typeof window !== 'undefined' && window.location && window.location.protocol) || 'http:';
+         const pageHost = (typeof window !== 'undefined' && window.location && window.location.host) || '';
+         const pagePath = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
 
-        const wsProto = pageProto === 'https:' ? 'wss:' : 'ws:';
+         const wsProto = pageProto === 'https:' ? 'wss:' : 'ws:';
 
-        // 如果伺服器有明確指定 wsTransportPath 且非 '/'，用它
-        // 否則用頁面 pathname 作為基礎（DO 子路徑部署時正確）
-        let targetPath;
-        if (_wsPath && _wsPath !== '/') {
-          targetPath = _wsPath.startsWith('/') ? _wsPath : '/' + _wsPath;
-        } else {
-          // 用頁面 pathname，去掉 index.html / gm.html 等檔名，保留子路徑
-          if (pagePath.endsWith('.html')) {
-            targetPath = pagePath.substring(0, pagePath.lastIndexOf('/') + 1);
-          } else {
-            targetPath = pagePath.endsWith('/') ? pagePath : pagePath + '/';
-          }
-        }
-        // 確保以 / 結尾
-        if (!targetPath.endsWith('/')) targetPath += '/';
+         // 以頁面 pathname 為基礎（DO 子路徑部署時正確）
+         let targetPath = pagePath;
+         // 如果是 .html 檔，去掉檔名，保留目錄
+         if (targetPath.endsWith('.html')) {
+           targetPath = targetPath.substring(0, targetPath.lastIndexOf('/') + 1);
+         }
+         // 確保以 / 結尾
+         if (!targetPath.endsWith('/')) targetPath += '/';
 
-        wsUrl = wsProto + '//' + pageHost + targetPath;
-        console.log('[WS] v2.9.1 完整連線資訊:');
-        console.log('[WS]   URL =', wsUrl);
-        console.log('[WS]   proto=', pageProto, 'host=', pageHost, 'pathname=', pagePath);
-        console.log('[WS]   serverUrl=', serverUrl, 'wsPath=', _wsPath);
-        console.log('[WS]   authToken 長度=', authToken ? authToken.length : 0, '前10字=', authToken ? authToken.substring(0,10)+'...' : '空');
+         wsUrl = wsProto + '//' + pageHost + targetPath;
+         console.log('[WS] v3.1.1 WebSocket URL 建構:');
+         console.log('[WS]   頁面 URL =', window.location.href);
+         console.log('[WS]   proto=', pageProto, 'host=', pageHost, 'pathname=', pagePath);
+         console.log('[WS]   WS URL =', wsUrl);
+         console.log('[WS]   wsTransportPath(health)=', _wsPath || '(空，預設 /)');
+         console.log('[WS]   authToken 長度=', authToken ? authToken.length : 0);
       } catch(e) {
         // fallback：簡單字串取代
         wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/?$/, '/');
@@ -614,13 +636,14 @@
         }
       };
 
-      ws.onclose = (event) => {
-        console.warn('[WS] ⚠️ onclose 觸發');
-        console.warn('[WS]   code=', event.code);
-        console.warn('[WS]   reason=', event.reason || '(空)');
-        console.warn('[WS]   wasClean=', event.wasClean);
-        console.warn('[WS]   readyState=', ws?.readyState);
-        wsConnected = false;
+       ws.onclose = function(event) {
+         console.warn('[WS] ⚠️ onclose 觸發');
+         console.warn('[WS]   code=', event.code);
+         console.warn('[WS]   reason=', event.reason || '(空)');
+         console.warn('[WS]   wasClean=', event.wasClean);
+         console.warn('[WS]   readyState=', ws?.readyState);
+         console.warn('[WS]   URL=', wsUrl);
+         wsConnected = false;
         _wsLastCloseCode = event.code;
         _wsLastCloseReason = event.reason || '';
         if (!resolved) {
@@ -661,30 +684,42 @@
             console.log('[WS] 認證成功，account=', msg.account, '(WebSocket 模式啟用)');
             resolve(msg);
           }
-          // 若已經在地圖中，重新 join
-          if (currentMapId && myPlayerId) {
-            wsSend({
-              type: 'join_map',
-              serverId: currentServerId,
-              mapId: currentMapId,
-              playerId: myPlayerId,
-              name: GS?.player?.name || 'Player',
-              classId: GS?.player?.classId || 'warrior',
-              level: GS?.player?.level || 1,
-              charIdx: currentCharIdx,
-            });
-          }
+           // 若已經在地圖中，重新 join
+           if (currentMapId && myPlayerId) {
+             wsSend({
+               type: 'join_map',
+               serverId: currentServerId,
+               mapId: currentMapId,
+               playerId: myPlayerId,
+               name: GS?.player?.name || 'Player',
+               classId: GS?.player?.classId || 'warrior',
+               level: GS?.player?.level || 1,
+               charIdx: currentCharIdx,
+               x: GS?.player?.x,
+               y: GS?.player?.y,
+               hp: GS?.player?.hp,
+               maxHp: GS?.player?.hpMax,
+               mp: GS?.player?.mp,
+               maxMp: GS?.player?.mpMax,
+               nation: GS?.player?.nation || '',
+             });
+             console.log('[WS] auth_ok 後自動 join_map, mapId=' + currentMapId + ', playerId=' + myPlayerId);
+           }
           return;
-        } else if (msg.type === 'auth_fail') {
-          console.error('[WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
-          clearTimeout(timeout);
-          _wsFailureReason = 'auth 失敗: ' + (msg.reason || msg.error || 'token 無效');
-          if (!resolved) {
-            resolved = true;
-            reject(new Error(_wsFailureReason));
-          }
-          return;
-        }
+         } else if (msg.type === 'auth_fail') {
+           console.error('[WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
+           clearTimeout(timeout);
+           _wsFailureReason = 'auth 失敗: ' + (msg.reason || msg.error || 'token 無效');
+           // v3.1.1：auth 失敗時顯示明確提示給玩家（不是只在 console）
+           if (typeof window.addLog === 'function') {
+             try { addLog('system', '⚠️ 伺服器驗證失敗：' + (msg.reason || msg.error || 'token 無效')); } catch(e) {}
+           }
+           if (!resolved) {
+             resolved = true;
+             reject(new Error(_wsFailureReason));
+           }
+           return;
+         }
 
         // 其他事件走統一處理
         handleWsMessage(msg);
