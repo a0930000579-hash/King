@@ -4643,6 +4643,13 @@ const MONSTER_SPRITES = {
   monster_scorpion:   SPRITE.monster_scorpion,
   monster_wraith:     SPRITE.monster_wraith,
   monster_gargoyle:   SPRITE.monster_gargoyle,
+  // v2.8.4：Boss 精靈納入統一入口（getMonsterSprite 能直接解析 boss_xxx）
+  boss_orc:          SPRITE.boss_orc,
+  boss_demon:        SPRITE.boss_demon,
+  boss_dragon:       SPRITE.boss_dragon,
+  boss_death_knight: SPRITE.boss_death_knight,
+  boss_baphomet:     SPRITE.boss_baphomet,
+  boss_demon_lord:   SPRITE.boss_demon_lord,
   // 新增變種（用現有精靈+濾鏡區分）
   darkorc:  SPRITE.orc,
   icewolf:  SPRITE.wolf,
@@ -5979,7 +5986,8 @@ const ITEM_ICON_MAP = {
 
 // 取得裝備圖標 URL（按類型，白色品質預設；推薦使用 getEquipRarityIcon(type, rarity)）
 function getEquipIcon(type) {
-  return EQUIP_ICON_MAP[type] || EQUIP_ICON_MAP.weapon;
+  // v2.8.4：統一入口，全部走 getEquipRarityIcon（白色品質）
+  return getEquipRarityIcon(type, 'white');
 }
 
 const EQUIP_TYPES = {
@@ -13038,22 +13046,28 @@ function loadMap(mapId) {
   }
 
   // v2.8.0：切圖前完整清場（確保 DOM/狀態不殘留）
+  const oldMap = GS.currentMap;
   if (GS.currentMap && GS.currentMap !== mapId) {
     fullMapCleanup();
     // v2.8.3：防衛檢查 — 確保玩家 sprite 在 fullMapCleanup 後依然存在
     // 理論上 .world-unit:not(.player-sprite):not(.hero) 不會刪玩家，但保險起見重建
+    let playerExists = false;
     if (worldLayer && typeof createPlayerSprite === 'function') {
       const existing = worldLayer.querySelector('[data-id="player"]');
       if (!existing) {
         console.warn('[MapSwitch] 玩家 sprite 在 fullMapCleanup 後遺失，重新建立');
         createPlayerSprite();
+        playerExists = !!worldLayer.querySelector('[data-id="player"]');
       } else {
+        playerExists = true;
         // 把玩家元素移到 worldLayer 最後（確保在最上層）
         if (existing.parentNode === worldLayer) {
           worldLayer.appendChild(existing);
         }
       }
     }
+    // v2.8.4：結構化切圖 log
+    console.log(`[MAP_SWITCH] from=${oldMap} to=${mapId} playerExists=${playerExists}`);
   }
 
   GS.currentMap = mapId;
@@ -13454,7 +13468,11 @@ function spawnMapBoss(map, slot = 'boss') {
   m.bossSlot = slot;
   m.bossMapId = map.id;
   const oldSprite = m.sprite;
-  m.sprite = SPRITE['boss_' + boss.type] || SPRITE.boss_demon;
+  // v2.8.4：統一走 getMonsterSprite（Boss 類型加 boss_ 前綴也能正確解析）
+  const bossSpriteKey = 'boss_' + boss.type;
+  m.sprite = getMonsterSprite(bossSpriteKey);
+  // 如果 boss_ 前綴沒命中（fallback 到普通怪），再嘗試 boss_demon 作為終極兜底
+  if (!m.sprite || !m.sprite.useImg) m.sprite = SPRITE.boss_demon;
   // 如果Boss sprite是多帧而原怪物sprite不是（或反之），需要重建DOM以匹配帧结构
   const wasMulti = oldSprite && oldSprite.multiFrame;
   const isMulti = m.sprite && m.sprite.multiFrame;
@@ -18510,7 +18528,7 @@ function renderCodexPage() {
         ${items.map(item => {
           const own = equipIds.has(item.id);
           const rarityInfo = RARITY_CONFIG[item.rarity];
-          const iconUrl = ITEM_ICONS[item.type] || ITEM_ICONS.weapon;
+          const iconUrl = getEquipRarityIcon(item.type, item.rarity);
           return `
             <div class="codex-card rarity-${item.rarity} ${own ? '' : 'locked'}" data-id="${item.id}" data-type="equip">
               <div class="codex-card-inner">
@@ -19002,7 +19020,7 @@ function showCodexDetail(id, type) {
     if (!item) return;
     rarity = item.rarity;
     stats = item.baseStats || item.stats || {};
-    const iconUrl = EQUIP_ICON_MAP[item.type] || ITEM_ICONS.weapon;
+    const iconUrl = getEquipRarityIcon(item.type, item.rarity);
     spriteHtml = owned
       ? `<img src="${iconUrl}" style="width:80px;height:80px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6))"/>`
       : `<div style="width:80px;height:80px;background:#222;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#555;font-size:32px">?</div>`;
@@ -21738,7 +21756,18 @@ function renderShopPage() {
     { key: 'gem', name: '鑽石商店' },
   ];
   const items = shopItems[activeTab] || [];
-  const renderIcon = (url) => `<img src="${url}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt=""/><div class="item-icon-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:24px;color:#c0a060">◆</div>`;
+  // v2.8.4：裝備 icon 統一走 getEquipRarityIcon（單一入口，確保不會顯示拼貼圖）
+  const renderIcon = (item) => {
+    let url;
+    if (item.itemType === 'equipment' || item.slot) {
+      url = getEquipRarityIcon(item.slot || item.type || 'weapon', item.rarity || 'white');
+    } else if (item.icon) {
+      url = item.icon;
+    } else {
+      url = getItemIconUrl(item);
+    }
+    return `<img src="${url}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt=""/><div class="item-icon-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:24px;color:#c0a060">◆</div>`;
+  };
   
   // 取得當前選擇數量（預設1）
   if (!GS.shopQty) GS.shopQty = {};
@@ -21760,7 +21789,7 @@ function renderShopPage() {
           <div class="shop-item-row" data-shop-item="${item.id}" data-tab="${activeTab}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:linear-gradient(90deg, rgba(40,28,16,0.85), rgba(25,18,10,0.7));border:1px solid rgba(240,192,64,0.25);border-radius:8px;box-shadow:inset 0 0 20px rgba(0,0,0,0.3)">
             <!-- 左側：商品圖標 -->
             <div class="shop-item-icon-wrap" style="width:52px;height:52px;border-radius:8px;border:2px solid var(--gold-dark);background:radial-gradient(circle at 50% 40%, rgba(30,22,14,0.95), rgba(10,7,4,0.98));display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.6), inset 0 0 8px rgba(240,192,64,0.15)">
-              ${renderIcon(item.icon)}
+              ${renderIcon(item)}
             </div>
             <!-- 中間：商品名稱 + 描述 + 價格 -->
             <div style="flex:1;min-width:0">
@@ -24992,7 +25021,8 @@ function spawnSiegeDefenders(castle) {
 
 // 渲染守城NPC精靈（使用8幀多幀精靈圖，與普通怪物一致）
 function renderSiegeDefenderSprite(guard) {
-  const sp = guard.sprite || SPRITE[guard.spriteKey] || SPRITE.warrior;
+  // v2.8.4：統一走 getMonsterSprite，不直接碰 SPRITE
+  const sp = getMonsterSprite(guard.sprite || guard.spriteKey || 'bandit');
   const isMultiFrame = !!(sp.multiFrame);
 
   const elDiv = document.createElement('div');

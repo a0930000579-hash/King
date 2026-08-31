@@ -818,19 +818,35 @@ async function handleApi(req, res, pathname, query) {
     const assetCount = assetIndex.size;
     const backend = db.getBackend();
     const dbErr = db.getLastError ? db.getLastError() : null;
+    // v2.8.4：線上人數明細（WS + LP 分開計，總數去重）
+    let wsCount = 0, lpCount = 0;
+    try { wsCount = (wsServer && typeof wsServer.getOnlineCount === 'function') ? wsServer.getOnlineCount() : 0; } catch(e) {}
+    try { lpCount = onlinePlayers ? onlinePlayers.size : 0; } catch(e) {}
+    const uniqueAccounts = new Set();
+    try {
+      if (wsServer && typeof wsServer.getOnlinePlayers === 'function') {
+        for (const c of wsServer.getOnlinePlayers()) { if (c.account) uniqueAccounts.add(c.account); }
+      }
+    } catch(e) {}
+    for (const p of onlinePlayers.values()) { uniqueAccounts.add(p.account); }
+    const onlineCount = uniqueAccounts.size;
+
     return sendJson(res, 200, {
       status: 'online',
       server: 'monarch-blade',
-      version: '2.8.3',
-      build: '2.8.3-2608311200',
-      buildId: '2.8.3-2608311200',
+      version: '2.8.4',
+      build: '2.8.4-2608311800',
+      buildId: '2.8.4-2608311800',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
-      socketIo: true,
+      socketIo: false,
       webSocket: true,
       wsTransportPath: '/',
       longPoll: true,
+      wsCount,
+      lpCount,
+      onlineCount,
       dbBackend: backend,
       dbError: dbErr,
       assetCount: assetCount,
@@ -1759,17 +1775,42 @@ async function handleApi(req, res, pathname, query) {
     }
   }
 
-  // GET /api/gm/online - GM 查看線上玩家
+  // GET /api/gm/online - GM 查看線上玩家（WS + LP 合併，去重）
   if (req.method === 'GET' && pathname === '/api/gm/online') {
     if (!(await verifyGM(req))) return sendJson(res, 403, { error: 'unauthorized' });
-    const list = Array.from(onlinePlayers.values()).map(p => ({
-      socketId: p.socketId,
-      account: p.account,
-      name: p.name,
-      serverId: p.serverId,
-      mapId: p.mapId,
-      level: p.level,
-    }));
+    const seen = new Map(); // playerId -> entry
+    // 1. LP 玩家
+    for (const p of onlinePlayers.values()) {
+      seen.set(p.account + ':' + (p.charIdx ?? 0), {
+        socketId: p.socketId,
+        account: p.account,
+        name: p.name,
+        serverId: p.serverId,
+        mapId: p.mapId,
+        level: p.level,
+        transport: 'longpoll',
+      });
+    }
+    // 2. WS 玩家（優先覆蓋，因為 WS 是主通道）
+    try {
+      if (wsServer && typeof wsServer.getOnlinePlayers === 'function') {
+        const wsList = wsServer.getOnlinePlayers() || [];
+        for (const c of wsList) {
+          if (!c.account) continue;
+          const pid = c.playerId || (c.account + ':' + (c.charIdx ?? 0));
+          seen.set(pid, {
+            socketId: 'ws:' + c.wsId,
+            account: c.account,
+            name: c.name,
+            serverId: c.serverId,
+            mapId: c.mapId,
+            level: c.level,
+            transport: 'websocket',
+          });
+        }
+      }
+    } catch(e) { console.warn('[GM] online WS 列表取得失敗:', e.message); }
+    const list = Array.from(seen.values());
     return sendJson(res, 200, { ok: true, players: list, count: list.length });
   }
 
