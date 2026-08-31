@@ -1113,6 +1113,8 @@
     for (const id of remotePlayers.keys()) {
       if (!seen.has(id)) removeRemotePlayer(id);
     }
+    // v3.1.4：更新在線人數顯示（包含自己）
+    try { _setOnlineCount(players.length + 1); } catch(e) {}
   }
 
   // v2.8.0：取得附近玩家數（給 UI 顯示「附近玩家:N」）
@@ -1367,36 +1369,82 @@
     }
   }
 
-   // v3.1.2：遊戲畫面左上角 WS 狀態標籤（肉眼可見，不只在 console）
-   let _wsBadgeEl = null;
-   function _ensureWsBadge() {
-     if (_wsBadgeEl) return;
-     try {
-       const badge = document.createElement('div');
-       badge.id = 'ws-status-badge';
-       badge.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99999;padding:2px 6px;font-size:10px;font-family:monospace;border-radius:3px;pointer-events:none;opacity:0.85;';
-       badge.textContent = 'WS離線';
-       badge.style.background = '#333';
-       badge.style.color = '#aaa';
-       document.body.appendChild(badge);
-       _wsBadgeEl = badge;
-     } catch(e) {}
-   }
-   function _updateWsBadge(state, label) {
-     _ensureWsBadge();
-     if (!_wsBadgeEl) return;
-     _wsBadgeEl.textContent = label || 'WS';
-     const colors = {
-       online:    { bg: '#1a4d2e', color: '#4ecdc4' },
-       connecting:{ bg: '#3d3d1a', color: '#ffd93d' },
-       error:     { bg: '#4d1a1a', color: '#ff6b6b' },
-       offline:   { bg: '#333',    color: '#aaa' },
-       reconnecting: { bg: '#3d3d1a', color: '#ffd93d' },
-     };
-     const c = colors[state] || colors.offline;
-     _wsBadgeEl.style.background = c.bg;
-     _wsBadgeEl.style.color = c.color;
-   }
+  // v3.1.4：遊戲畫面左上角 網路狀態標籤（增大字體、顯示在線人數、點擊查看診斷）
+  let _wsBadgeEl = null;
+  let _wsBadgeState = 'offline';
+  let _wsBadgeLabel = '離線';
+  let _wsOnlineCount = 0;
+  let _wsTransport = '?';
+  function _ensureWsBadge() {
+    if (_wsBadgeEl) return;
+    try {
+      const badge = document.createElement('div');
+      badge.id = 'ws-status-badge';
+      badge.style.cssText = 'position:fixed;top:8px;left:8px;z-index:999999;padding:5px 10px;font-size:13px;font-weight:600;font-family:monospace;border-radius:6px;cursor:pointer;opacity:0.92;box-shadow:0 2px 8px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.15);user-select:none;';
+      badge.textContent = '網路:離線 0人';
+      badge.style.background = '#333';
+      badge.style.color = '#aaa';
+      badge.title = '點擊查看網路診斷';
+      badge.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _showNetworkDiagnostics();
+      });
+      document.body.appendChild(badge);
+      _wsBadgeEl = badge;
+    } catch(e) {}
+  }
+  function _updateWsBadge(state, label) {
+    _ensureWsBadge();
+    if (!_wsBadgeEl) return;
+    _wsBadgeState = state;
+    _wsBadgeLabel = label || state;
+    const transport = useWebSocket ? 'WS' : (pollingActive ? 'LP' : '?');
+    _wsTransport = transport;
+    const count = _wsOnlineCount;
+    const stateLabel = {
+      online: '在線', connecting: '連線中', error: '錯誤',
+      offline: '離線', reconnecting: '重連中',
+    }[state] || state;
+    _wsBadgeEl.textContent = transport + ':' + stateLabel + ' ' + count + '人';
+    const colors = {
+      online:    { bg: '#1a4d2e', color: '#4ecdc4' },
+      connecting:{ bg: '#3d3d1a', color: '#ffd93d' },
+      error:     { bg: '#4d1a1a', color: '#ff6b6b' },
+      offline:   { bg: '#333',    color: '#aaa' },
+      reconnecting: { bg: '#3d3d1a', color: '#ffd93d' },
+    };
+    const c = colors[state] || colors.offline;
+    _wsBadgeEl.style.background = c.bg;
+    _wsBadgeEl.style.color = c.color;
+  }
+  function _setOnlineCount(n) {
+    _wsOnlineCount = n || 0;
+    _updateWsBadge(_wsBadgeState, _wsBadgeLabel);
+  }
+  function _showNetworkDiagnostics() {
+    try {
+      const info = [
+        '===== 網路診斷 =====',
+        '狀態: ' + _wsBadgeLabel,
+        '傳輸: ' + _wsTransport,
+        '在線人數: ' + _wsOnlineCount,
+        'WS已連線: ' + (wsConnected ? '是' : '否'),
+        'WS使用中: ' + (useWebSocket ? '是' : '否'),
+        'Long-Poll使用中: ' + (pollingActive ? '是' : '否'),
+        '伺服器URL: ' + (serverUrl || '未設定'),
+        'Token長度: ' + (authToken ? authToken.length : 0),
+        'WS失敗原因: ' + (_wsFailureReason || '無'),
+        '當前地圖: ' + (currentMapId || '無'),
+        '我的PlayerID: ' + (myPlayerId || '無'),
+        '遠端玩家數: ' + (remotePlayers ? remotePlayers.size : 0),
+        '',
+        '提示: 如果顯示LP但WS應該可用，請檢查console中[GAME-WS]日誌',
+      ].join('\n');
+      alert(info);
+    } catch(e) {
+      alert('網路診斷錯誤: ' + e.message);
+    }
+  }
 
    // ========== 暴露到全域 ==========
   window.MultiplayerClient = MultiplayerClient;
