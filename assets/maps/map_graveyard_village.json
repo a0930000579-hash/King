@@ -1,0 +1,36 @@
+{
+  "mapId": "graveyard_village",
+  "name": "亡者驿站",
+  "type": "safe",
+  "width": 2496,
+  "height": 1664,
+  "background": "/assets/map/darkforest.jpg",
+  "spawn": { "x": 1200, "y": 900 },
+  "safeZone": { "x": 1200, "y": 832, "radius": 600 },
+  "levelMin": 15,
+  "levelMax": 30,
+  "castle": "dion",
+  "teleports": [
+    {
+      "id": "tp_to_graveyard",
+      "x": 2400, "y": 832, "radius": 100,
+      "targetMap": "graveyard",
+      "targetX": 120, "targetY": 832
+    }
+  ],
+  "monsterSpawns": [],
+  "npcs": [
+    { "npcId": "shop",           "x": 220,  "y": 740, "name": "補給商人" },
+    { "npcId": "blacksmith",     "x": 960,  "y": 740, "name": "鐵匠" },
+    { "npcId": "warehouse",      "x": 400,  "y": 880, "name": "倉庫管理員" },
+    { "npcId": "inn",            "x": 580,  "y": 800, "name": "破舊旅館" },
+    { "npcId": "bulletin",       "x": 740,  "y": 720, "name": "佈告欄" },
+    { "npcId": "quest",          "x": 860,  "y": 840, "name": "守墓人" },
+    { "npcId": "dungeon_master", "x": 1100, "y": 900, "name": "墓地守護者" },
+    { "npcId": "premium_shop",   "x": 1000, "y": 760, "name": "高級商人" },
+    { "npcId": "main_quest",     "x": 500,  "y": 720, "name": "亡靈法師" },
+    { "npcId": "guard",          "x": 260,  "y": 660, "name": "驅魔衛兵" },
+    { "npcId": "guard",          "x": 1060, "y": 680, "name": "驅魔衛兵" }
+  ],
+  "bgm": "/assets/audio/bgm_graveyard.mp3"
+}

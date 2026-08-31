@@ -7226,22 +7226,11 @@ function _initCore() {
     try { initMultiplayerUI(); } catch (e) { console.warn('initMultiplayerUI error:', e); }
   }
 
-  // ===== v2.0 自動連線多人伺服器 =====
-  if (window.MultiplayerClient && window.AuthSystem) {
-    try {
-      const server = AuthSystem.getCurrentServer();
-      if (server) {
-        const serverUrl = window.location.origin;
-        MultiplayerClient.connect(serverUrl, (window.AuthSystem && AuthSystem.getToken) ? AuthSystem.getToken() : '').then(() => {
-          console.log('[v2.0] 自動連線成功:', serverUrl);
-        }).catch(err => {
-          console.warn('[v2.4.0] 自動連線失敗，重新連線中:', err.message);
-        });
-      }
-    } catch (e) { console.warn('[v2.0] auto connect error:', e); }
-  }
+   // v3.1.3：移除重複自動連線 — auth.js 的 startGameCommon() 已是權威連線入口
+   //  這裡再連一次會造成 connect→disconnect→connect 抖動，導致狀態混亂
+   //  保留這段註解做為歷史標記，連線流程統一由 auth.js 管理
 
-} // end of _initCore
+ } // end of _initCore
 
 function worldMaxW() { return Math.max(worldW, CAMERA.worldWidth); }
 function worldMaxH() { return Math.max(worldH, CAMERA.worldHeight); }
@@ -13368,11 +13357,14 @@ function _renderNPCsFromConfig(npcs) {
   }
 }
 
-// 暴露給 multiplayer.js 的全域函數
-window.handleMapChange = handleMapChange;
+ // 暴露給 multiplayer.js 的全域函數
+ window.handleMapChange = handleMapChange;
 
-  npcLayer.innerHTML = '';
-  if (!map.npcs) return;
+ // 從本地 map 配置渲染 NPC（loadMap 時呼叫）
+ function renderNPCs(map) {
+   if (!el.npcLayer) return;
+   el.npcLayer.innerHTML = '';
+   if (!map.npcs) return;
   // NPC id 到 SPRITE key 的映射
   const npcSpriteMap = {
     shop: 'npc_shop',

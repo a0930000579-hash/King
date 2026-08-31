@@ -73,6 +73,8 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '..', 'data');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const ASSETS_DIR = path.resolve(ROOT_DIR, 'assets');
+const MAPS_DIR = path.resolve(__dirname, 'maps');
+const PUBLIC_MAPS_DIR = path.resolve(ASSETS_DIR, 'maps');
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2MB
 const GM_ACCOUNT = '19811013';
 const GM_PASSWORD = process.env.GM_PASSWORD || '19811013';
@@ -198,6 +200,33 @@ function buildAssetIndex(dir) {
  }
  cleanManifest();
  regenerateManifestFromDisk();
+ // v3.1.3：regenerate 完成後，清理後的 manifest 等同 regenerated（全部磁碟存在）
+ //  確保 /api/diag 中的 manifestMissingOnDisk 反映真實情況（=0）
+ cleanedManifest = regeneratedManifest;
+ cleanedManifestMissing = 0;
+ cleanedManifestOriginal = Object.keys(regeneratedManifest || {}).length;
+
+ // v3.1.3：把地圖配置複製到公開目錄 assets/maps/，讓客戶端可直接 fetch
+ //  與 /api/map/:mapId 形成雙重備份，確保一定能讀到地圖配置
+ (function copyMapsToPublic() {
+   try {
+     if (!fs.existsSync(MAPS_DIR)) { console.log('[Maps] MAPS_DIR 不存在，跳過複製'); return; }
+     if (!fs.existsSync(PUBLIC_MAPS_DIR)) fs.mkdirSync(PUBLIC_MAPS_DIR, { recursive: true });
+     const files = fs.readdirSync(MAPS_DIR).filter(f => f.endsWith('.json'));
+     let copied = 0;
+     for (const f of files) {
+       const src = path.join(MAPS_DIR, f);
+       const dst = path.join(PUBLIC_MAPS_DIR, f);
+       try {
+         fs.copyFileSync(src, dst);
+         copied++;
+       } catch(e) { console.warn('[Maps] 複製失敗:', f, e.message); }
+     }
+     console.log('[Maps] 已複製 ' + copied + ' 個地圖配置到 assets/maps/');
+   } catch(e) {
+     console.warn('[Maps] 複製地圖配置失敗:', e.message);
+   }
+ })();
  function countFiles(dir) {
   if (!fs.existsSync(dir)) return 0;
   let n = 0;
@@ -926,9 +955,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '3.1.2',
-      build: '3.1.2-2608311500',
-      buildId: '3.1.2-2608311500',
+      version: '3.1.3',
+      build: '3.1.3-2609011500',
+      buildId: '3.1.3-2609011500',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -953,8 +982,37 @@ async function handleApi(req, res, pathname, query) {
     return;
   }
 
-  // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
-  if (req.method === 'GET' && pathname === '/api/diag') {
+   // v3.1.3：地圖配置 API — 讀取 server/maps/map_${mapId}.json
+   //  解決地圖配置放在 server/maps/ 非公開目錄，客戶端 fetch 不到的問題
+   if (req.method === 'GET' && pathname.startsWith('/api/map/')) {
+     const mapId = pathname.substring('/api/map/'.length).replace(/[^a-zA-Z0-9_-]/g, '');
+     if (!mapId) {
+       res.statusCode = 400;
+       res.end(JSON.stringify({ error: 'mapId 為空' }));
+       return;
+     }
+     const mapPath = path.join(MAPS_DIR, 'map_' + mapId + '.json');
+     if (!fs.existsSync(mapPath)) {
+       res.statusCode = 404;
+       res.setHeader('Content-Type', 'application/json; charset=utf-8');
+       res.end(JSON.stringify({ error: '地圖不存在: ' + mapId }));
+       return;
+     }
+     try {
+       const raw = fs.readFileSync(mapPath, 'utf8');
+       res.statusCode = 200;
+       res.setHeader('Content-Type', 'application/json; charset=utf-8');
+       res.setHeader('Cache-Control', 'public, max-age=3600');
+       res.end(raw);
+     } catch(e) {
+       res.statusCode = 500;
+       res.end(JSON.stringify({ error: '讀取地圖失敗: ' + e.message }));
+     }
+     return;
+   }
+
+   // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
+   if (req.method === 'GET' && pathname === '/api/diag') {
     const sampleRel = '1YPfWK8cKg.png';
     const samplePath = path.join(ASSETS_DIR, sampleRel);
     const sampleExists = fs.existsSync(samplePath);
