@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  // v2.4.0：Long-Poll 多人連線客戶端（零依賴，純 fetch）
+  // v4.1.0：WebSocket ONLY 多人連線客戶端（完全移除 Long-Poll）
   const STATUS = {
     OFFLINE: 'offline',
     LOADING: 'loading',
@@ -59,10 +59,7 @@
   }
 
   const remotePlayers = new Map();
-  let pollAbortController = null;
-  let pollRunning = false;
-  let reconnectDelay = 1000;
-  let lastPollTime = 0;
+  // v4.1.0：WS ONLY — 已移除所有 Long-Poll 相關變量
   let lastUpdateTime = 0;
   const UPDATE_THROTTLE = 100; // v2.7.5：50ms → 100ms（10Hz），降低廣播頻寬
 
@@ -140,7 +137,7 @@
       currentWorldH = h || 1664;
     },
 
-    // 連線：token 從遊戲端傳入（與 cookie 同步）
+    // v4.1.0：連線 — 嚴格只走 WebSocket，完全移除 LP 模式
      connect(url, token) {
        const u = (url || '').trim();
        if (!u) {
@@ -151,15 +148,11 @@
        MultiplayerClient.saveServerUrl(u);
        authToken = token || '';
 
-       console.log('[GAME-WS] ===== MultiplayerClient.connect() 被呼叫 =====');
+       console.log('[GAME-WS] ===== MultiplayerClient.connect() v4.1.0 (WS ONLY) =====');
        console.log('[GAME-WS]   serverUrl =', serverUrl);
        console.log('[GAME-WS]   token 長度 =', authToken ? authToken.length : 0);
 
        // 先斷開舊的
-      if (pollAbortController) {
-        try { pollAbortController.abort(); } catch(e) {}
-        pollAbortController = null;
-      }
       if (ws) {
         try { ws.close(); } catch(e) {}
         ws = null;
@@ -167,89 +160,32 @@
       }
       clearAllRemotePlayers();
       myPlayerId = null;
-      reconnectDelay = 1000;
       wsReconnectDelay = 1000;
       useWebSocket = false;
       setStatus(STATUS.CONNECTING);
+      _updateWsBadge('connecting', 'WS連線中');
 
-       // 用 health 檢查伺服器是否活著，並決定是否用 WS
-       // v3.1.2：即使 health 失敗也嘗試 WS（有些平台 proxy 會擋 /api/health 但 WS upgrade 正常）
-       return fetch(serverUrl + '/api/health')
-         .then(r => r.json())
-         .then(data => {
-           if (data && data.status === 'online') {
-             setStatus(STATUS.ONLINE);
-             console.info('[Multi] 伺服器連線成功:', data.version, 'WS=', data.webSocket || data.socketIo);
-             // v2.7.10：從伺服器取得 WS upgrade 路徑（預設 '/'）
-             _wsPath = data.wsTransportPath || '/';
-
-             // v2.7.7：伺服器在線就先把 AI 模式切到 server（防止本地 AI 偷生）
-             if (typeof window.setServerOnline === 'function') {
-               window.setServerOnline(currentServerId || 'pending', null);
-             }
-             if (typeof window.setOfflineMode === 'function') {
-               window.setOfflineMode(false);
-             }
-
-             // v2.7.2：若伺服器支援 WebSocket，優先連 WS（失敗自動 fallback long-poll）
-             // v3.1.2：health 有 webSocket 才連；沒有的話直接 LP
-             if (data.webSocket || data.socketIo) {
-               _startWsWithRetry();
-             } else {
-               _wsFailureReason = '伺服器未啟用 WebSocket';
-               startPollLoop();
-             }
-           } else {
-             // health 回來但 status 不是 online → 仍嘗試 WS + LP
-             console.warn('[Multi] health 回應異常，仍嘗試 WS 連線');
-             _startWsWithRetry();
-             startPollLoop();
-           }
-           // 若已有玩家資料，自動 join
-           if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
-             return MultiplayerClient.joinWorld().then(result => {
-               if (!result) {
-                 console.warn('[Multi] joinWorld 失敗，退回離線模式');
-                 setStatus(STATUS.ERROR);
-                 if (typeof window.setOfflineMode === 'function') {
-                   window.setOfflineMode(true);
-                 }
-               }
-               return result;
-             });
-           }
-           return null;
-         })
-         .catch(err => {
-           // v3.1.2：health fetch 失敗（可能被 proxy 擋）也不要放棄 — 仍嘗試 WS + LP
-           console.warn('[Multi] /api/health 失敗:', err.message, '仍嘗試 WS 連線');
-           setStatus(STATUS.CONNECTING);
-           _updateWsBadge('connecting', 'WS連線中');
-           _startWsWithRetry();
-           startPollLoop();
-           if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
-             return MultiplayerClient.joinWorld().catch(() => null);
-           }
-           return null;
-         });
+      // v4.1.0：直接建立 WebSocket 連線，不經過 health，不啟動 LP
+      return _startWsWithRetry().then(() => {
+        console.log('[GAME-WS] ✅ WebSocket 連線成功');
+        return { ok: true, transport: 'websocket' };
+      }).catch(err => {
+        console.error('[GAME-WS] ❌ WebSocket 連線失敗:', err.message);
+        setStatus(STATUS.ERROR);
+        _wsFailureReason = err.message || 'WebSocket 連線失敗';
+        if (typeof window.setOfflineMode === 'function') {
+          window.setOfflineMode(true);
+        }
+        throw err;
+      });
      },
 
 
+    // v4.1.0：WS ONLY
     disconnect() {
-      if (currentMapId) {
-        try {
-          if (ws && wsConnected) {
-            wsSend({ type: 'leave_map' });
-          } else {
-            apiPost('/api/mp/leave', { mapId: currentMapId, charIdx: currentCharIdx });
-          }
-        } catch(e) {}
+      if (currentMapId && ws && wsConnected) {
+        try { wsSend({ type: 'leave_map' }); } catch(e) {}
       }
-      if (pollAbortController) {
-        try { pollAbortController.abort(); } catch(e) {}
-        pollAbortController = null;
-      }
-      pollRunning = false;
       if (ws) {
         try { ws.close(); } catch(e) {}
         ws = null;
@@ -267,259 +203,130 @@
     },
 
     // 加入世界（從 auth token 推斷帳號）
-    // 加入世界（從 auth token 推斷帳號）
+    // v4.1.0：加入世界 — WS ONLY，只設置狀態，join_map由WebSocket auth_ok處理
     joinWorld(opts) {
       opts = opts || {};
       currentCharIdx = opts.charIdx ?? (GS.currentCharIdx ?? 0);
-      const mapId = opts.mapId || GS.currentMap || 'village_01';
-      // v2.7.3：優先從 opts 取，其次用已選伺服器（AuthSystem），最後才 fallback zeus
+      const mapId = opts.mapId || GS.currentMap || 'village';
       let serverId = opts.serverId;
       if (!serverId && typeof AuthSystem !== 'undefined' && AuthSystem.getCurrentServer) {
         const srv = AuthSystem.getCurrentServer();
         if (srv && srv.id) serverId = srv.id;
       }
       if (!serverId && GS.currentServerId) serverId = GS.currentServerId;
-      if (!serverId) serverId = currentServerId || 'zeus';
+      if (!serverId) serverId = currentServerId || 'monarch-blade';
       currentServerId = serverId;
-      // 在線模式先告訴 game.js 進入在線狀態，避免本地隨機生成 AI
+      currentMapId = mapId;
+      if (!myPlayerId) {
+        const account = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? AuthSystem.getAccount() : (GS.player?.id || 'unknown');
+        myPlayerId = account + ':' + currentCharIdx;
+      }
       if (typeof window.setServerOnline === 'function') {
         window.setServerOnline(serverId, mapId);
       }
-      return apiPost('/api/mp/join', {
-        mapId,
-        serverId,
-        charIdx: currentCharIdx,
-      }).then(data => {
-        if (data.ok) {
-          myPlayerId = data.playerId;
-          currentMapId = mapId;
-          currentServerId = serverId;
-          // 初始化遠端玩家列表
-          if (data.others && Array.isArray(data.others)) {
-            data.others.forEach(p => {
-              if (p.playerId !== myPlayerId) {
-                addOrUpdateRemotePlayer({
-                  id: p.playerId,
-                  name: p.name,
-                  class: p.classId,
-                  level: p.level,
-                  x: p.x, y: p.y, dir: p.dir,
-                  transform: p.transformId,
-                });
-              }
-            });
-          }
-          // v2.7.3：同步伺服器級 AI 列表（權威）—— 收到才標記在線
-          if (typeof window.setServerAIs === 'function') {
-            window.setServerAIs((data.ais && Array.isArray(data.ais)) ? data.ais : [], serverId, mapId);
-          }
-          // v2.7.3：回傳 instanceId 給客戶端診斷用
-          if (data.instanceId && typeof window._setServerInstanceId === 'function') {
-            window._setServerInstanceId(data.instanceId);
-          }
-          setStatus(STATUS.ONLINE);
-          // v2.7.2：WS 模式下不啟動 long-poll（WS 已處理所有事件）
-          if (!useWebSocket) {
-            startPollLoop();
-          }
-           // v3.1.1：WS 連上後，若已 joinWorld 完成（有 myPlayerId），立即發 join_map
-           //  修復：WS auth 比 LP join 慢時，auth_ok 後不會自動 join_map 的 bug
-           if (ws && wsConnected) {
-             wsSend({
-               type: 'join_map',
-               serverId,
-               mapId,
-               playerId: myPlayerId,
-               name: GS.player?.name || 'Player',
-               classId: GS.player?.classId || 'warrior',
-               level: GS.player?.level || 1,
-               charIdx: currentCharIdx,
-               x: GS.player?.x,
-               y: GS.player?.y,
-               hp: GS.player?.hp,
-               maxHp: GS.player?.hpMax,
-               mp: GS.player?.mp,
-               maxMp: GS.player?.mpMax,
-               nation: GS.player?.nation || '',
-             });
-             console.log('[Multi] WS join_map 已發送 (LP join 完成後)');
-           }
-          console.info('[Multi] 加入地圖 ' + mapId + '，在線 ' + ((data.others||[]).length+1) + ' 人');
-          return data;
-        } else {
-          throw new Error(data.error || '加入失敗');
-        }
-        }).catch(err => {
-         console.warn('[Multi] joinWorld 失敗:', err.message);
-         // v2.8.2：join 失敗時標記離線，避免 health 成功但 join 失敗導致狀態假 ON
-         if (typeof window.setOfflineMode === 'function') window.setOfflineMode(true);
-         return null;
-       });
+      console.log('[GAME-WS] joinWorld 設置狀態: mapId=' + mapId + ' serverId=' + serverId + ' playerId=' + myPlayerId);
+      return Promise.resolve({ ok: true, mapId, serverId, playerId: myPlayerId });
     },
 
     // 切換地圖
+    // v4.1.0：WS ONLY — 切換地圖，發送WebSocket join_map
     enterMap(mapId, charIdx, worldW, worldH) {
       if (!mapId || mapId === currentMapId) return Promise.resolve();
-      // 先離開舊地圖
-      const oldMap = currentMapId;
       currentMapId = mapId;
       if (worldW) currentWorldW = worldW;
       if (worldH) currentWorldH = worldH;
       if (charIdx != null) currentCharIdx = charIdx;
-
-      // 清空遠端玩家
       clearAllRemotePlayers();
-
-      // 加入新地圖（v2.7.3：serverId 用當前伺服器，不再寫死 zeus）
-      const sId = currentServerId || (typeof AuthSystem !== 'undefined' && AuthSystem.getCurrentServer && AuthSystem.getCurrentServer()?.id) || 'zeus';
-      return apiPost('/api/mp/join', {
-        mapId,
-        serverId: sId,
-        charIdx: currentCharIdx,
-      }).then(data => {
-        if (data.ok) {
-          myPlayerId = data.playerId;
-          if (data.others && Array.isArray(data.others)) {
-            data.others.forEach(p => {
-              if (p.playerId !== myPlayerId) {
-                addOrUpdateRemotePlayer({
-                  id: p.playerId,
-                  name: p.name,
-                  class: p.classId,
-                  level: p.level,
-                  x: p.x, y: p.y, dir: p.dir,
-                  transform: p.transformId,
-                });
-              }
-            });
-          }
-          console.info('[Multi] 進入地圖 ' + mapId);
-          return data;
+      if (!myPlayerId) {
+        const account = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? AuthSystem.getAccount() : (GS.player?.id || 'unknown');
+        myPlayerId = account + ':' + currentCharIdx;
+      }
+      // v4.1.0：發送WebSocket join_map（<126字節，不會被DO proxy截斷）
+      if (useWebSocket && ws && wsConnected) {
+        try {
+          wsSend({
+            type: 'join_map',
+            mapId: mapId,
+            playerId: myPlayerId,
+            charIdx: currentCharIdx,
+          });
+          console.log('[GAME-WS] enterMap 發送 join_map: mapId=' + mapId);
+        } catch(e) {
+          console.error('[GAME-WS] enterMap join_map 發送失敗:', e.message);
         }
-        return null;
-      }).catch(() => null);
+      }
+      return Promise.resolve({ ok: true, mapId });
     },
 
     // 回報移動（節流）
+    // v4.1.0：WS ONLY
     reportMove(x, y, dir) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
       const now = Date.now();
       if (now - lastUpdateTime < UPDATE_THROTTLE) return;
       lastUpdateTime = now;
       const sPos = worldToServer(x, y);
-      // v2.7.2：優先走 WebSocket
       if (useWebSocket && ws && wsConnected) {
-        wsSend({
-          type: 'move',
-          x: sPos.x, y: sPos.y, dir: dir,
-        });
-      } else {
-        apiPost('/api/mp/update', {
-          mapId: currentMapId,
-          charIdx: currentCharIdx,
-          x: sPos.x,
-          y: sPos.y,
-          dir: dir,
-        }).catch(() => {
-          // 失敗不影響
-        });
+        wsSend({ type: 'move', x: sPos.x, y: sPos.y, dir: dir });
       }
     },
 
     // 回報血量變化
+    // v4.1.0：WS ONLY
     reportHp(hp, maxHp) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
       if (useWebSocket && ws && wsConnected) {
         wsSend({ type: 'hp', hp, maxHp });
-      } else {
-        apiPost('/api/mp/update', {
-          mapId: currentMapId,
-          charIdx: currentCharIdx,
-          hp, maxHp,
-        }).catch(() => {});
       }
     },
 
     // 回報變身變化
+    // v4.1.0：WS ONLY
     reportTransform(transformId) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
       if (useWebSocket && ws && wsConnected) {
         wsSend({ type: 'update_profile', transformId });
-      } else {
-        apiPost('/api/mp/update', {
-          mapId: currentMapId,
-          charIdx: currentCharIdx,
-          transformId,
-        }).catch(() => {});
       }
     },
 
+    // v4.1.0：WS ONLY
     sendChat(text, channel) {
-      if (status !== STATUS.ONLINE || !currentMapId) return;
+      if (status !== STATUS.ONLINE || !currentMapId) return Promise.reject(new Error('未連線'));
       if (useWebSocket && ws && wsConnected) {
         wsSend({ type: 'chat', text, channel: channel || 'map' });
         return Promise.resolve({ ok: true });
       }
-      return apiPost('/api/mp/chat', {
-        mapId: currentMapId,
-        charIdx: currentCharIdx,
-        channel: channel || 'map',
-        text,
-      });
+      return Promise.reject(new Error('WebSocket未連線'));
     },
 
+    // v4.1.0：WS ONLY
     attackMonster(monsterId, skillId, damage) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
-      apiPost('/api/mp/attack', {
-        mapId: currentMapId,
-        charIdx: currentCharIdx,
-        targetId: monsterId,
-        skillId,
-        damage,
-      }).catch(() => {});
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'attack', targetId: monsterId, skillId: skillId || 0, damage: damage || 0 });
+      }
     },
 
     // 回報攻擊（對伺服器 AI 造成傷害）
+    // v4.1.0：WS ONLY
     reportAttack(targetId, skillId, damage) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
-      const body = {
-        mapId: currentMapId,
-        serverId: currentServerId || 'zeus',
-        charIdx: currentCharIdx,
-        targetId,
-        skillId: skillId || 0,
-        damage: damage || 0,
-      };
-      // v2.7.5：優先走 WebSocket，否則走 LP
       if (useWebSocket && ws && wsConnected) {
-        wsSend({ type: 'attack', ...body });
-      } else {
-        apiPost('/api/mp/attack', body).catch(() => {});
+        wsSend({ type: 'attack', targetId, skillId: skillId || 0, damage: damage || 0 });
       }
     },
 
     // v2.7.9：位置上報（LP 模式下讓其他玩家看到自己移動）
     //  節流 100ms，避免過多 HTTP 請求；WS 模式下自動走 WS 通道
     _lastMoveSend: 0,
+    // v4.1.0：WS ONLY
     sendPosition(x, y, dir, opts) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
       const now = Date.now();
-      if (now - this._lastMoveSend < 100) return; // 100ms 節流（10Hz）
+      if (now - this._lastMoveSend < 100) return;
       this._lastMoveSend = now;
-      const body = {
-        mapId: currentMapId,
-        serverId: currentServerId || 'zeus',
-        charIdx: currentCharIdx,
-        x, y, dir,
-        hp: opts?.hp != null ? opts.hp : undefined,
-        transformId: opts?.transformId || undefined,
-      };
       if (useWebSocket && ws && wsConnected) {
-        // v4.0.7：簡化move消息，伺服器端已有mapId/playerId，只需發x/y/dir
         wsSend({ type: 'move', x, y, dir: dir || 0 });
-      } else {
-        // LP 模式：fire and forget，非阻塞
-        apiPost('/api/mp/update', body).catch(() => {});
       }
     },
 
@@ -538,7 +345,7 @@
     getWsFailureReason: getWsFailureReason,
   };
 
-  // ========== v2.7.2：WebSocket 連線（優先通道，失敗降級 long-poll） ==========
+  // ========== v4.1.0：WebSocket 連線（唯一通道，WS ONLY） ==========
   // v3.2.0：大訊息自動分片發送（每個chunk <126位元組，避免DO proxy截斷大幀）
   function _wsChunkId() {
     return 'c' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
@@ -573,10 +380,13 @@
   }
 
    // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
+   // v4.1.0：WS ONLY — 失敗直接報錯，不降級 LP
    function _startWsWithRetry() {
      if (typeof WebSocket === 'undefined') {
-       startPollLoop();
-       return;
+       const err = new Error('瀏覽器不支援 WebSocket');
+       setStatus(STATUS.ERROR);
+       _wsFailureReason = err.message;
+       return Promise.reject(err);
      }
      let wsRetryCount = 0;
      const MAX_WS_RETRIES = 3;
@@ -592,24 +402,25 @@
            return new Promise(function(resolve) { setTimeout(resolve, delay); })
              .then(tryWsWithRetry);
          } else {
-           console.warn('[GAME-WS] WS 連線失敗已達', MAX_WS_RETRIES, '次，降級 long-poll');
+           console.error('[GAME-WS] ❌ WS 連線失敗已達', MAX_WS_RETRIES, '次');
            _wsFailureReason = e.message || 'WS 連線失敗';
            useWebSocket = false;
-           _updateWsBadge('offline', 'WS離線');
+           _updateWsBadge('error', 'WS錯誤');
            if (typeof window.addLog === 'function') {
              try {
-               addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
+               addLog('system', '❌ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次）：' + (e.message || '未知'));
              } catch(_) {}
            }
-           startPollLoop();
+           setStatus(STATUS.ERROR);
+           return Promise.reject(e);
          }
        });
      }
-     tryWsWithRetry().catch(function() { /* 最終失敗也不中斷連線流程 */ });
+     return tryWsWithRetry();
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.7] tryWebSocket 開始');
+     _wsDiag('[v4.0.8] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -728,11 +539,9 @@
           reject(new Error(reason));
           return;
         }
-        // 意外斷線：嘗試重連，或降級 long-poll
+        // v4.1.0：WS ONLY — 意外斷線直接重連，不降級 LP
         if (useWebSocket && status === STATUS.ONLINE) {
-          console.warn('[WS] 線中斷，降級 long-poll 並嘗試重連');
-          useWebSocket = false;
-          startPollLoop();
+          console.warn('[WS] 線中斷，嘗試重連');
           scheduleWsReconnect();
         }
       };
@@ -757,19 +566,22 @@
              const joinServerId = currentServerId || 'monarch-blade';
              if (!currentMapId) currentMapId = joinMapId;
              if (!myPlayerId) myPlayerId = joinPlayerId;
-             // v4.0.5：縮小join_map消息到<126位元組，只發送必要欄位，不需要分片
+             // v4.0.8：進一步縮小join_map，移除名字/職業/等級（auth時伺服器端已知道）
+             // 確保即使中文名字也<126位元組，不會被DO proxy截斷
              const px = (typeof GS !== 'undefined' && GS?.player?.x != null) ? GS.player.x : 400;
              const py = (typeof GS !== 'undefined' && GS?.player?.y != null) ? GS.player.y : 400;
-             const pname = (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player';
-             const pclass = (typeof GS !== 'undefined' && GS?.player?.classId) ? GS.player.classId : 'warrior';
-             const plevel = (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1;
-             const joinMsg = { type: 'join_map', s: joinServerId, m: joinMapId, p: joinPlayerId, n: pname, c: pclass, l: plevel, x: px, y: py };
+             const joinMsg = { type: 'join_map', s: joinServerId, m: joinMapId, p: joinPlayerId, x: px, y: py };
              const joinLen = JSON.stringify(joinMsg).length;
-             _wsDiag('[v4.0.6] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
+             _wsDiag('[v4.0.8] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
              console.log('[GAME-WS] auth_ok 後發送 join_map, len=' + joinLen + ', mapId=' + joinMapId + ', msg=' + JSON.stringify(joinMsg));
-             const joinSent = wsSend(joinMsg);
-             console.log('[GAME-WS] join_map 發送結果: ' + (joinSent ? '成功' : '失敗'));
-             _wsDiag('[v4.0.6] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
+             try {
+               const joinSent = wsSend(joinMsg);
+               console.log('[GAME-WS] join_map 發送結果: ' + (joinSent ? '成功' : '失敗'));
+               _wsDiag('[v4.0.8] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
+             } catch(e) {
+               console.error('[GAME-WS] join_map 發送異常:', e);
+               _wsDiag('[v4.0.8] join_map發送異常: ' + e.message);
+             }
              resolve(msg);
            }
            return;
@@ -1021,80 +833,7 @@
     }
   }
 
-  // ========== Long-Poll 循環 ==========
-  function startPollLoop() {
-    if (pollRunning) return;
-    pollRunning = true;
-    pollLoop();
-  }
-
-  function pollLoop() {
-    if (status !== STATUS.ONLINE || !currentMapId) {
-      pollRunning = false;
-      return;
-    }
-    pollAbortController = new AbortController();
-    const since = Date.now();
-    const url = serverUrl + '/api/mp/poll?map=' + encodeURIComponent(currentMapId)
-      + '&server=' + encodeURIComponent(currentServerId || 'zeus')
-      + '&charIdx=' + currentCharIdx
-      + '&since=' + since;
-
-    fetch(url, {
-      method: 'GET',
-      headers: getAuthHeader(),
-      signal: pollAbortController.signal,
-      credentials: 'omit',
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data && data.ok && data.events) {
-        handlePollEvents(data.events);
-        // v2.8.0：處理 LP poll 返回的完整 players 快照（確保新加入/已離開玩家同步）
-        if (data.players && Array.isArray(data.players)) {
-          handlePlayerSnapshot(data.players);
-        }
-        // v2.7.3：long-poll 也推送 AI 快照（GM 調整 aiCount 時 LP 玩家同步生效）
-        if (data.ais && Array.isArray(data.ais) && typeof window.setServerAIs === 'function') {
-          window.setServerAIs(data.ais, currentServerId, currentMapId);
-        }
-        if (data.broadcasts && data.broadcasts.length) {
-          // 全服廣播處理
-          data.broadcasts.forEach(b => {
-            if (b.type === 'gm_broadcast' && onChatMessage) {
-              try {
-                onChatMessage({
-                  name: '【系統公告】',
-                  text: b.text || '',
-                  channel: 'system',
-                  system: true,
-                });
-              } catch(e) {}
-            }
-          });
-        }
-      }
-       reconnectDelay = 1000; // 重置退避
-        // v2.8.0：自適應輪詢 — 有事件則快輪，空回應則逐步拉長
-        const hasEvents = data.events && data.events.length > 0;
-        adjustPollInterval(hasEvents);
-        // 繼續下一輪
-        if (pollRunning) setTimeout(pollLoop, _lpPollInterval);
-    })
-    .catch(err => {
-      if (err.name === 'AbortError') {
-        pollRunning = false;
-        return;
-      }
-      console.warn('[Multi] poll 失敗:', err.message);
-      // 退避重連
-      if (pollRunning) {
-        if (status === STATUS.ONLINE) setStatus(STATUS.RECONNECTING);
-        setTimeout(pollLoop, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, 8000);
-      }
-    });
-  }
+  // v4.1.0：WS ONLY — Long-Poll 循環已完全移除
 
   function handlePollEvents(events) {
     if (!events || !events.length) return;
@@ -1486,7 +1225,7 @@
     if (!_wsBadgeEl) return;
     _wsBadgeState = state;
     _wsBadgeLabel = label || state;
-    const transport = useWebSocket ? 'WS' : (pollRunning ? 'LP' : '?');
+    const transport = useWebSocket ? 'WS' : 'OFF';
     _wsTransport = transport;
     const count = _wsOnlineCount;
     const stateLabel = {
@@ -1519,7 +1258,7 @@
         '在線人數: ' + _wsOnlineCount,
         'WS已連線: ' + (wsConnected ? '是' : '否'),
         'WS使用中: ' + (useWebSocket ? '是' : '否'),
-        'Long-Poll使用中: ' + (pollRunning ? '是' : '否'),
+        'Long-Poll使用中: 否 (v4.1.0 WS ONLY)',
         '伺服器URL: ' + (serverUrl || '未設定'),
         'Token長度: ' + (authToken ? authToken.length : 0),
         'Token前15: ' + (authToken ? authToken.substring(0,15) : '空'),
