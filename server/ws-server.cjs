@@ -798,19 +798,27 @@ function createWsServer(httpServer) {
     // v3.0.0：透過 game-world 加入，取得 AOI 快照
     const aiCount = msg.aiCount != null ? msg.aiCount : 8;
     const initLevel = msg.initLevel != null ? msg.initLevel : 1;
-    const snapshot = gameWorld.playerJoin(serverId, mapId, client.wsId, {
-      account: client.account,
-      name: client.name,
-      classId: client.classId,
-      level: client.level,
-      x: msg.x || 400,
-      y: msg.y || 400,
-      hp: msg.hp || 100,
-      maxHp: msg.maxHp || 100,
-      mp: msg.mp || 50,
-      maxMp: msg.maxMp || 50,
-      nation: msg.nation || '',
-    }, { aiCount, initLevel });
+    _wsLog('[WS-JOIN] 呼叫 gameWorld.playerJoin: serverId=' + serverId + ' mapId=' + mapId + ' wsId=' + client.wsId + ' account=' + client.account);
+    let snapshot;
+    try {
+      snapshot = gameWorld.playerJoin(serverId, mapId, client.wsId, {
+        account: client.account,
+        name: client.name,
+        classId: client.classId,
+        level: client.level,
+        x: msg.x || 400,
+        y: msg.y || 400,
+        hp: msg.hp || 100,
+        maxHp: msg.maxHp || 100,
+        mp: msg.mp || 50,
+        maxMp: msg.maxMp || 50,
+        nation: msg.nation || '',
+      }, { aiCount, initLevel });
+      _wsLog('[WS-JOIN] ✅ playerJoin成功, entities數=' + (snapshot.entities ? snapshot.entities.length : 0) + ' self=' + JSON.stringify(snapshot.self || {}).substring(0, 80));
+    } catch(e) {
+      _wsLog('[WS-JOIN] ❌ playerJoin異常: ' + e.message + ' ' + e.stack);
+      snapshot = { self: { id: client.playerId, x: msg.x || 400, y: msg.y || 400 }, entities: [], aoiRadius: 800 };
+    }
 
     // v3.1.0：一併回傳地圖配置（客戶端用於顯示傳送點、地圖尺寸等）
     const mapCfg = gameWorld.getMapConfig ? gameWorld.getMapConfig(mapId) : null;
