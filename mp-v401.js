@@ -608,7 +608,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.5] tryWebSocket 開始');
+     _wsDiag('[v4.0.6] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -764,19 +764,22 @@
              const plevel = (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1;
              const joinMsg = { type: 'join_map', s: joinServerId, m: joinMapId, p: joinPlayerId, n: pname, c: pclass, l: plevel, x: px, y: py };
              const joinLen = JSON.stringify(joinMsg).length;
-             _wsDiag('[v4.0.5] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
-             console.log('[GAME-WS] auth_ok 後發送 join_map, len=' + joinLen + ', mapId=' + joinMapId);
-             wsSend(joinMsg);
+             _wsDiag('[v4.0.6] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
+             console.log('[GAME-WS] auth_ok 後發送 join_map, len=' + joinLen + ', mapId=' + joinMapId + ', msg=' + JSON.stringify(joinMsg));
+             const joinSent = wsSend(joinMsg);
+             console.log('[GAME-WS] join_map 發送結果: ' + (joinSent ? '成功' : '失敗'));
+             _wsDiag('[v4.0.6] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
              resolve(msg);
            }
            return;
          } else if (msg.type === 'join_map_ok') {
            // v4.0.4：收到join_map_ok後才正式啟用WebSocket模式
+           console.log('[GAME-WS] 📩 收到 join_map_ok, entities數=' + (msg.entities||[]).length + ' self=' + JSON.stringify(msg.self||{}).substring(0,100));
            if (!wsConnected) {
              useWebSocket = true;
              wsConnected = true;
              _updateWsBadge('online', 'WS在線');
-             _wsDiag('[v4.0.4] 收到join_map_ok，WS模式正式啟用');
+             _wsDiag('[v4.0.6] 收到join_map_ok，WS模式正式啟用');
              console.log('[GAME-WS] 收到 join_map_ok，WebSocket 模式正式啟用');
            }
            return;

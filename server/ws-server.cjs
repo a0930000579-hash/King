@@ -623,11 +623,14 @@ function createWsServer(httpServer) {
     }
 
     if (!msg.type) return;
+    // v4.0.6：增加詳細日誌，確認每個消息都被正確處理
+    console.log('[WS-MSG] 收到消息 type=' + msg.type + ' len=' + JSON.stringify(msg).length + ' wsId=' + client.wsId + ' authenticated=' + client.authenticated);
     switch (msg.type) {
       case 'auth':
         handleAuth(client, msg);
         break;
       case 'join_map':
+        console.log('[WS-MSG] 處理 join_map, mapId=' + (msg.mapId||msg.m||'?') + ' playerId=' + (msg.playerId||msg.p||'?'));
         handleJoinMap(client, msg);
         break;
       case 'move':
@@ -748,10 +751,15 @@ function createWsServer(httpServer) {
   }
 
   function handleJoinMap(client, msg) {
-    if (!client.authenticated) return;
+    console.log('[WS-JOIN] handleJoinMap 被呼叫, wsId=' + client.wsId + ' authenticated=' + client.authenticated);
+    if (!client.authenticated) {
+      console.log('[WS-JOIN] ❌ 未認證，忽略 join_map');
+      return;
+    }
     // v4.0.5：支援縮短的欄位名稱（s→serverId, m→mapId, p→playerId, n→name, c→classId, l→level）
     const serverId = msg.serverId || msg.s || 'monarch-blade';
     const mapId = msg.mapId || msg.m || 'village';
+    console.log('[WS-JOIN] serverId=' + serverId + ' mapId=' + mapId + ' playerId=' + (msg.playerId||msg.p||'?'));
 
     // 離開舊地圖
     if (client.mapId && client.serverId) {
@@ -811,6 +819,7 @@ function createWsServer(httpServer) {
     }
     sendJson(client.socket, reply);
 
+    console.log('[WS-JOIN] ✅ 發送 join_map_ok, entities數=' + snapshot.entities.length + ' wsId=' + client.wsId + ' account=' + client.account);
     console.log(`[WS] ${client.account} 加入 ${serverId}/${mapId}, wsId=${client.wsId}, 初始實體數=${snapshot.entities.length}`);
   }
 
