@@ -899,6 +899,11 @@
         try {
           localStorage.setItem(STORAGE_TOKEN_KEY, data.token);
           localStorage.setItem(STORAGE_ACC_KEY, acc);
+          // v4.0.1：保存短wsSessionId用於WebSocket認證（避免大幀被proxy截斷）
+          if (data.wsSessionId) {
+            localStorage.setItem('mmo_ws_session_id', data.wsSessionId);
+            console.log('[Auth] 已保存wsSessionId:', data.wsSessionId);
+          }
           // 登入成功清除離線標記
           localStorage.removeItem(STORAGE_OFFLINE_KEY);
         } catch (e) {}

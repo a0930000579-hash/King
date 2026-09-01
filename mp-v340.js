@@ -661,33 +661,33 @@
 
        ws.onopen = () => {
          _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
-        // v3.5.0：先用HTTP POST認證獲取短sessionId，避免WebSocket大幀被截斷
-        _wsDiag('[v3.5.0] HTTP POST認證中...');
-        fetch(serverUrl + '/api/mp/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
+        const wsSessionId = localStorage.getItem('mmo_ws_session_id') || '';
+        if (wsSessionId) {
+          const authMsg = {
+            type: 'auth',
+            wsSessionId: wsSessionId,
+            name: GS?.player?.name || 'Player',
+          };
+          const msgLen = JSON.stringify(authMsg).length;
+          _wsDiag('[v4.0.1] 使用wsSessionId認證，訊息長度=' + msgLen + '位元組' + (msgLen < 126 ? ' (小幀，安全)' : ' (大幀，可能被截斷)'));
+          const sent = wsSend(authMsg);
+          _wsDiag('[v4.0.1] auth發送: ' + (sent ? '成功' : '失敗'));
+          // 一次性使用，發送後清除
+          localStorage.removeItem('mmo_ws_session_id');
+        } else {
+          // 後備：使用token（大幀，可能被proxy截斷）
+          _wsDiag('[v4.0.1] 無wsSessionId，使用token認證（大幀，可能被截斷）');
+          const authMsg = {
+            type: 'auth',
             token: authToken,
             name: GS?.player?.name || 'Player',
             classId: GS?.player?.classId || 'warrior',
             level: GS?.player?.level || 1,
-          }),
-        })
-        .then(r => r.json())
-        .then(authData => {
-          if (!authData.ok || !authData.sessionId) {
-            _wsDiag('[v3.5.0] HTTP認證失敗: ' + (authData.error || '未知'));
-            reject(new Error('HTTP認證失敗'));
-            return;
-          }
-          _wsDiag('[v3.5.0] HTTP認證成功 sessionId=' + authData.sessionId);
-          const sent = wsSend({ type: 'auth', sessionId: authData.sessionId });
-          _wsDiag('[v3.5.0] sessionId發送: ' + (sent ? '成功' : '失敗'));
-        })
-        .catch(e => {
-          _wsDiag('[v3.5.0] HTTP認證異常: ' + e.message);
-          reject(e);
-        });
+          };
+          const sent = wsSend(authMsg);
+          _wsDiag('[v4.0.1] token auth發送: ' + (sent ? '成功' : '失敗') + ' 訊息長度=' + JSON.stringify(authMsg).length);
+        }
        };
 
        ws.onerror = (event) => {

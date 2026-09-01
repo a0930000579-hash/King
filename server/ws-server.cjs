@@ -663,26 +663,34 @@ function createWsServer(httpServer) {
 
   function handleAuth(client, msg) {
     try {
-      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasSessionId=' + !!msg.sessionId);
+      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasWsSessionId=' + !!msg.wsSessionId + ' hasSessionId=' + !!msg.sessionId + ' hasToken=' + !!msg.token);
       let account = null;
-      // v3.5.0：優先使用sessionId（HTTP POST認證後返回的短ID）
-      if (msg.sessionId && global._wsSessions) {
+      // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
+      if (msg.wsSessionId && global._wsSessions) {
+        const sess = global._wsSessions.get(msg.wsSessionId);
+        if (sess) {
+          account = sess.account;
+          global._wsSessions.delete(msg.wsSessionId); // 一次性使用
+          _wsLog(' wsSessionId驗證成功 account=' + account);
+          console.log('[WS-Auth] wsSessionId驗證成功 account=' + account + ' wsId=' + client.wsId);
+        } else {
+          _wsLog(' wsSessionId無效或已過期');
+          console.log('[WS-Auth] wsSessionId無效或已過期 wsId=' + client.wsId);
+        }
+      }
+      // 後備1：舊版sessionId
+      if (!account && msg.sessionId && global._wsSessions) {
         const sess = global._wsSessions.get(msg.sessionId);
         if (sess) {
           account = sess.account;
-          msg.name = sess.name || msg.name;
-          msg.classId = sess.classId || msg.classId;
-          msg.level = sess.level || msg.level;
           global._wsSessions.delete(msg.sessionId);
           _wsLog(' sessionId驗證成功 account=' + account);
-        } else {
-          _wsLog(' sessionId無效或已過期');
         }
       }
-      // 後備：直接token驗證（相容舊版）
+      // 後備2：直接token驗證（相容舊版，但token大會被proxy截斷）
       if (!account && msg.token) {
         const token = msg.token || '';
-        _wsLog(' token長度=' + token.length);
+        _wsLog(' token長度=' + token.length + ' (大幀可能被proxy截斷)');
         account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
         _wsLog(' verifyToken 結果=' + (account || 'null'));
       }
