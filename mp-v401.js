@@ -379,6 +379,45 @@
     }
   }
 
+  // v4.1.2：客戶端分片接收緩衝區（對稱伺服器端的chunkBuffers）
+  const _clientChunkBuffers = new Map();
+
+  function _handleClientChunk(msg) {
+    try {
+      const cid = msg.c;
+      const idx = msg.i;
+      const total = msg.n;
+      const data = msg.d;
+      if (!cid || idx == null || !total || data == null) return null;
+      if (!_clientChunkBuffers.has(cid)) {
+        _clientChunkBuffers.set(cid, { parts: new Map(), total: total, received: 0 });
+      }
+      const buf = _clientChunkBuffers.get(cid);
+      buf.parts.set(idx, data);
+      buf.received++;
+      _wsDiag('[v4.1.2] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      if (buf.received >= total) {
+        let full = '';
+        for (let i = 0; i < total; i++) {
+          full += buf.parts.get(i) || '';
+        }
+        _clientChunkBuffers.delete(cid);
+        _wsDiag('[v4.1.2] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        try {
+          return JSON.parse(full);
+        } catch(e) {
+          console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
+          _wsDiag('[v4.1.2] chunk組裝後JSON失敗: ' + e.message);
+          return null;
+        }
+      }
+      return null; // 還沒收齊
+    } catch(e) {
+      console.error('[GAME-WS] 處理chunk異常:', e);
+      return null;
+    }
+  }
+
    // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
    // v4.1.0：WS ONLY — 失敗直接報錯，不降級 LP
    function _startWsWithRetry() {
@@ -549,6 +588,15 @@
       ws.onmessage = (ev) => {
         let msg;
         try { msg = JSON.parse(ev.data); } catch(e) { _wsDiag('❌ onmessage JSON解析失敗: ' + e.message); return; }
+        // v4.1.2：檢查是否為分片消息
+        if (msg && msg.t === '__c') {
+          const reassembled = _handleClientChunk(msg);
+          if (reassembled) {
+            msg = reassembled;
+          } else {
+            return; // 分片還沒收齊，等待
+          }
+        }
         if (!msg || !msg.type) { _wsDiag('❌ onmessage 無type欄位'); return; }
         _wsDiag('📥 收到訊息: type=' + msg.type + ' 長度=' + (ev.data ? ev.data.length : 0));
 
@@ -707,13 +755,62 @@
         }
         break;
       case 'aoi_update':
-        if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIUpdate === 'function') {
-          window.handleAOIUpdate(msg.entities);
+        // v4.1.2：正確處理aoi_update，更新remotePlayers和在線人數
+        try {
+          if (msg.entities && Array.isArray(msg.entities)) {
+            const playerEntities = msg.entities.filter(e => e && (e.type === 'player' || e.playerId || e.id));
+            // 更新remotePlayers
+            playerEntities.forEach(p => {
+              const pid = p.playerId || p.id;
+              if (pid && pid !== myPlayerId) {
+                addOrUpdateRemotePlayer({
+                  id: pid,
+                  name: p.name || 'Player',
+                  class: p.classId || p.class || 'warrior',
+                  level: p.level || 1,
+                  x: p.x, y: p.y, dir: p.dir || 0,
+                  transform: p.transformId || p.transform,
+                  moving: p.moving || false,
+                });
+              }
+            });
+            // 移除不在AOI範圍內的玩家
+            const visibleIds = new Set(playerEntities.map(p => p.playerId || p.id));
+            const toRemove = [];
+            remotePlayers.forEach((_, pid) => {
+              if (!visibleIds.has(pid)) toRemove.push(pid);
+            });
+            toRemove.forEach(pid => removeRemotePlayer(pid));
+            // 更新在線人數（可見玩家數+1自己）
+            const onlineCount = playerEntities.filter(p => (p.playerId || p.id) !== myPlayerId).length + 1;
+            if (typeof _setOnlineCount === 'function') {
+              _setOnlineCount(onlineCount);
+            }
+            // 通知game.js渲染
+            if (typeof window.handleAOIUpdate === 'function') {
+              window.handleAOIUpdate(msg.entities);
+            }
+            if (playerEntities.length > 0) {
+              console.log('[GAME-WS] aoi_update: 可見玩家數=' + (onlineCount-1) + ' 總實體數=' + msg.entities.length);
+            }
+          }
+        } catch(e) {
+          console.error('[GAME-WS] aoi_update處理異常:', e);
         }
         break;
       case 'aoi_leave':
-        if (msg.ids && Array.isArray(msg.ids) && typeof window.handleAOILeave === 'function') {
-          window.handleAOILeave(msg.ids);
+        // v4.1.2：正確處理aoi_leave，移除remotePlayers
+        try {
+          if (msg.ids && Array.isArray(msg.ids)) {
+            msg.ids.forEach(pid => {
+              if (pid !== myPlayerId) removeRemotePlayer(pid);
+            });
+            if (typeof window.handleAOILeave === 'function') {
+              window.handleAOILeave(msg.ids);
+            }
+          }
+        } catch(e) {
+          console.error('[GAME-WS] aoi_leave處理異常:', e);
         }
         break;
       // v3.1.0：Zone Server 地圖切換事件

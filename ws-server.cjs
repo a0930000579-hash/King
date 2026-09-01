@@ -572,12 +572,33 @@ function createWsServer(httpServer) {
     } catch (e) {}
   }
 
+  // v4.1.2：伺服器端分片發送（對稱客戶端的wsSend，避免大幀被DO proxy截斷）
+  function _serverChunkId() {
+    return 's' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  }
+
   function sendJson(socket, obj) {
     try {
       _wsLog(' sendJson: type=' + obj.type + ' socket.writable=' + socket.writable + ' socket.destroyed=' + socket.destroyed);
-      const data = Buffer.from(JSON.stringify(obj), 'utf8');
-      sendFrame(socket, 0x1, data);
-      _wsLog(' sendJson 完成, dataLen=' + data.length);
+      const raw = JSON.stringify(obj);
+      // v4.1.2：≥100字節的消息進行分片發送（留餘量給分片頭），避免被DO proxy截斷
+      if (raw.length < 100) {
+        const data = Buffer.from(raw, 'utf8');
+        sendFrame(socket, 0x1, data);
+        _wsLog(' sendJson 小幀直接發送, dataLen=' + data.length);
+      } else {
+        const cid = _serverChunkId();
+        const chunkSize = 50; // 每片數據大小，確保整個分片消息<126字節
+        const total = Math.ceil(raw.length / chunkSize);
+        _wsLog(' sendJson 大訊息分片 len=' + raw.length + ' -> ' + total + ' chunks, cid=' + cid);
+        for (let i = 0; i < total; i++) {
+          const part = raw.substring(i * chunkSize, (i + 1) * chunkSize);
+          const chunkMsg = JSON.stringify({ t: '__c', c: cid, i: i, n: total, d: part });
+          const chunkData = Buffer.from(chunkMsg, 'utf8');
+          sendFrame(socket, 0x1, chunkData);
+        }
+        _wsLog(' sendJson 分片發送完成, total=' + total + ' chunks');
+      }
     } catch(e) {
       _wsLog('[ERROR]  ❌ sendJson 異常:', e.message, e.stack);
     }
