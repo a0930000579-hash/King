@@ -21,7 +21,7 @@
   <!-- v2.5.9：紫變7隻+紅變7隻真8幀落地，補齊attack_3幀、eightFrame標誌 -->
   <script src="lang.js?v=3.3.0"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
-  <script src="mp-v401.js" defer></script>
+  <script src="mp-v401.js?v=4.2.0" defer></script>
   <script src="bug-report.js?v=3.3.0" defer></script>
   <script src="auth.js?v=3.3.0" defer></script>
   <style>
@@ -188,6 +188,48 @@
       100% { transform: translateX(-100%); }
     }
   </style>
+<style>
+/* v4.2.0：卡牌圓角處理 */
+.char-card, .char-card-empty, .nation-card, .item-slot, .skill-slot,
+.inventory-item, .equipment-slot, .quest-card, .shop-item {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+.char-card-portrait, .char-card-portrait-inner {
+  border-radius: 50% !important;
+}
+.char-card-portrait-ring {
+  border-radius: 50% !important;
+}
+/* 所有面板/彈窗圓角 */
+.modal, .panel, .dialog, .popup, .tooltip, .dropdown {
+  border-radius: 10px !important;
+}
+/* 按鈕圓角 */
+button, .btn, .char-card-enter, .char-card-delete {
+  border-radius: 8px !important;
+}
+/* 輸入框圓角 */
+input, select, textarea {
+  border-radius: 6px !important;
+}
+
+/* v4.2.0：精靈圖去背（CSS方式，不改圖）
+   白底圖用 multiply，黑底圖用 screen，自動偵測 */
+.unit-sprite-img, .sprite-frame-idle, .sprite-frame-walk, .sprite-frame-attack,
+.char-card-class-icon img, .skill-icon img, .item-icon img, .avatar-img {
+  mix-blend-mode: multiply; /* 去除白底 */
+  background: transparent !important;
+}
+/* 黑底圖覆蓋為screen */
+.sprite-dark-bg {
+  mix-blend-mode: screen !important;
+}
+/* 確保精靈圖容器透明 */
+.unit-sprite-wrap, .sprite-unit, .char-card-portrait-inner {
+  background: transparent !important;
+}
+</style>
 </head>
 <body>
   <!-- 首屏骨架：JS 載入前就顯示君主之刃介面，杜絕空白或容器骨架 -->
@@ -196,7 +238,7 @@
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v2.5.9</div>
+    <div class="splash-version">v4.2.0</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->

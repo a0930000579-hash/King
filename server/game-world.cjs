@@ -166,7 +166,7 @@ class Zone {
   // ===== 玩家加入 =====
   addPlayer(wsId, playerData) {
     const entity = {
-      id: 'p:' + wsId,
+      id: playerData.id || ('p:' + wsId),  // v4.2.0：優先使用客戶端playerId，保持兩端一致
       kind: 'player',
       wsId,
       account: playerData.account || '',

@@ -299,22 +299,20 @@ function _buildRevIndex(manifest) {
 }
 function loadAssetsManifest() {
   if (ASSETS_MANIFEST_LOADED) return Promise.resolve(ASSETS_MANIFEST);
-  // v2.8.5：用相對路徑，DO 子路徑部署也能正確載入（/app/xxx/ 下絕對路徑會 404）
-  const manifestPath = (window.__assetBase || 'assets/') + 'assets-manifest.json';
-  return fetch(manifestPath, { cache: 'no-cache' })
+  return fetch('/assets/assets-manifest.json', { cache: 'no-cache' })
     .then(r => { if (!r.ok) throw new Error('manifest HTTP ' + r.status); return r.json(); })
     .then(data => {
       ASSETS_MANIFEST = data || {};
       ASSETS_REV_INDEX = _buildRevIndex(ASSETS_MANIFEST);
       ASSETS_MANIFEST_LOADED = true;
-      console.log('[Assets] manifest 載入成功，路徑=' + manifestPath + '，共', Object.keys(ASSETS_MANIFEST).length, '筆');
+      console.log('[Assets] manifest 載入成功，共', Object.keys(ASSETS_MANIFEST).length, '筆；反向索引', Object.keys(ASSETS_REV_INDEX).length, '筆');
       return ASSETS_MANIFEST;
     })
     .catch(e => {
       ASSETS_MANIFEST = null;
       ASSETS_REV_INDEX = null;
       ASSETS_MANIFEST_LOADED = true;
-      console.warn('[Assets] manifest 載入失敗，路徑=' + manifestPath + '，使用分類目錄 fallback:', e.message);
+      console.warn('[Assets] manifest 缺失，使用分類目錄 fallback:', e.message);
       return null;
     });
 }
@@ -376,21 +374,12 @@ function assetUrl(id) {
       return '';
     }
   }
-  // v2.7.0：transform/ 路徑已全部去背為 PNG32，優先 .png
-  if (id.indexOf('transform/') !== -1) {
-    if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
-    return 'assets/' + pureId + '.png';
-  }
   // v2.4.0：語意路徑優先走 manifest；若不在 manifest，嘗試 jpg/png 並以 manifest 結果為準
-  // v2.8.5：monster/ /sprite/ /npc/ /hero/ 預設 .png（實際檔案都是 png），其他預設 .jpg
+  // 對於有 / 的語意路徑，優先嘗試 .jpg（多數美術圖為 jpg），其次 .png
   if (id.indexOf('/') !== -1) {
     // 有副檔名 → 直接拼接
     if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
-    // 沒副檔名 → 依路徑前綴決定預設副檔名
-    const lowId = id.toLowerCase();
-    if (lowId.startsWith('monster/') || lowId.startsWith('sprite/') || lowId.startsWith('npc/') || lowId.startsWith('hero/') || lowId.startsWith('pet/') || lowId.startsWith('transform/') || lowId.startsWith('boss/') || lowId.startsWith('warrior/') || lowId.startsWith('mage/') || lowId.startsWith('archer/')) {
-      return 'assets/' + pureId + '.png';
-    }
+    // 沒副檔名 → 先嘗試 .jpg（多數美術資源），fallback 到 .png（onerror 鏈接續）
     return 'assets/' + pureId + '.jpg';
   }
   const cat = getSpriteCategory(pureId);
@@ -453,25 +442,6 @@ function handleImgError(img) {
       img.style.visibility = 'visible';
       return;
     }
-    // v2.8.5：連 idle frame 自己都失敗 → 用暗色漸層 + 文字符號兜底，絕不顯示問號方塊
-    if (idleImg && idleImg === img) {
-      img.dataset.errFallback = 'sprite_fixed';
-      img.classList.add('frame-error');
-      // 把 img 換成 div 形式的兜底（避免顯示破損圖示）
-      const wrap = img.parentElement;
-      if (wrap) {
-        // 用 CSS 偽元素或直接替換為背景兜底
-        img.style.display = 'none';
-        const fallback = document.createElement('div');
-        fallback.className = 'sprite-error-fallback';
-        const unitName = unitEl ? unitEl.querySelector('.unit-name')?.textContent || '' : '';
-        const fallbackChar = unitName ? unitName.charAt(0) : '✦';
-        fallback.textContent = fallbackChar;
-        fallback.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:900;color:#e0c060;text-shadow:0 2px 4px rgba(0,0,0,0.8);background:linear-gradient(180deg,#2a1a0a,#1a0f05);border-radius:6px;font-size:18px;letter-spacing:1px';
-        wrap.appendChild(fallback);
-      }
-      return;
-    }
     // 連 idle 都找不到 → 最少要確保不透明不閃爍
     img.dataset.errFallback = 'sprite_fixed';
     img.classList.add('frame-error');
@@ -482,54 +452,7 @@ function handleImgError(img) {
 
   // 已經走過 CDN 還是失敗 → 最終 fallback
   // v2.4.0：不再隱藏圖片，改為顯示暗色漸層+文字兜底，絕不出現藍底問號或原生破圖
-  // v2.8.0：先嘗試 SVG 動態補圖（NPC/怪物/職業頭像），不行才用漸層兜底
   if (img.dataset.errFallback === 'cdn') {
-    // 嘗試 SVG 動態補圖
-    if (typeof window.PortraitGenerator !== 'undefined') {
-      const src = img.src || '';
-      const alt = img.alt || '';
-      let svgUrl = null;
-
-      // NPC 頭像
-      const npcMatch = src.match(/npc[_](\w+)/);
-      if (npcMatch) {
-        svgUrl = PortraitGenerator.npcPortraitToDataURL(npcMatch[1]);
-      }
-      // 怪物圖
-      if (!svgUrl) {
-        const mTypes = ['goblin','skeleton','orc','scorpion','bat','wolf','slime','ghost','spider',
-          'lizardman','ogre','stone_golem','demon','lich','cerberus','death_knight','dragon',
-          'bone_dragon','griffin','armored_bear','chimera','hydra','naga','lava_golem',
-          'direwolf','hellhound','braindevil','gargoyle','wraith','spider_queen',
-          'monster_direwolf','monster_scorpion','monster_hellhound','monster_braindevil',
-          'monster_gargoyle','monster_wraith'];
-        for (const mt of mTypes) {
-          if (src.indexOf(mt) !== -1) {
-            svgUrl = PortraitGenerator.monsterPortraitToDataURL(mt.replace('monster_', ''));
-            break;
-          }
-        }
-      }
-      // 職業頭像
-      if (!svgUrl) {
-        const cTypes = ['warrior','mage','archer','rogue','paladin','warlock',
-          'knight','sorcerer','assassin'];
-        for (const ct of cTypes) {
-          if (src.indexOf(ct) !== -1) {
-            svgUrl = PortraitGenerator.classPortraitToDataURL(ct);
-            break;
-          }
-        }
-      }
-
-      if (svgUrl) {
-        img.dataset.errFallback = 'svg';
-        img.style.visibility = 'visible';
-        img.style.opacity = '1';
-        img.src = svgUrl;
-        return;
-      }
-    }
     img.dataset.errFallback = 'fail';
     // 隱藏自身，但父層加上帶名稱的漸層占位
     img.style.visibility = 'hidden';
@@ -1282,145 +1205,135 @@ const SPRITE = {
 
   // ---------- 綠色精良（新變身） ----------
   forest_guardian: {
-    idle:    assetUrl('transform/green/forest_guardian/idle'),
-    walk:    assetUrl('transform/green/forest_guardian/walk_down'),
-    walk2:   assetUrl('transform/green/forest_guardian/walk_side'),
-    walk3:   assetUrl('transform/green/forest_guardian/walk_up'),
-    walk4:   assetUrl('transform/green/forest_guardian/walk_side'),
-    attack:  assetUrl('transform/green/forest_guardian/attack_1'),
-    attack2: assetUrl('transform/green/forest_guardian/attack_2'),
-    attack3: assetUrl('transform/green/forest_guardian/attack_3'),
-    hit:     assetUrl('transform/green/forest_guardian/hit'),
+    idle: assetUrl('1daCVmkSeg'),
+    walk: assetUrl('1daCVmkSeg'),
+    walk2: assetUrl('7rkggQtVva'),
+    walk3: assetUrl('7EMmttpXtt'),
+    walk4: assetUrl('rUD0POkJta'),
+    attack: assetUrl('rFGDkDOZRB'),
+    attack2: assetUrl('0yfRk9msfe'),
+    hit: assetUrl('u8C4FDxAzq'),
     color: '#205030', glow: '#60c080', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#80e0a0',
   },
   wind_spirit: {
-    idle:    assetUrl('transform/green/wind_spirit/idle'),
-    walk:    assetUrl('transform/green/wind_spirit/walk_down'),
-    walk2:   assetUrl('transform/green/wind_spirit/walk_side'),
-    walk3:   assetUrl('transform/green/wind_spirit/walk_up'),
-    walk4:   assetUrl('transform/green/wind_spirit/walk_side'),
-    attack:  assetUrl('transform/green/wind_spirit/attack_1'),
-    attack2: assetUrl('transform/green/wind_spirit/attack_2'),
-    attack3: assetUrl('transform/green/wind_spirit/attack_3'),
-    hit:     assetUrl('transform/green/wind_spirit/hit'),
+    idle: assetUrl('jkm5kDZZyi'),
+    walk: assetUrl('jkm5kDZZyi'),
+    walk2: assetUrl('s1b9NsVUNP'),
+    walk3: assetUrl('rY6t9P8rRQ'),
+    walk4: assetUrl('u5eemtHJJk'),
+    attack: assetUrl('Vn6NQ5HTfP'),
+    attack2: assetUrl('C3VstdT6dQ'),
+    hit: assetUrl('n7NjzUEXzg'),
     color: '#80c0c0', glow: '#c0f0f0', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#e0ffff',
   },
   green_dragon: {
-    idle:    assetUrl('transform/green/green_dragon/idle'),
-    walk:    assetUrl('transform/green/green_dragon/walk_down'),
-    walk2:   assetUrl('transform/green/green_dragon/walk_side'),
-    walk3:   assetUrl('transform/green/green_dragon/walk_up'),
-    walk4:   assetUrl('transform/green/green_dragon/walk_side'),
-    attack:  assetUrl('transform/green/green_dragon/attack_1'),
-    attack2: assetUrl('transform/green/green_dragon/attack_2'),
-    attack3: assetUrl('transform/green/green_dragon/attack_3'),
-    hit:     assetUrl('transform/green/green_dragon/hit'),
+    idle: assetUrl('Pl4PBEqsvs'),
+    walk: assetUrl('Pl4PBEqsvs'),
+    walk2: assetUrl('CH3Wf8rqcv'),
+    walk3: assetUrl('324delxMNK'),
+    walk4: assetUrl('jsmfG7UE6X'),
+    attack: assetUrl('StVW9D5cG3'),
+    attack2: assetUrl('KGGg348qE0'),
+    hit: assetUrl('lyhUAf9LY1'),
     color: '#204020', glow: '#80d060', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#a0e080',
   },
   druid: {
-    idle:    assetUrl('transform/green/druid/idle'),
-    walk:    assetUrl('transform/green/druid/walk_down'),
-    walk2:   assetUrl('transform/green/druid/walk_side'),
-    walk3:   assetUrl('transform/green/druid/walk_up'),
-    walk4:   assetUrl('transform/green/druid/walk_side'),
-    attack:  assetUrl('transform/green/druid/attack_1'),
-    attack2: assetUrl('transform/green/druid/attack_2'),
-    attack3: assetUrl('transform/green/druid/attack_3'),
-    hit:     assetUrl('transform/green/druid/hit'),
+    idle: assetUrl('g5u2Sq5agH'),
+    walk: assetUrl('g5u2Sq5agH'),
+    walk2: assetUrl('8uoto9Z1wj'),
+    walk3: assetUrl('y1G12v4mDa'),
+    walk4: assetUrl('3eq3rAYEYV'),
+    attack: assetUrl('pFJT2Xc5o8'),
+    attack2: assetUrl('Qd4BJClvxa'),
+    hit: assetUrl('UdeJSiOwgC'),
     color: '#405020', glow: '#a0c060', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#c0e080',
   },
   treant: {
-    idle:    assetUrl('transform/green/treant/idle'),
-    walk:    assetUrl('transform/green/treant/walk_down'),
-    walk2:   assetUrl('transform/green/treant/walk_side'),
-    walk3:   assetUrl('transform/green/treant/walk_up'),
-    walk4:   assetUrl('transform/green/treant/walk_side'),
-    attack:  assetUrl('transform/green/treant/attack_1'),
-    attack2: assetUrl('transform/green/treant/attack_2'),
-    attack3: assetUrl('transform/green/treant/attack_3'),
-    hit:     assetUrl('transform/green/treant/hit'),
+    idle: assetUrl('BIuGGAsYZh'),
+    walk: assetUrl('BIuGGAsYZh'),
+    walk2: assetUrl('vlURIemaSk'),
+    walk3: assetUrl('GI7RvSykGX'),
+    walk4: assetUrl('RqzkY6gSAe'),
+    attack: assetUrl('q2rm4wKK3M'),
+    attack2: assetUrl('F6ctRUeEtA'),
+    hit: assetUrl('fNqR5LHWx6'),
     color: '#403020', glow: '#80a050', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#a0c070',
   },
 
   // ---------- 白色普通（新變身） ----------
   white_dragon: {
-    idle:    assetUrl('transform/white/white_dragon/idle'),
-    walk:    assetUrl('transform/white/white_dragon/walk_down'),
-    walk2:   assetUrl('transform/white/white_dragon/walk_side'),
-    walk3:   assetUrl('transform/white/white_dragon/walk_up'),
-    walk4:   assetUrl('transform/white/white_dragon/walk_side'),
-    attack:  assetUrl('transform/white/white_dragon/attack_1'),
-    attack2: assetUrl('transform/white/white_dragon/attack_2'),
-    attack3: assetUrl('transform/white/white_dragon/attack_3'),
-    hit:     assetUrl('transform/white/white_dragon/hit'),
+    idle: assetUrl('APDWUGWZVw'),
+    walk: assetUrl('APDWUGWZVw'),
+    walk2: assetUrl('bYD7aJdZCZ'),
+    walk3: assetUrl('EHH32Fvnw1'),
+    walk4: assetUrl('01wfNPiTXP'),
+    attack: assetUrl('PL5FOn3oK3'),
+    attack2: assetUrl('UfxwzeARpf'),
+    hit: assetUrl('UIynvopITS'),
     color: '#e0e8f0', glow: '#ffffff', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   angel_white: {
-    idle:    assetUrl('transform/white/angel_white/idle'),
-    walk:    assetUrl('transform/white/angel_white/walk_down'),
-    walk2:   assetUrl('transform/white/angel_white/walk_side'),
-    walk3:   assetUrl('transform/white/angel_white/walk_up'),
-    walk4:   assetUrl('transform/white/angel_white/walk_side'),
-    attack:  assetUrl('transform/white/angel_white/attack_1'),
-    attack2: assetUrl('transform/white/angel_white/attack_2'),
-    attack3: assetUrl('transform/white/angel_white/attack_3'),
-    hit:     assetUrl('transform/white/angel_white/hit'),
+    idle: assetUrl('NaPbNp9c1V'),
+    walk: assetUrl('NaPbNp9c1V'),
+    walk2: assetUrl('GUlp5Qy6iw'),
+    walk3: assetUrl('5UMFE65Hny'),
+    walk4: assetUrl('hbuS4nnQI2'),
+    attack: assetUrl('0UZceLNR6V'),
+    attack2: assetUrl('kUFVQVjTCS'),
+    hit: assetUrl('3ygE66VdLj'),
     color: '#f0f0e8', glow: '#fff8c0', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   unicorn: {
-    idle:    assetUrl('transform/white/unicorn/idle'),
-    walk:    assetUrl('transform/white/unicorn/walk_down'),
-    walk2:   assetUrl('transform/white/unicorn/walk_side'),
-    walk3:   assetUrl('transform/white/unicorn/walk_up'),
-    walk4:   assetUrl('transform/white/unicorn/walk_side'),
-    attack:  assetUrl('transform/white/unicorn/attack_1'),
-    attack2: assetUrl('transform/white/unicorn/attack_2'),
-    attack3: assetUrl('transform/white/unicorn/attack_3'),
-    hit:     assetUrl('transform/white/unicorn/hit'),
+    idle: assetUrl('a8JCQmVVNT'),
+    walk: assetUrl('a8JCQmVVNT'),
+    walk2: assetUrl('f8JFmtkifj'),
+    walk3: assetUrl('8dvXmhS5c7'),
+    walk4: assetUrl('HzkkhZbJQy'),
+    attack: assetUrl('FOIte0Nrnl'),
+    attack2: assetUrl('2lE46ur5Jl'),
+    hit: assetUrl('1OVUePiezR'),
     color: '#f8f0f8', glow: '#ffe0ff', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#ffffff',
   },
   holy_spirit: {
-    idle:    assetUrl('transform/white/holy_spirit/idle'),
-    walk:    assetUrl('transform/white/holy_spirit/walk_down'),
-    walk2:   assetUrl('transform/white/holy_spirit/walk_side'),
-    walk3:   assetUrl('transform/white/holy_spirit/walk_up'),
-    walk4:   assetUrl('transform/white/holy_spirit/walk_side'),
-    attack:  assetUrl('transform/white/holy_spirit/attack_1'),
-    attack2: assetUrl('transform/white/holy_spirit/attack_2'),
-    attack3: assetUrl('transform/white/holy_spirit/attack_3'),
-    hit:     assetUrl('transform/white/holy_spirit/hit'),
+    idle: assetUrl('TLuUdtTRPo'),
+    walk: assetUrl('TLuUdtTRPo'),
+    walk2: assetUrl('JcezH6rVhY'),
+    walk3: assetUrl('gnxhj1r7Tr'),
+    walk4: assetUrl('8IDPqcesFo'),
+    attack: assetUrl('aNWVrFpkQ7'),
+    attack2: assetUrl('DGdNzHjEpE'),
+    hit: assetUrl('wZ2LHv5DEE'),
     color: '#e8f0f8', glow: '#c0e0ff', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#f0f8ff',
   },
   white_wolf: {
-    idle:    assetUrl('transform/white/white_wolf/idle'),
-    walk:    assetUrl('transform/white/white_wolf/walk_down'),
-    walk2:   assetUrl('transform/white/white_wolf/walk_side'),
-    walk3:   assetUrl('transform/white/white_wolf/walk_up'),
-    walk4:   assetUrl('transform/white/white_wolf/walk_side'),
-    attack:  assetUrl('transform/white/white_wolf/attack_1'),
-    attack2: assetUrl('transform/white/white_wolf/attack_2'),
-    attack3: assetUrl('transform/white/white_wolf/attack_3'),
-    hit:     assetUrl('transform/white/white_wolf/hit'),
+    idle: assetUrl('dPBulifvdn'),
+    walk: assetUrl('dPBulifvdn'),
+    walk2: assetUrl('vtUUJB7bTi'),
+    walk3: assetUrl('Atwxnpfckc'),
+    walk4: assetUrl('ysMOfAVZc0'),
+    attack: assetUrl('tjFKwAE5pk'),
+    attack2: assetUrl('ekiTVHnUBx'),
+    hit: assetUrl('ohKPiheUuX'),
     color: '#d8d8e0', glow: '#e8e8f0', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#f0f0f8',
   },
 
@@ -1513,75 +1426,70 @@ const SPRITE = {
 
   // ---------- 綠色高級（新） ----------
   ranger_green: {
-    idle:    assetUrl('transform/green/ranger_green/idle'),
-    walk:    assetUrl('transform/green/ranger_green/walk_down'),
-    walk2:   assetUrl('transform/green/ranger_green/walk_side'),
-    walk3:   assetUrl('transform/green/ranger_green/walk_up'),
-    walk4:   assetUrl('transform/green/ranger_green/walk_side'),
-    attack:  assetUrl('transform/green/ranger_green/attack_1'),
-    attack2: assetUrl('transform/green/ranger_green/attack_2'),
-    attack3: assetUrl('transform/green/ranger_green/attack_3'),
-    hit:     assetUrl('transform/green/ranger_green/hit'),
+    idle: assetUrl('rchaMLCdba'),
+    walk: assetUrl('rchaMLCdba'),
+    walk2: assetUrl('rchaMLCdba'),
+    walk3: assetUrl('rchaMLCdba'),
+    walk4: assetUrl('rchaMLCdba'),
+    attack: assetUrl('rchaMLCdba'),
+    attack2: assetUrl('rchaMLCdba'),
+    hit: assetUrl('rchaMLCdba'),
     color: '#306040', glow: '#60c080', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#a0f0b0',
   },
   forest_elf_archer: {
-    idle:    assetUrl('transform/green/forest_elf_archer/idle'),
-    walk:    assetUrl('transform/green/forest_elf_archer/walk_down'),
-    walk2:   assetUrl('transform/green/forest_elf_archer/walk_side'),
-    walk3:   assetUrl('transform/green/forest_elf_archer/walk_up'),
-    walk4:   assetUrl('transform/green/forest_elf_archer/walk_side'),
-    attack:  assetUrl('transform/green/forest_elf_archer/attack_1'),
-    attack2: assetUrl('transform/green/forest_elf_archer/attack_2'),
-    attack3: assetUrl('transform/green/forest_elf_archer/attack_3'),
-    hit:     assetUrl('transform/green/forest_elf_archer/hit'),
+    idle: assetUrl('fTDu2t8m4b'),
+    walk: assetUrl('fTDu2t8m4b'),
+    walk2: assetUrl('fTDu2t8m4b'),
+    walk3: assetUrl('fTDu2t8m4b'),
+    walk4: assetUrl('fTDu2t8m4b'),
+    attack: assetUrl('fTDu2t8m4b'),
+    attack2: assetUrl('fTDu2t8m4b'),
+    hit: assetUrl('fTDu2t8m4b'),
     color: '#205030', glow: '#60b070', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#90e0a0',
   },
   apprentice_mage: {
-    idle:    assetUrl('transform/green/apprentice_mage/idle'),
-    walk:    assetUrl('transform/green/apprentice_mage/walk_down'),
-    walk2:   assetUrl('transform/green/apprentice_mage/walk_side'),
-    walk3:   assetUrl('transform/green/apprentice_mage/walk_up'),
-    walk4:   assetUrl('transform/green/apprentice_mage/walk_side'),
-    attack:  assetUrl('transform/green/apprentice_mage/attack_1'),
-    attack2: assetUrl('transform/green/apprentice_mage/attack_2'),
-    attack3: assetUrl('transform/green/apprentice_mage/attack_3'),
-    hit:     assetUrl('transform/green/apprentice_mage/hit'),
+    idle: assetUrl('k9fWQyguRW'),
+    walk: assetUrl('k9fWQyguRW'),
+    walk2: assetUrl('k9fWQyguRW'),
+    walk3: assetUrl('k9fWQyguRW'),
+    walk4: assetUrl('k9fWQyguRW'),
+    attack: assetUrl('k9fWQyguRW'),
+    attack2: assetUrl('k9fWQyguRW'),
+    hit: assetUrl('k9fWQyguRW'),
     color: '#4060a0', glow: '#70a0e0', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#a0c0ff',
   },
 
   // ---------- 白色普通（新） ----------
   rookie_warrior: {
-    idle:    assetUrl('transform/white/rookie_warrior/idle'),
-    walk:    assetUrl('transform/white/rookie_warrior/walk_down'),
-    walk2:   assetUrl('transform/white/rookie_warrior/walk_side'),
-    walk3:   assetUrl('transform/white/rookie_warrior/walk_up'),
-    walk4:   assetUrl('transform/white/rookie_warrior/walk_side'),
-    attack:  assetUrl('transform/white/rookie_warrior/attack_1'),
-    attack2: assetUrl('transform/white/rookie_warrior/attack_2'),
-    attack3: assetUrl('transform/white/rookie_warrior/attack_3'),
-    hit:     assetUrl('transform/white/rookie_warrior/hit'),
+    idle: assetUrl('8au7xoi5Il'),
+    walk: assetUrl('8au7xoi5Il'),
+    walk2: assetUrl('8au7xoi5Il'),
+    walk3: assetUrl('8au7xoi5Il'),
+    walk4: assetUrl('8au7xoi5Il'),
+    attack: assetUrl('8au7xoi5Il'),
+    attack2: assetUrl('8au7xoi5Il'),
+    hit: assetUrl('8au7xoi5Il'),
     color: '#a0a0b0', glow: '#d0d0e0', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#e0e0ec',
   },
   village_guard: {
-    idle:    assetUrl('transform/white/village_guard/idle'),
-    walk:    assetUrl('transform/white/village_guard/walk_down'),
-    walk2:   assetUrl('transform/white/village_guard/walk_side'),
-    walk3:   assetUrl('transform/white/village_guard/walk_up'),
-    walk4:   assetUrl('transform/white/village_guard/walk_side'),
-    attack:  assetUrl('transform/white/village_guard/attack_1'),
-    attack2: assetUrl('transform/white/village_guard/attack_2'),
-    attack3: assetUrl('transform/white/village_guard/attack_3'),
-    hit:     assetUrl('transform/white/village_guard/hit'),
+    idle: assetUrl('cgp2aEtGh5'),
+    walk: assetUrl('cgp2aEtGh5'),
+    walk2: assetUrl('cgp2aEtGh5'),
+    walk3: assetUrl('cgp2aEtGh5'),
+    walk4: assetUrl('cgp2aEtGh5'),
+    attack: assetUrl('cgp2aEtGh5'),
+    attack2: assetUrl('cgp2aEtGh5'),
+    hit: assetUrl('cgp2aEtGh5'),
     color: '#8090a0', glow: '#b0c0d0', useImg: true,
-    multiFrame: true, coverMode: true, eightFrame: true,
+    multiFrame: true, coverMode: true,
     slashColor: '#d0dce8',
   },
 
@@ -1669,288 +1577,270 @@ const SPRITE = {
   },
 
   // ========== 怪物 ==========
-  // v2.7.7：核心怪物改為真實怪物圖（monster/ 目錄），其餘怪物 fallback 到 goblin 避免缺圖
   goblin: {
-    idle: assetUrl('monster/goblin/idle'),
-    walk: assetUrl('monster/goblin/walk_1'),
-    walk2: assetUrl('monster/goblin/walk_2'),
-    walk3: assetUrl('monster/goblin/walk_3'),
-    walk4: assetUrl('monster/goblin/walk_4'),
+    idle: assetUrl('monster/goblin/down'),
+    walk: assetUrl('monster/goblin/down'),
+    walk2: assetUrl('monster/goblin/side'),
+    walk3: assetUrl('monster/goblin/up'),
+    walk4: assetUrl('monster/goblin/side'),
     attack: assetUrl('monster/goblin/attack'),
     attack2: assetUrl('monster/goblin/attack'),
-    hit: assetUrl('monster/goblin/hit'),
+    hit: assetUrl('monster/goblin/attack'),
     color: '#508040', glow: '#80c060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0ff80',
-    // v2.7.7：4 幀 walk 動畫
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   skeleton: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('Wzi9iVLdb2'),
+    walk: assetUrl('Wzi9iVLdb2'),
+    walk2: assetUrl('U9ed5silDc'),
+    walk3: assetUrl('wpc6V9qVDO'),
+    walk4: assetUrl('1x1j3NjhPH'),
+    attack: assetUrl('VfGgZRdHIL'),
+    attack2: assetUrl('YQCgkX79ZB'),
+    hit: assetUrl('6ifL3DgjCY'),
     color: '#e0e0d0', glow: '#ffffff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0f0ff',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   orc: {
-    idle: assetUrl('monster/orc/idle'),
-    walk: assetUrl('monster/orc/idle'),
-    walk2: assetUrl('monster/orc/side'),
-    walk3: assetUrl('monster/orc/up'),
-    walk4: assetUrl('monster/orc/side'),
-    attack: assetUrl('monster/orc/attack'),
-    attack2: assetUrl('monster/orc/attack'),
-    hit: assetUrl('monster/orc/hit'),
+    idle: assetUrl('7jZBWui3Db'),
+    walk: assetUrl('7jZBWui3Db'),
+    walk2: assetUrl('Zpc82edK6V'),
+    walk3: assetUrl('CewMfMo7tU'),
+    walk4: assetUrl('9Us5kQk4ie'),
+    attack: assetUrl('rvAT3NSnQB'),
+    attack2: assetUrl('5oTzfOrfzV'),
+    hit: assetUrl('Xc1HGJ1KGV'),
     color: '#608040', glow: '#a0c060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#d0ffa0',
   },
   slime: {
-    idle: assetUrl('monster/slime/idle'),
-    walk: assetUrl('monster/slime/walk_1'),
-    walk2: assetUrl('monster/slime/walk_2'),
-    walk3: assetUrl('monster/slime/walk_3'),
-    walk4: assetUrl('monster/slime/walk_4'),
-    attack: assetUrl('monster/slime/attack'),
-    attack2: assetUrl('monster/slime/attack'),
-    hit: assetUrl('monster/slime/hit'),
+    idle: assetUrl('582Ij09o3K'),
+    walk: assetUrl('582Ij09o3K'),
+    walk2: assetUrl('hjTKkz0REl'),
+    walk3: assetUrl('uUcl6ZXFlt'),
+    walk4: assetUrl('naY3bow36j'),
+    attack: assetUrl('Wi8i3HuMPN'),
+    attack2: assetUrl('xWZWQAzLLU'),
+    hit: assetUrl('ULQRvB1CdS'),
     color: '#40a060', glow: '#80e0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ffc0',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   spider: {
-    idle: assetUrl('monster/spider/idle'),
-    walk: assetUrl('monster/spider/walk_1'),
-    walk2: assetUrl('monster/spider/walk_2'),
-    walk3: assetUrl('monster/spider/walk_3'),
-    walk4: assetUrl('monster/spider/walk_4'),
-    attack: assetUrl('monster/spider/attack'),
-    attack2: assetUrl('monster/spider/attack'),
-    hit: assetUrl('monster/spider/hit'),
+    idle: assetUrl('6AohjTIRnR'),
+    walk: assetUrl('6AohjTIRnR'),
+    walk2: assetUrl('AKCLMYp49L'),
+    walk3: assetUrl('2hMO5hilVu'),
+    walk4: assetUrl('L5TZ5ntmcZ'),
+    attack: assetUrl('P4IKJKFaPb'),
+    attack2: assetUrl('jrdjr24uAs'),
+    hit: assetUrl('IkB3kC0MLn'),
     color: '#402020', glow: '#804040', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff6060',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   scorpion: {
-    idle: assetUrl('monster/scorpion/idle'),
-    walk: assetUrl('monster/scorpion/walk_1'),
-    walk2: assetUrl('monster/scorpion/walk_2'),
-    walk3: assetUrl('monster/scorpion/walk_3'),
-    walk4: assetUrl('monster/scorpion/walk_4'),
-    attack: assetUrl('monster/scorpion/attack'),
-    attack2: assetUrl('monster/scorpion/attack'),
-    hit: assetUrl('monster/scorpion/hit'),
+    idle: assetUrl('sYDuOUW1hs'),
+    walk: assetUrl('sYDuOUW1hs'),
+    walk2: assetUrl('2diYDBGw40'),
+    walk3: assetUrl('1n2FHCF00k'),
+    walk4: assetUrl('jOmfjaAowT'),
+    attack: assetUrl('STUpj5gzz2'),
+    attack2: assetUrl('Mx7YOqVObn'),
+    hit: assetUrl('oi41e1Ciog'),
     color: '#442266', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   bat: {
-    idle: assetUrl('monster/bat/idle'),
-    walk: assetUrl('monster/bat/walk_1'),
-    walk2: assetUrl('monster/bat/walk_2'),
-    walk3: assetUrl('monster/bat/walk_3'),
-    walk4: assetUrl('monster/bat/walk_4'),
-    attack: assetUrl('monster/bat/attack'),
-    attack2: assetUrl('monster/bat/attack'),
-    hit: assetUrl('monster/bat/hit'),
+    idle: assetUrl('R5ucsLb0nY'),
+    walk: assetUrl('R5ucsLb0nY'),
+    walk2: assetUrl('ZMSh5JkLuI'),
+    walk3: assetUrl('7FtGCbQrYd'),
+    walk4: assetUrl('9pQ6wjsVuN'),
+    attack: assetUrl('WrjJT3OobX'),
+    attack2: assetUrl('DQeqQ0d043'),
+    hit: assetUrl('k3ide5hCRw'),
     color: '#442222', glow: '#ff2222', useImg: true, multiFrame: true, coverMode: true,
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   ghost: {
-    idle: assetUrl('monster/ghost/idle'),
-    walk: assetUrl('monster/ghost/walk_1'),
-    walk2: assetUrl('monster/ghost/walk_2'),
-    walk3: assetUrl('monster/ghost/walk_3'),
-    walk4: assetUrl('monster/ghost/walk_4'),
-    attack: assetUrl('monster/ghost/attack'),
-    attack2: assetUrl('monster/ghost/attack'),
-    hit: assetUrl('monster/ghost/hit'),
-    color: '#a0c0e0', glow: '#e0f0ff', useImg: true, multiFrame: true, coverMode: true,
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
+    idle: assetUrl('e7D8utv94E'),
+    walk: assetUrl('e7D8utv94E'),
+    walk2: assetUrl('n93e7pZjIQ'),
+    walk3: assetUrl('DlrVUtEL4U'),
+    walk4: assetUrl('nSc7HUXdKk'),
+    attack: assetUrl('ulXEI5IJVn'),
+    attack2: assetUrl('vgIBoWl1gY'),
+    hit: assetUrl('VnCngAVE7l'),
+    color: '#44dddd', glow: '#88ffff', useImg: true, multiFrame: true, coverMode: true,
   },
   troll: {
-    idle: assetUrl('monster/orc/idle'),
-    walk: assetUrl('monster/orc/walk_1'),
-    walk2: assetUrl('monster/orc/walk_2'),
-    walk3: assetUrl('monster/orc/walk_3'),
-    walk4: assetUrl('monster/orc/walk_4'),
-    attack: assetUrl('monster/orc/attack'),
-    attack2: assetUrl('monster/orc/attack'),
-    hit: assetUrl('monster/orc/hit'),
+    idle: assetUrl('6ykq8WkXGM'),
+    walk: assetUrl('6ykq8WkXGM'),
+    walk2: assetUrl('88UbrwO9KU'),
+    walk3: assetUrl('EgnBBCs2il'),
+    walk4: assetUrl('64CM6j4mMt'),
+    attack: assetUrl('SoVisJ5aYQ'),
+    attack2: assetUrl('6fn78tWYQr'),
+    hit: assetUrl('CvFbmbrRCF'),
     color: '#558833', glow: '#88aa44', useImg: true, multiFrame: true, coverMode: true,
   },
   demon: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/idle'),
-    walk2: assetUrl('monster/demon/side'),
-    walk3: assetUrl('monster/demon/up'),
-    walk4: assetUrl('monster/demon/side'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('ennzdff10h'),
+    walk: assetUrl('ennzdff10h'),
+    walk2: assetUrl('HHYnZL77dr'),
+    walk3: assetUrl('iA3sODRZZ1'),
+    walk4: assetUrl('iovh4nWNY3'),
+    attack: assetUrl('VvBW6MiFDv'),
+    attack2: assetUrl('GCjQ9UYJCa'),
+    hit: assetUrl('bOvayC2iOD'),
     color: '#c03030', glow: '#ff6040', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff5050',
   },
   // 中高階怪物 8 帧
   ogre: {
-    idle: assetUrl('monster/orc/idle'),
-    walk: assetUrl('monster/orc/walk_1'),
-    walk2: assetUrl('monster/orc/walk_2'),
-    walk3: assetUrl('monster/orc/walk_3'),
-    walk4: assetUrl('monster/orc/walk_4'),
-    attack: assetUrl('monster/orc/attack'),
-    attack2: assetUrl('monster/orc/attack'),
-    hit: assetUrl('monster/orc/hit'),
+    idle: assetUrl('6mcEV2Pgpy'),
+    walk: assetUrl('6mcEV2Pgpy'),
+    walk2: assetUrl('OlcaeodfWk'),
+    walk3: assetUrl('EfvFkRDFHo'),
+    walk4: assetUrl('8s0noOL4Yj'),
+    attack: assetUrl('WV9nboUyMl'),
+    attack2: assetUrl('YY8fAAd1go'),
+    hit: assetUrl('5vqHZHGQV5'),
     color: '#806040', glow: '#d0a060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffb060',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   lizardman: {
-    idle: assetUrl('monster/lizardman/idle'),
-    walk: assetUrl('monster/lizardman/idle'),
-    walk2: assetUrl('monster/lizardman/side'),
-    walk3: assetUrl('monster/lizardman/up'),
-    walk4: assetUrl('monster/lizardman/side'),
-    attack: assetUrl('monster/lizardman/attack'),
-    attack2: assetUrl('monster/lizardman/attack'),
-    hit: assetUrl('monster/lizardman/hit'),
+    idle: assetUrl('TCEkPooI9E'),
+    walk: assetUrl('TCEkPooI9E'),
+    walk2: assetUrl('S4gNP4k3pT'),
+    walk3: assetUrl('AY9mkXA71v'),
+    walk4: assetUrl('HLDhc9wPmh'),
+    attack: assetUrl('w9OpsvrH9Z'),
+    attack2: assetUrl('3iG0uaSQjw'),
+    hit: assetUrl('rmIJxJ5Fpg'),
     color: '#40a060', glow: '#80e0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a0ffc0',
   },
   stone_golem: {
-    idle: assetUrl('monster/stone_golem/idle'),
-    walk: assetUrl('monster/stone_golem/walk_1'),
-    walk2: assetUrl('monster/stone_golem/walk_2'),
-    walk3: assetUrl('monster/stone_golem/walk_3'),
-    walk4: assetUrl('monster/stone_golem/walk_4'),
-    attack: assetUrl('monster/stone_golem/attack'),
-    attack2: assetUrl('monster/stone_golem/attack'),
-    hit: assetUrl('monster/stone_golem/hit'),
+    idle: assetUrl('1djiUtrb2c'),
+    walk: assetUrl('1djiUtrb2c'),
+    walk2: assetUrl('znvzkueF2c'),
+    walk3: assetUrl('Ix5C2VbmyJ'),
+    walk4: assetUrl('pVW3CEoidZ'),
+    attack: assetUrl('38FuwV7gPw'),
+    attack2: assetUrl('BUQtrrYRAS'),
+    hit: assetUrl('paWYrtkpSB'),
     color: '#908070', glow: '#c0b0a0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0d0b0',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   lich: {
-    idle: assetUrl('monster/lich/idle'),
-    walk: assetUrl('monster/lich/walk_1'),
-    walk2: assetUrl('monster/lich/walk_2'),
-    walk3: assetUrl('monster/lich/walk_3'),
-    walk4: assetUrl('monster/lich/walk_4'),
-    attack: assetUrl('monster/lich/attack'),
-    attack2: assetUrl('monster/lich/attack'),
-    hit: assetUrl('monster/lich/hit'),
+    idle: assetUrl('DKPorAcX7s'),
+    walk: assetUrl('DKPorAcX7s'),
+    walk2: assetUrl('RiirQZ3fSV'),
+    walk3: assetUrl('MuVRCBrUzD'),
+    walk4: assetUrl('iQg6zyogEa'),
+    attack: assetUrl('JspSNdIB2O'),
+    attack2: assetUrl('A2ZjoB2Pki'),
+    hit: assetUrl('OgVGjrT6k0'),
     color: '#8040a0', glow: '#c080e0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0a0ff',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   cerberus: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('0CytJl9tpO'),
+    walk: assetUrl('0CytJl9tpO'),
+    walk2: assetUrl('jbo4hVvFPI'),
+    walk3: assetUrl('gSqkzYpyr5'),
+    walk4: assetUrl('sWaRxnHrMT'),
+    attack: assetUrl('PGwtG4t9rj'),
+    attack2: assetUrl('EJZ0gbn982'),
+    hit: assetUrl('Dhbzw4B2uB'),
     color: '#cc2200', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== 新增 8 帧怪物 ==========
   monster_hellhound: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('QVsxMC7AXE'),
+    walk: assetUrl('QVsxMC7AXE'),
+    walk2: assetUrl('Y7D6wor5GO'),
+    walk3: assetUrl('h1SdH2HSwb'),
+    walk4: assetUrl('HtY7WUwH6y'),
+    attack: assetUrl('NckDHIlVdY'),
+    attack2: assetUrl('RCqUWJ5gFx'),
+    hit: assetUrl('Vb5KUo6sqn'),
     color: '#301010', glow: '#ff4020', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff8040',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_braindevil: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('sxV2RI2KMa'),
+    walk: assetUrl('sxV2RI2KMa'),
+    walk2: assetUrl('L2OBUHNdsg'),
+    walk3: assetUrl('GzLoOexBtC'),
+    walk4: assetUrl('VSwDVeboki'),
+    attack: assetUrl('HjiPNansZJ'),
+    attack2: assetUrl('FRwIj4bM49'),
+    hit: assetUrl('b3NpFiK4gt'),
     color: '#8040a0', glow: '#d080ff', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#e0a0ff',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_direwolf: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('ZUTg8LaVx4'),
+    walk: assetUrl('ZUTg8LaVx4'),
+    walk2: assetUrl('nbtEFlg5Ee'),
+    walk3: assetUrl('UjIVNyA3ms'),
+    walk4: assetUrl('f7yZo8ohJK'),
+    attack: assetUrl('1PRvT0IyUa'),
+    attack2: assetUrl('VudULCUxHn'),
+    hit: assetUrl('UKCZ9Ol81J'),
     color: '#504030', glow: '#c0a060', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffc060',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_scorpion: {
-    idle: assetUrl('monster/scorpion/idle'),
-    walk: assetUrl('monster/scorpion/walk_1'),
-    walk2: assetUrl('monster/scorpion/walk_2'),
-    walk3: assetUrl('monster/scorpion/walk_3'),
-    walk4: assetUrl('monster/scorpion/walk_4'),
-    attack: assetUrl('monster/scorpion/attack'),
-    attack2: assetUrl('monster/scorpion/attack'),
-    hit: assetUrl('monster/scorpion/hit'),
+    idle: assetUrl('clSORpgY8H'),
+    walk: assetUrl('clSORpgY8H'),
+    walk2: assetUrl('OQ155a7UgC'),
+    walk3: assetUrl('0qJFdwQwIA'),
+    walk4: assetUrl('GNZH2vsocJ'),
+    attack: assetUrl('UgIpBy6CPb'),
+    attack2: assetUrl('L8URoUC8Vs'),
+    hit: assetUrl('9evfx7AVO8'),
     color: '#a06020', glow: '#ff9040', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffb060',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_wraith: {
-    idle: assetUrl('monster/ghost/idle'),
-    walk: assetUrl('monster/ghost/walk_1'),
-    walk2: assetUrl('monster/ghost/walk_2'),
-    walk3: assetUrl('monster/ghost/walk_3'),
-    walk4: assetUrl('monster/ghost/walk_4'),
-    attack: assetUrl('monster/ghost/attack'),
-    attack2: assetUrl('monster/ghost/attack'),
-    hit: assetUrl('monster/ghost/hit'),
+    idle: assetUrl('ZhVGRF6Vtp'),
+    walk: assetUrl('ZhVGRF6Vtp'),
+    walk2: assetUrl('oLc2Dzb4Gp'),
+    walk3: assetUrl('pHCtLwxDf4'),
+    walk4: assetUrl('2UqZ9EqS9X'),
+    attack: assetUrl('ArU5iZorxO'),
+    attack2: assetUrl('tuLEUDjxSt'),
+    hit: assetUrl('CFc9nu0uVZ'),
     color: '#302040', glow: '#8060c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#a080ff',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   monster_gargoyle: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('WFSp2Ctj4D'),
+    walk: assetUrl('WFSp2Ctj4D'),
+    walk2: assetUrl('i5XYfgjPDQ'),
+    walk3: assetUrl('nqRRU8MWNQ'),
+    walk4: assetUrl('UwvHjx0urh'),
+    attack: assetUrl('ndPzwGiddo'),
+    attack2: assetUrl('xmJHo2FGR6'),
+    hit: assetUrl('VbAUPUjQRw'),
     color: '#606070', glow: '#a0a0c0', useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0c0e0',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   // ========== 新增變身 8 帧（v2.6.2 改為本地真8幀） ==========
   demon_lord: {
@@ -2108,238 +1998,234 @@ const SPRITE = {
     slashColor: '#a0d0ff',
   },
   dragon: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('9Do8Ov0n08'),
+    walk: assetUrl('9Do8Ov0n08'),
+    walk2: assetUrl('e6cVUaEb1W'),
+    walk3: assetUrl('AiYHpTKu8K'),
+    walk4: assetUrl('ResU9dONwj'),
+    attack: assetUrl('CHAU6a1OqQ'),
+    attack2: assetUrl('SqE44zEURU'),
+    hit: assetUrl('aOi6g9V9CR'),
     color: '#cc3322', glow: '#ff6644', useImg: true, multiFrame: true, coverMode: true,
   },
   shaman: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('UrxAO5gJZh'),
+    walk: assetUrl('UrxAO5gJZh'),
+    walk2: assetUrl('9tQUBUFncb'),
+    walk3: assetUrl('Z2xMHdIvFW'),
+    walk4: assetUrl('h6R9VB8C2D'),
+    attack: assetUrl('ok9EV5aDdb'),
+    attack2: assetUrl('292nQJbkml'),
+    hit: assetUrl('km8jUYM0xi'),
     color: '#558833', glow: '#44ff44', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== Boss ==========
   bandit: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('hy8Xjp5GAH'),
+    walk: assetUrl('hy8Xjp5GAH'),
+    walk2: assetUrl('CQZcKHDPUL'),
+    walk3: assetUrl('ZscZv5PG5H'),
+    walk4: assetUrl('MijY5iMyg7'),
+    attack: assetUrl('ahUJpmTMju'),
+    attack2: assetUrl('FEDzWUgVga'),
+    hit: assetUrl('aCANFoS5Gl'),
     color: '#444444', glow: '#aaaaaa', useImg: true, multiFrame: true, coverMode: true,
   },
   zombie: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('Oa7zNf9UFK'),
+    walk: assetUrl('Oa7zNf9UFK'),
+    walk2: assetUrl('iRA0DU1c1U'),
+    walk3: assetUrl('mlRsq3v4CR'),
+    walk4: assetUrl('4e21Sv8gty'),
+    attack: assetUrl('5Db9F0ZKN5'),
+    attack2: assetUrl('U6IJ8Cv32K'),
+    hit: assetUrl('dRz7qCVPik'),
     color: '#668844', glow: '#88aa44', useImg: true, multiFrame: true, coverMode: true,
   },
   darkmage: {
-    idle: assetUrl('monster/lich/idle'),
-    walk: assetUrl('monster/lich/walk_1'),
-    walk2: assetUrl('monster/lich/walk_2'),
-    walk3: assetUrl('monster/lich/walk_3'),
-    walk4: assetUrl('monster/lich/walk_4'),
-    attack: assetUrl('monster/lich/attack'),
-    attack2: assetUrl('monster/lich/attack'),
-    hit: assetUrl('monster/lich/hit'),
+    idle: assetUrl('SWrInn0grd'),
+    walk: assetUrl('SWrInn0grd'),
+    walk2: assetUrl('V9DEE42h0u'),
+    walk3: assetUrl('86rJAUsBMa'),
+    walk4: assetUrl('6UTDEAFDC4'),
+    attack: assetUrl('hPGhoqXxrK'),
+    attack2: assetUrl('6q6TBuiWlt'),
+    hit: assetUrl('qN9sQGMUCq'),
     color: '#8844cc', glow: '#cc66ff', useImg: true, multiFrame: true, coverMode: true,
   },
   // ========== Boss ==========
   spider_queen: {
-    idle: assetUrl('monster/spider/idle'),
-    walk: assetUrl('monster/spider/walk_1'),
-    walk2: assetUrl('monster/spider/walk_2'),
-    walk3: assetUrl('monster/spider/walk_3'),
-    walk4: assetUrl('monster/spider/walk_4'),
-    attack: assetUrl('monster/spider/attack'),
-    attack2: assetUrl('monster/spider/attack'),
-    hit: assetUrl('monster/spider/hit'),
+    idle: assetUrl('wUbEJL0DQj'),
+    walk: assetUrl('wUbEJL0DQj'),
+    walk2: assetUrl('MqykB9GBTw'),
+    walk3: assetUrl('4EULJzSSlr'),
+    walk4: assetUrl('0Kft2Gw701'),
+    attack: assetUrl('RzttyT1vnA'),
+    attack2: assetUrl('2t7NaIE7tA'),
+    hit: assetUrl('kKsYi20tlC'),
     color: '#6622aa', glow: '#aa44ff', useImg: true, multiFrame: true, coverMode: true,
   },
   lava_golem: {
-    idle: assetUrl('monster/stone_golem/idle'),
-    walk: assetUrl('monster/stone_golem/walk_1'),
-    walk2: assetUrl('monster/stone_golem/walk_2'),
-    walk3: assetUrl('monster/stone_golem/walk_3'),
-    walk4: assetUrl('monster/stone_golem/walk_4'),
-    attack: assetUrl('monster/stone_golem/attack'),
-    attack2: assetUrl('monster/stone_golem/attack'),
-    hit: assetUrl('monster/stone_golem/hit'),
+    idle: assetUrl('HUp2dsmzpG'),
+    walk: assetUrl('HUp2dsmzpG'),
+    walk2: assetUrl('MgoybTkwZ6'),
+    walk3: assetUrl('oUaxg5EX4u'),
+    walk4: assetUrl('32iobvZMDR'),
+    attack: assetUrl('qUQX6lr47u'),
+    attack2: assetUrl('jomDSXKJlp'),
+    hit: assetUrl('41VYP0XKXm'),
     color: '#cc4400', glow: '#ff8800', useImg: true, multiFrame: true, coverMode: true,
   },
   bone_dragon: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('db3YKTmL82'),
+    walk: assetUrl('db3YKTmL82'),
+    walk2: assetUrl('tT2bGXfVAt'),
+    walk3: assetUrl('P7mvta9pXb'),
+    walk4: assetUrl('e37AqKOKFL'),
+    attack: assetUrl('UIhYxdZIV4'),
+    attack2: assetUrl('N3Oo4VTI1q'),
+    hit: assetUrl('2oWLq4vXlG'),
     color: '#ccccaa', glow: '#66ddff', useImg: true, multiFrame: true, coverMode: true,
   },
   griffin: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('VAWDvwJJu2'),
+    walk: assetUrl('VAWDvwJJu2'),
+    walk2: assetUrl('qOZI7NIdhG'),
+    walk3: assetUrl('W3swxk3OAM'),
+    walk4: assetUrl('spjSIXLSiv'),
+    attack: assetUrl('wtVX2EX1W9'),
+    attack2: assetUrl('wS6Zm0HXjw'),
+    hit: assetUrl('AudVTivqvo'),
     color: '#dd9922', glow: '#ffcc44', useImg: true, multiFrame: true, coverMode: true,
   },
   chimera: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('tUaY3UCxsD'),
+    walk: assetUrl('tUaY3UCxsD'),
+    walk2: assetUrl('isJ78s37eH'),
+    walk3: assetUrl('AUb3VXl0Qy'),
+    walk4: assetUrl('mfvvD9NaVO'),
+    attack: assetUrl('VTiQzea4Rm'),
+    attack2: assetUrl('CIxe6TrTWl'),
+    hit: assetUrl('aqedAEKlp6'),
     color: '#333333', glow: '#ff6622', useImg: true, multiFrame: true, coverMode: true,
   },
   hydra: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('930N2UUgHS'),
+    walk: assetUrl('930N2UUgHS'),
+    walk2: assetUrl('iucIEoCrcU'),
+    walk3: assetUrl('omtqjxhzdX'),
+    walk4: assetUrl('gpjTvUFuXy'),
+    attack: assetUrl('QBG6VLKJN8'),
+    attack2: assetUrl('4eRQoBplQY'),
+    hit: assetUrl('nt1sPXaTHe'),
     color: '#338833', glow: '#66ff44', useImg: true, multiFrame: true, coverMode: true,
   },
   naga: {
-    idle: assetUrl('monster/lizardman/idle'),
-    walk: assetUrl('monster/lizardman/walk_1'),
-    walk2: assetUrl('monster/lizardman/walk_2'),
-    walk3: assetUrl('monster/lizardman/walk_3'),
-    walk4: assetUrl('monster/lizardman/walk_4'),
-    attack: assetUrl('monster/lizardman/attack'),
-    attack2: assetUrl('monster/lizardman/attack'),
-    hit: assetUrl('monster/lizardman/hit'),
+    idle: assetUrl('XuUqNLGiQv'),
+    walk: assetUrl('XuUqNLGiQv'),
+    walk2: assetUrl('mRBvVrhlWs'),
+    walk3: assetUrl('XvP3MIcdio'),
+    walk4: assetUrl('B7CVTe4x0z'),
+    attack: assetUrl('t7LvPGwoxg'),
+    attack2: assetUrl('Q3tRQvOOgA'),
+    hit: assetUrl('oVatgTEF4i'),
     color: '#338866', glow: '#44ffaa', useImg: true, multiFrame: true, coverMode: true,
   },
   armored_bear: {
-    idle: assetUrl('monster/orc/idle'),
-    walk: assetUrl('monster/orc/walk_1'),
-    walk2: assetUrl('monster/orc/walk_2'),
-    walk3: assetUrl('monster/orc/walk_3'),
-    walk4: assetUrl('monster/orc/walk_4'),
-    attack: assetUrl('monster/orc/attack'),
-    attack2: assetUrl('monster/orc/attack'),
-    hit: assetUrl('monster/orc/hit'),
+    idle: assetUrl('hmpB2nomb5'),
+    walk: assetUrl('hmpB2nomb5'),
+    walk2: assetUrl('DfBHVDQWHG'),
+    walk3: assetUrl('yAMXkNx3dg'),
+    walk4: assetUrl('FVI72L2SIo'),
+    attack: assetUrl('boDcUh2M8E'),
+    attack2: assetUrl('U3cuZTf5WT'),
+    hit: assetUrl('Nj49Ur4BtB'),
     color: '#885522', glow: '#ffaa44', useImg: true, multiFrame: true, coverMode: true,
   },
   kraken: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('WD439eGaFU'),
+    walk: assetUrl('WD439eGaFU'),
+    walk2: assetUrl('IainVVfq3F'),
+    walk3: assetUrl('1YUXX26uiA'),
+    walk4: assetUrl('jNM4KI8ia2'),
+    attack: assetUrl('RCdDqMVfE5'),
+    attack2: assetUrl('NHFUFVv4Vs'),
+    hit: assetUrl('eAGGLx6phH'),
     color: '#552288', glow: '#9944ff', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_orc: {
-    idle: assetUrl('monster/orc/idle'),
-    walk: assetUrl('monster/orc/walk_1'),
-    walk2: assetUrl('monster/orc/walk_2'),
-    walk3: assetUrl('monster/orc/walk_3'),
-    walk4: assetUrl('monster/orc/walk_4'),
-    attack: assetUrl('monster/orc/attack'),
-    attack2: assetUrl('monster/orc/attack'),
-    hit: assetUrl('monster/orc/hit'),
+    idle: assetUrl('fvPYGckiQc'),
+    walk: assetUrl('fvPYGckiQc'),
+    walk2: assetUrl('Yz4l2QxCxp'),
+    walk3: assetUrl('TZ0P76Cllb'),
+    walk4: assetUrl('CPUrKw4Hol'),
+    attack: assetUrl('qjNBrcFMWq'),
+    attack2: assetUrl('qBmed9uuoE'),
+    hit: assetUrl('5r13VWiPU7'),
     color: '#558833', glow: '#ff4400', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_demon: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('UfgjsaYUoz'),
+    walk: assetUrl('UfgjsaYUoz'),
+    walk2: assetUrl('HcRMhunYY3'),
+    walk3: assetUrl('mfoJtk6O9p'),
+    walk4: assetUrl('Up2bmaIU99'),
+    attack: assetUrl('ICVHEO0qCP'),
+    attack2: assetUrl('6oppkux3K5'),
+    hit: assetUrl('R1gVGe51Fb'),
     color: '#cc2200', glow: '#ff6600', useImg: true, multiFrame: true, coverMode: true,
   },
   boss_dragon: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('o1qWUrCATh'),
+    walk: assetUrl('o1qWUrCATh'),
+    walk2: assetUrl('g3Irrwx4oq'),
+    walk3: assetUrl('jJaVDoXIZ2'),
+    walk4: assetUrl('CnUAPsRzlA'),
+    attack: assetUrl('Fr4eqGqBd6'),
+    attack2: assetUrl('mXwLa8wNlS'),
+    hit: assetUrl('1wgGAVd8JU'),
     color: '#e09010', glow: '#ffc040', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ffd060',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   boss_death_knight: {
-    idle: assetUrl('monster/skeleton/idle'),
-    walk: assetUrl('monster/skeleton/walk_1'),
-    walk2: assetUrl('monster/skeleton/walk_2'),
-    walk3: assetUrl('monster/skeleton/walk_3'),
-    walk4: assetUrl('monster/skeleton/walk_4'),
-    attack: assetUrl('monster/skeleton/attack'),
-    attack2: assetUrl('monster/skeleton/attack'),
-    hit: assetUrl('monster/skeleton/hit'),
+    idle: assetUrl('7FnWRqmp3O'),
+    walk: assetUrl('7FnWRqmp3O'),
+    walk2: assetUrl('U8U8zD5mQY'),
+    walk3: assetUrl('x0ngk7iSES'),
+    walk4: assetUrl('aPOtgxIgss'),
+    attack: assetUrl('KRVgdmZdqh'),
+    attack2: assetUrl('B1oZEnBt4W'),
+    hit: assetUrl('eqsOwvfx7E'),
     color: '#404060', glow: '#8080c0', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#c0c0ff',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   boss_baphomet: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('B5UzjmgzgT'),
+    walk: assetUrl('B5UzjmgzgT'),
+    walk2: assetUrl('rCZVzIR4DM'),
+    walk3: assetUrl('DsZs2wdjX8'),
+    walk4: assetUrl('FvmW2tQuUr'),
+    attack: assetUrl('fXcREvAk5H'),
+    attack2: assetUrl('49gZhlUxoM'),
+    hit: assetUrl('9aUL4o7j9K'),
     color: '#602040', glow: '#ff5080', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff80a0',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   boss_demon_lord: {
-    idle: assetUrl('monster/demon/idle'),
-    walk: assetUrl('monster/demon/walk_1'),
-    walk2: assetUrl('monster/demon/walk_2'),
-    walk3: assetUrl('monster/demon/walk_3'),
-    walk4: assetUrl('monster/demon/walk_4'),
-    attack: assetUrl('monster/demon/attack'),
-    attack2: assetUrl('monster/demon/attack'),
-    hit: assetUrl('monster/demon/hit'),
+    idle: assetUrl('MQbYJyKtqK'),
+    walk: assetUrl('MQbYJyKtqK'),
+    walk2: assetUrl('daKfmMOKiL'),
+    walk3: assetUrl('H0oH4yS5iQ'),
+    walk4: assetUrl('HfzbqxNOUp'),
+    attack: assetUrl('wltQkklEoZ'),
+    attack2: assetUrl('OYdq2KLrpQ'),
+    hit: assetUrl('7YUd2dOZDc'),
     color: '#a01010', glow: '#ff3030', boss: true, useImg: true,
     multiFrame: true, coverMode: true,
     slashColor: '#ff5050',
-    walkFrames: ['walk_1','walk_2','walk_3','walk_4'],
   },
   // ========== NPC ==========
   // ========== NPC 8 幀完整動畫 ==========
@@ -4668,13 +4554,6 @@ const MONSTER_SPRITES = {
   monster_scorpion:   SPRITE.monster_scorpion,
   monster_wraith:     SPRITE.monster_wraith,
   monster_gargoyle:   SPRITE.monster_gargoyle,
-  // v2.8.4：Boss 精靈納入統一入口（getMonsterSprite 能直接解析 boss_xxx）
-  boss_orc:          SPRITE.boss_orc,
-  boss_demon:        SPRITE.boss_demon,
-  boss_dragon:       SPRITE.boss_dragon,
-  boss_death_knight: SPRITE.boss_death_knight,
-  boss_baphomet:     SPRITE.boss_baphomet,
-  boss_demon_lord:   SPRITE.boss_demon_lord,
   // 新增變種（用現有精靈+濾鏡區分）
   darkorc:  SPRITE.orc,
   icewolf:  SPRITE.wolf,
@@ -4689,54 +4568,6 @@ const MONSTER_SPRITES = {
   eliteGoblin: SPRITE.goblin,
   royalScorpion: SPRITE.scorpion,
   goldenSlime: SPRITE.slime,
-  // v2.8.1：高級 Boss 類型 fallback（確保不顯示 ?，用相近精靈 + 大小/濾鏡區分）
-  death_knight: SPRITE.darkmage,
-  baphomet:     SPRITE.demon,
-  demon_lord:    SPRITE.demon,
-  // v2.8.2：補齊所有常見怪物中文名對應的 type（即使重名也給正確精靈，杜絕 ?）
-  //  哥布林系
-  goblin_archer: SPRITE.goblin,
-  goblin_patrol: SPRITE.goblin,
-  goblin_scout:  SPRITE.goblin,
-  goblin_warrior:SPRITE.goblin,
-  goblin_shaman: SPRITE.shaman,
-  goblin_king:   SPRITE.orc,
-  forest_goblin: SPRITE.goblin,
-  forest_goblin_chief: SPRITE.goblin,
-  //  骷髏系
-  skeleton_soldier:  SPRITE.skeleton,
-  skeleton_archer:   SPRITE.skeleton,
-  skeleton_warrior:  SPRITE.skeleton,
-  skeleton_knight:   SPRITE.skeleton,
-  skeleton_mage:     SPRITE.darkmage,
-  small_skeleton:    SPRITE.skeleton,
-  //  野狼/野豬/史萊姆/蝙蝠/蜘蛛/蛇
-  wild_wolf:    SPRITE.wolf,
-  black_wolf:   SPRITE.wolf,
-  timber_wolf:  SPRITE.monster_direwolf,
-  wild_boar:    SPRITE.ogre,
-  slime_blue:   SPRITE.slime,
-  slime_green:  SPRITE.slime,
-  gold_slime:   SPRITE.slime,
-  cave_bat:     SPRITE.bat,
-  forest_bat:   SPRITE.bat,
-  giant_spider: SPRITE.spider,
-  poison_spider:SPRITE.spider,
-  spiderling:   SPRITE.spider,
-  snake:        SPRITE.lizardman,
-  cobra:        SPRITE.lizardman,
-  //  人形/其他常見怪物 (用相近精靈兜底)
-  bandit_archer:SPRITE.bandit,
-  bandit_leader:SPRITE.bandit,
-  dark_knight:  SPRITE.darkmage,
-  //  Boss 級
-  orc_chief:    SPRITE.orc,
-  orc_warrior:  SPRITE.orc,
-  ogre_berserker:SPRITE.ogre,
-  lizardman_shaman:SPRITE.lizardman,
-  dark_mage:    SPRITE.darkmage,
-  demon_priest: SPRITE.demon,
-  succubus:     SPRITE.demon,
 };
 
 // ==================== 國家/公会/城堡 ====================
@@ -5750,15 +5581,6 @@ function doTransformGacha(mode) {
     }
   }
   updateUI();
-  // v2.7.2：抽完變身立即存檔並同步到伺服器，確保中獎入帳、重登仍在
-  if (typeof saveGame === 'function') {
-    try { saveGame(); } catch(e) { console.warn('[TransformGacha] 存檔失敗:', e); }
-  }
-  if (typeof syncAccountSharedFromLocal === 'function') {
-    syncAccountSharedFromLocal().catch(e =>
-      console.warn('[TransformGacha] 同步伺服器失敗:', e)
-    );
-  }
   // 史詩以上全服公告
   announceGachaResults(results, '變身');
   return results;
@@ -5814,7 +5636,7 @@ const AUTO_ITEMS_CATALOG = [
 ];
 
 const ITEM_ICONS = {
-  // 藥水（v2.7.4：暗黑風獨立圖標）
+  // 藥水（v2.4.0：新語意路徑 assets/item/icon_*.jpg）
   hp1: assetUrl('item/icon_potion_hp.jpg'),
   hp2: assetUrl('item/icon_potion_hp.jpg'),
   hp3: assetUrl('item/icon_potion_hp.jpg'),
@@ -5829,74 +5651,36 @@ const ITEM_ICONS = {
   atk_potion: assetUrl('item/icon_potion_orange.jpg'),
   def_potion: assetUrl('item/icon_potion_green.jpg'),
   crit_potion: assetUrl('item/icon_potion_orange.jpg'),
-  mgem: assetUrl('item/icon_soul_gem.jpg'),
-  teleport: assetUrl('item/icon_teleport_scroll.jpg'),
-  enhance_ticket: assetUrl('item/icon_enhance_stone.jpg'),
-  // v2.7.9：強化卷/機率卷改用卷軸圖（非石頭/紅藥水）
-  enhance_scroll: assetUrl('item/icon_enhance_scroll.jpg'),
-  enhance_boost_scroll: assetUrl('item/icon_enhance_boost_scroll.jpg'),
-  // v2.7.9：6 種真死亡體驗券，各有可區分的券據圖（非紅藥水）
-  ticket_death_knight:  assetUrl('item/icon_ticket_death_knight.jpg'),
-  ticket_death_sorcerer: assetUrl('item/icon_ticket_death_sorcerer.jpg'),
-  ticket_death_archer:   assetUrl('item/icon_ticket_death_archer.jpg'),
-  ticket_death_assassin: assetUrl('item/icon_ticket_death_assassin.jpg'),
-  ticket_death_mage:     assetUrl('item/icon_ticket_death_mage.jpg'),
-  ticket_fallen_paladin: assetUrl('item/icon_ticket_fallen_paladin.jpg'),
-  chest: assetUrl('item/icon_chest.jpg'),
+  mgem: assetUrl('item/icon_gem_ruby.jpg'),
+  teleport: assetUrl('item/icon_scroll.jpg'),
+  enhance_ticket: assetUrl('item/icon_scroll.jpg'),
+  chest: assetUrl('item/icon_gold_coin.jpg'),
   tscroll: assetUrl('item/icon_scroll.jpg'),
-  revive_scroll: assetUrl('item/icon_revive_scroll.jpg'),
-  escape_scroll: assetUrl('item/icon_teleport_scroll.jpg'),
-  enhance_stone: assetUrl('item/icon_enhance_stone.jpg'),
-  bless_stone: assetUrl('item/icon_bless_stone.jpg'),
-  crystal_frag: assetUrl('item/icon_crystal_shard.jpg'),
+  revive_scroll: assetUrl('item/icon_scroll.jpg'),
+  escape_scroll: assetUrl('item/icon_scroll.jpg'),
+  enhance_stone: assetUrl('item/icon_gem_ruby.jpg'),
+  bless_stone: assetUrl('item/icon_gem_ruby.jpg'),
+  crystal_frag: assetUrl('item/icon_gem_ruby.jpg'),
   gold_coin: assetUrl('item/icon_gold_coin.jpg'),
-  gem_bag: assetUrl('item/icon_soul_gem.jpg'),
-  dungeon_key: assetUrl('item/icon_dungeon_key.jpg'),
-  treasure_key: assetUrl('item/icon_dungeon_key.jpg'),
-  quest_scroll: assetUrl('item/icon_quest_scroll.jpg'),
-  bag_expand_scroll: assetUrl('item/icon_bag_scroll.jpg'),
-  ancient_book: assetUrl('item/icon_ancient_book.jpg'),
-  monster_eye: assetUrl('item/icon_monster_eye.jpg'),
-  dragon_scale: assetUrl('item/icon_dragon_scale.jpg'),
-  // 裝備類型 fallback（v2.7.4：按品質選圖，此為白色預設）
-  weapon: assetUrl('equip/icon_sword_white.jpg'),
-  armor: assetUrl('equip/icon_armor_white.jpg'),
-  helmet: assetUrl('equip/icon_helmet_white.jpg'),
-  boots: assetUrl('equip/icon_boots_white.jpg'),
-  gloves: assetUrl('equip/icon_gloves_white.jpg'),
-  belt: assetUrl('equip/icon_belt_white.jpg'),
-  cape: assetUrl('equip/icon_cape_white.jpg'),
-  pants: assetUrl('equip/icon_pants_white.jpg'),
-  necklace: assetUrl('equip/icon_necklace_white.jpg'),
-  shield: assetUrl('equip/icon_shield_white.jpg'),
-  ring: assetUrl('equip/icon_ring_white.jpg'),
-  ring1: assetUrl('equip/icon_ring_white.jpg'),
-  ring2: assetUrl('equip/icon_ring_white.jpg'),
-  accessory: assetUrl('equip/icon_ring_white.jpg'),
-   bow: assetUrl('equip/icon_bow_white.jpg'),
-   staff: assetUrl('equip/icon_staff_white.jpg'),
-   dagger: assetUrl('equip/icon_dagger_white.jpg'),
+  gem_bag: assetUrl('item/icon_gem_ruby.jpg'),
+  dungeon_key: assetUrl('item/icon_scroll.jpg'),
+  treasure_key: assetUrl('item/icon_gem_ruby.jpg'),
+  quest_scroll: assetUrl('item/icon_scroll.jpg'),
+  bag_expand_scroll: assetUrl('item/icon_scroll.jpg'),
+  ancient_book: assetUrl('item/icon_scroll.jpg'),
+  monster_eye: assetUrl('item/icon_gem_ruby.jpg'),
+  dragon_scale: assetUrl('item/icon_gem_ruby.jpg'),
+  // 裝備類型（v2.4.0：新語意路徑 assets/equip/icon_*.jpg）
+  weapon: assetUrl('equip/icon_sword.jpg'),
+  armor: assetUrl('equip/icon_armor.jpg'),
+  helmet: assetUrl('equip/icon_helmet.jpg'),
+  boots: assetUrl('equip/icon_boots.jpg'),
+  gloves: assetUrl('equip/icon_armor.jpg'),
+  shield: assetUrl('equip/icon_shield.jpg'),
+  ring: assetUrl('equip/icon_ring.jpg'),
+  bow: assetUrl('equip/icon_bow.jpg'),
+  staff: assetUrl('equip/icon_staff.jpg'),
   gem: assetUrl('item/icon_gem_ruby.jpg'),
-};
-
-// v2.7.4：裝備品質圖標（部位 × 6 品質）
-const EQUIP_RARITY_ICONS = {
-  sword:    { white: assetUrl('equip/icon_sword_white.jpg'),    green: assetUrl('equip/icon_sword_green.jpg'),    blue: assetUrl('equip/icon_sword_blue.jpg'),    red: assetUrl('equip/icon_sword_red.jpg'),    purple: assetUrl('equip/icon_sword_purple.jpg'),    gold: assetUrl('equip/icon_sword_gold.jpg') },
-  armor:    { white: assetUrl('equip/icon_armor_white.jpg'),    green: assetUrl('equip/icon_armor_green.jpg'),    blue: assetUrl('equip/icon_armor_blue.jpg'),    red: assetUrl('equip/icon_armor_red.jpg'),    purple: assetUrl('equip/icon_armor_purple.jpg'),    gold: assetUrl('equip/icon_armor_gold.jpg') },
-  helmet:   { white: assetUrl('equip/icon_helmet_white.jpg'),   green: assetUrl('equip/icon_helmet_green.jpg'),   blue: assetUrl('equip/icon_helmet_blue.jpg'),   red: assetUrl('equip/icon_helmet_red.jpg'),   purple: assetUrl('equip/icon_helmet_purple.jpg'),   gold: assetUrl('equip/icon_helmet_gold.jpg') },
-  boots:    { white: assetUrl('equip/icon_boots_white.jpg'),    green: assetUrl('equip/icon_boots_green.jpg'),    blue: assetUrl('equip/icon_boots_blue.jpg'),    red: assetUrl('equip/icon_boots_red.jpg'),    purple: assetUrl('equip/icon_boots_purple.jpg'),    gold: assetUrl('equip/icon_boots_gold.jpg') },
-  gloves:   { white: assetUrl('equip/icon_gloves_white.jpg'),   green: assetUrl('equip/icon_gloves_green.jpg'),   blue: assetUrl('equip/icon_gloves_blue.jpg'),   red: assetUrl('equip/icon_gloves_red.jpg'),   purple: assetUrl('equip/icon_gloves_purple.jpg'),   gold: assetUrl('equip/icon_gloves_gold.jpg') },
-  belt:     { white: assetUrl('equip/icon_belt_white.jpg'),     green: assetUrl('equip/icon_belt_green.jpg'),     blue: assetUrl('equip/icon_belt_blue.jpg'),     red: assetUrl('equip/icon_belt_red.jpg'),     purple: assetUrl('equip/icon_belt_purple.jpg'),     gold: assetUrl('equip/icon_belt_gold.jpg') },
-  cape:     { white: assetUrl('equip/icon_cape_white.jpg'),     green: assetUrl('equip/icon_cape_green.jpg'),     blue: assetUrl('equip/icon_cape_blue.jpg'),     red: assetUrl('equip/icon_cape_red.jpg'),     purple: assetUrl('equip/icon_cape_purple.jpg'),     gold: assetUrl('equip/icon_cape_gold.jpg') },
-  pants:    { white: assetUrl('equip/icon_pants_white.jpg'),    green: assetUrl('equip/icon_pants_green.jpg'),    blue: assetUrl('equip/icon_pants_blue.jpg'),    red: assetUrl('equip/icon_pants_red.jpg'),    purple: assetUrl('equip/icon_pants_purple.jpg'),    gold: assetUrl('equip/icon_pants_gold.jpg') },
-  ring:     { white: assetUrl('equip/icon_ring_white.jpg'),     green: assetUrl('equip/icon_ring_green.jpg'),     blue: assetUrl('equip/icon_ring_blue.jpg'),     red: assetUrl('equip/icon_ring_red.jpg'),     purple: assetUrl('equip/icon_ring_purple.jpg'),     gold: assetUrl('equip/icon_ring_gold.jpg') },
-  necklace: { white: assetUrl('equip/icon_necklace_white.jpg'), green: assetUrl('equip/icon_necklace_green.jpg'), blue: assetUrl('equip/icon_necklace_blue.jpg'), red: assetUrl('equip/icon_necklace_red.jpg'), purple: assetUrl('equip/icon_necklace_purple.jpg'), gold: assetUrl('equip/icon_necklace_gold.jpg') },
-  shield:   { white: assetUrl('equip/icon_shield_white.jpg'),   green: assetUrl('equip/icon_shield_green.jpg'),   blue: assetUrl('equip/icon_shield_blue.jpg'),   red: assetUrl('equip/icon_shield_red.jpg'),   purple: assetUrl('equip/icon_shield_purple.jpg'),   gold: assetUrl('equip/icon_shield_gold.jpg') },
-  // v2.8.0：遠程/法系/刺客武器獨立圖標，不再共用劍
-  bow:      { white: assetUrl('equip/icon_bow_white.jpg'),      green: assetUrl('equip/icon_bow_green.jpg'),      blue: assetUrl('equip/icon_bow_blue.jpg'),      red: assetUrl('equip/icon_bow_red.jpg'),      purple: assetUrl('equip/icon_bow_purple.jpg'),      gold: assetUrl('equip/icon_bow_gold.jpg') },
-  staff:    { white: assetUrl('equip/icon_staff_white.jpg'),    green: assetUrl('equip/icon_staff_green.jpg'),    blue: assetUrl('equip/icon_staff_blue.jpg'),    red: assetUrl('equip/icon_staff_red.jpg'),    purple: assetUrl('equip/icon_staff_purple.jpg'),    gold: assetUrl('equip/icon_staff_gold.jpg') },
-  dagger:   { white: assetUrl('equip/icon_dagger_white.jpg'),   green: assetUrl('equip/icon_dagger_green.jpg'),   blue: assetUrl('equip/icon_dagger_blue.jpg'),   red: assetUrl('equip/icon_dagger_red.jpg'),   purple: assetUrl('equip/icon_dagger_purple.jpg'),   gold: assetUrl('equip/icon_dagger_gold.jpg') },
-  weapon:   { white: assetUrl('equip/icon_weapon_white.jpg'),   green: assetUrl('equip/icon_weapon_green.jpg'),   blue: assetUrl('equip/icon_weapon_blue.jpg'),   red: assetUrl('equip/icon_weapon_red.jpg'),   purple: assetUrl('equip/icon_weapon_purple.jpg'),   gold: assetUrl('equip/icon_weapon_gold.jpg') },
 };
 
 // 獲取道具圖資 URL（道具ID優先，裝備按類型回落）
@@ -5908,23 +5692,6 @@ function getItemIconUrl(item) {
   if (item.type && ITEM_ICONS[item.type]) return ITEM_ICONS[item.type];
   if (item.itemType === 'consumable') return ITEM_ICONS.hp2;
   return ITEM_ICONS.chest;
-}
-
-// v2.8.1：按部位+品質取裝備圖標，每件「部位×品質」單一圖標不拼貼
-function getEquipRarityIcon(type, rarity) {
-  const slotMap = { weapon:'sword', armor:'armor', helmet:'helmet', boots:'boots',
-    gloves:'gloves', belt:'belt', cape:'cape', pants:'pants', ring:'ring',
-    ring1:'ring', ring2:'ring', necklace:'necklace', shield:'shield',
-    accessory:'ring', bow:'bow', staff:'staff', dagger:'dagger',
-    sword:'sword' };
-  const slot = slotMap[type] || 'sword';
-  const r = rarity || 'white';
-  const icon = EQUIP_RARITY_ICONS[slot]?.[r] || EQUIP_RARITY_ICONS.sword.white;
-  // v2.8.3：診斷 log（只在 type 不在 slotMap 或 slot 映射異常時打印，避免刷屏）
-  if (!slotMap[type] || !EQUIP_RARITY_ICONS[slot]?.[r]) {
-    console.log('[getEquipRarityIcon] type=', type, 'rarity=', r, '→ slot=', slot, '→ icon=', icon);
-  }
-  return icon;
 }
 
 // ==================== 裝備配置 ====================
@@ -5942,77 +5709,40 @@ const EQUIP_SLOTS = [
   { id: 'boots',   name: '靴子',   pos: 'feet' },
 ];
 
-// 裝備部位對應圖標（v2.7.4：白色品質為預設，帶品質請用 getEquipRarityIcon）
+// 裝備部位對應圖標（v2.4.0：新語意路徑 assets/equip/icon_*.jpg）
 const EQUIP_ICON_MAP = {
-  helmet:   assetUrl('equip/icon_helmet_white.jpg'),
-  armor:    assetUrl('equip/icon_armor_white.jpg'),
-  weapon:   assetUrl('equip/icon_sword_white.jpg'),
-  necklace: assetUrl('equip/icon_necklace_white.jpg'),
-  ring:     assetUrl('equip/icon_ring_white.jpg'),
-  ring1:    assetUrl('equip/icon_ring_white.jpg'),
-  ring2:    assetUrl('equip/icon_ring_white.jpg'),
-  boots:    assetUrl('equip/icon_boots_white.jpg'),
-  gloves:   assetUrl('equip/icon_gloves_white.jpg'),
-  belt:     assetUrl('equip/icon_belt_white.jpg'),
-  cape:     assetUrl('equip/icon_cape_white.jpg'),
-  pants:    assetUrl('equip/icon_pants_white.jpg'),
-  shield:   assetUrl('equip/icon_shield_white.jpg'),
-  // v2.8.1：遠程/法系/刺客武器獨立圖標，不再共用劍
-  sword:    assetUrl('equip/icon_sword_white.jpg'),
-  bow:      assetUrl('equip/icon_bow_white.jpg'),
-  staff:    assetUrl('equip/icon_staff_white.jpg'),
-  dagger:   assetUrl('equip/icon_dagger_white.jpg'),
-  accessory:assetUrl('equip/icon_ring_white.jpg'),
+  helmet:   assetUrl('equip/icon_helmet.jpg'),
+  armor:    assetUrl('equip/icon_armor.jpg'),
+  weapon:   assetUrl('equip/icon_sword.jpg'),
+  necklace: assetUrl('equip/icon_ring.jpg'),
+  ring:     assetUrl('equip/icon_ring.jpg'),
+  ring1:    assetUrl('equip/icon_ring.jpg'),
+  ring2:    assetUrl('equip/icon_ring.jpg'),
+  boots:    assetUrl('equip/icon_boots.jpg'),
+  gloves:   assetUrl('equip/icon_armor.jpg'),
+  belt:     assetUrl('equip/icon_armor.jpg'),
+  cape:     assetUrl('equip/icon_armor.jpg'),
+  pants:    assetUrl('equip/icon_armor.jpg'),
+  shield:   assetUrl('equip/icon_shield.jpg'),
+  bow:      assetUrl('equip/icon_bow.jpg'),
+  staff:    assetUrl('equip/icon_staff.jpg'),
 };
 
-// 道具/消耗品圖標（v2.7.7：全面重製，天堂W寫實風、每種道具獨特識別）
+// 道具/消耗品圖標（v2.4.0：新語意路徑 assets/item/icon_*.jpg）
 const ITEM_ICON_MAP = {
-  // 藥水系列
-  potion_hp:          assetUrl('item/icon_potion_hp.jpg'),
-  potion_mp:          assetUrl('item/icon_potion_mp.jpg'),
-  potion_green:       assetUrl('item/icon_potion_green.jpg'),
-  potion_orange:      assetUrl('item/icon_potion_orange.jpg'),
-  // 卷軸系列
-  scroll:             assetUrl('item/icon_scroll.jpg'),
-  teleport_scroll:    assetUrl('item/icon_teleport_scroll.jpg'),
-  revive_scroll:      assetUrl('item/icon_revive_scroll.jpg'),
-  quest_scroll:       assetUrl('item/icon_quest_scroll.jpg'),
-  bag_scroll:         assetUrl('item/icon_bag_scroll.jpg'),
-  enhance_scroll:     assetUrl('item/icon_enhance_scroll.jpg'),
-  probability_scroll: assetUrl('item/icon_probability_scroll.jpg'),
-  // 寶石系列
-  gem:                assetUrl('item/icon_gem_ruby.jpg'),
-  gem_ruby:           assetUrl('item/icon_gem_ruby.jpg'),
-  gem_sapphire:       assetUrl('item/icon_gem_sapphire.jpg'),
-  gem_emerald:        assetUrl('item/icon_gem_emerald.jpg'),
-  gem_amethyst:       assetUrl('item/icon_gem_amethyst.jpg'),
-  diamond:            assetUrl('item/icon_gem_sapphire.jpg'),
-  enhance:            assetUrl('item/icon_enhance_stone.jpg'),
-  enhance_stone:      assetUrl('item/icon_enhance_stone.jpg'),
-  soul_gem:           assetUrl('item/icon_soul_gem.jpg'),
-  crystal_shard:      assetUrl('item/icon_crystal_shard.jpg'),
-  // 寶箱
-  chest:              assetUrl('item/icon_chest.jpg'),
-  chest_open:         assetUrl('item/icon_chest_open.jpg'),
-  // 貨幣 / 材料
-  gold:               assetUrl('item/icon_gold_coin.jpg'),
-  gold_coin:          assetUrl('item/icon_gold_coin.jpg'),
-  dragon_scale:       assetUrl('item/icon_dragon_scale.jpg'),
-  dungeon_key:        assetUrl('item/icon_dungeon_key.jpg'),
-  monster_eye:        assetUrl('item/icon_monster_eye.jpg'),
-  bless_stone:        assetUrl('item/icon_bless_stone.jpg'),
-  // 書籍 / 體驗券
-  ancient_book:       assetUrl('item/icon_ancient_book.jpg'),
-  true_death_coupon:  assetUrl('item/icon_ticket_death_knight.jpg'), // v2.7.9: 向後相容
-  transform_coupon:   assetUrl('item/icon_ticket_death_knight.jpg'), // v2.7.9: 向後相容
-  // fallback
-  default:            assetUrl('item/icon_gem_ruby.jpg'),
+  potion_hp: assetUrl('item/icon_potion_hp.jpg'),
+  potion_mp: assetUrl('item/icon_potion_mp.jpg'),
+  scroll:    assetUrl('item/icon_scroll.jpg'),
+  gem:       assetUrl('item/icon_gem_ruby.jpg'),
+  enhance:   assetUrl('item/icon_gem_ruby.jpg'),
+  gold:      assetUrl('item/icon_gold_coin.jpg'),
+  diamond:   assetUrl('item/icon_gem_ruby.jpg'),
+  default:   assetUrl('item/icon_gem_ruby.jpg'),
 };
 
-// 取得裝備圖標 URL（按類型，白色品質預設；推薦使用 getEquipRarityIcon(type, rarity)）
+// 取得裝備圖標 URL（按類型）
 function getEquipIcon(type) {
-  // v2.8.4：統一入口，全部走 getEquipRarityIcon（白色品質）
-  return getEquipRarityIcon(type, 'white');
+  return EQUIP_ICON_MAP[type] || EQUIP_ICON_MAP.weapon;
 }
 
 const EQUIP_TYPES = {
@@ -6627,22 +6357,6 @@ function loadGameFromSlot(idx) {
 function applySaveData(data) {
   if (!data || typeof data !== 'object') return false;
   SAVE_FIELDS.forEach(function(k) { if (k in data) GS[k] = data[k]; });
-  // v2.7.7：完整性校驗 — 防止損壞存檔把關鍵欄位覆蓋成 null/undefined
-  if (!GS.player || typeof GS.player !== 'object') {
-    console.warn('[存檔] player 欄位損壞，已恢復預設值');
-    GS.player = {
-      name: '玩家', classId: 'warrior', level: 1, exp: 0, expMax: 100,
-      x: 200, y: 260, targetX: 200, targetY: 260,
-      hp: 200, hpMax: 200, mp: 100, mpMax: 100,
-      state: 'idle', facing: 'right', attackCooldown: 0,
-      skillCooldowns: [0,0,0,0,0,0,0,0], hitTimer: 0,
-      transformId: null, buffs: {},
-    };
-  }
-  if (!Array.isArray(GS.aiPlayers)) GS.aiPlayers = [];
-  if (!Array.isArray(GS.monsters)) GS.monsters = [];
-  if (!GS.resources || typeof GS.resources !== 'object') GS.resources = { gold: 0, gem: 0 };
-  if (!GS.inventory) GS.inventory = [];
   console.log('[存檔] 英雄', GS.ownedHeroes?.length || 0, '張 / 寵物', GS.ownedPets?.length || 0, '張 / 變身', GS.ownedTransforms?.length || 0, '張');
   return true;
 }
@@ -6709,57 +6423,31 @@ function updateMultiplayerStatus(status) {
   const txt = document.getElementById('mp-status-text');
   const btn = document.getElementById('mp-connect-btn');
   const s = status || S.OFFLINE;
-  // v2.7.7：讀取傳輸方式與失敗原因（WebSocket / Long-Poll）
-  const transport = (window.MultiplayerClient && MultiplayerClient.transport) || '';
-  const wsReason = (window.MultiplayerClient && MultiplayerClient.wsFailureReason) || '';
-  const wsCloseCode = window.MultiplayerClient ? MultiplayerClient.wsLastCloseCode : null;
-  const wsCloseReason = window.MultiplayerClient ? MultiplayerClient.wsLastCloseReason : '';
   // 狀態點
-    if (dot) {
-     dot.className = 'mp-status-dot mp-status-' + s;
-     let title = '';
-     if (s === S.ONLINE) {
-       if (transport === 'websocket') title = 'WebSocket 實時連線（正常）';
-       else if (transport === 'longpoll') title = '長輪詢模式（WS 未升級，已降級 LP）';
-       else title = '已連線多人';
-       if (wsReason) title += '\nWS 失敗: ' + wsReason;
-       if (wsCloseCode != null) title += '\nclose code: ' + wsCloseCode + (wsCloseReason ? ' / ' + wsCloseReason : '');
-     } else if (s === S.ERROR) {
-       title = '連線失敗';
-       if (wsReason) title += '\nWS: ' + wsReason;
-       if (wsCloseCode != null) title += '\nclose code: ' + wsCloseCode + (wsCloseReason ? ' / ' + wsCloseReason : '');
-     } else {
-       const titles = {
-         offline: '離線',
-         loading: '載入中...',
-         connecting: '連線中...',
-         reconnecting: '斷線重連中...',
-       };
-       title = titles[s] || '';
-       if (wsReason) title += '\nWS: ' + wsReason;
-       if (wsCloseCode != null) title += '\nclose code: ' + wsCloseCode + (wsCloseReason ? ' / ' + wsCloseReason : '');
-     }
-     dot.title = title;
-   }
+  if (dot) {
+    dot.className = 'mp-status-dot mp-status-' + s;
+    const titles = {
+      offline: '連線中',
+      loading: '載入中...',
+      connecting: '連線中...',
+      online: '已連線多人',
+      reconnecting: '斷線重連中...',
+      error: '連線失敗',
+    };
+    dot.title = titles[s] || '';
+  }
   // 設定面板狀態文字
   if (txt) {
     txt.className = 'mp-status-text mp-status-' + s;
-    let label = '連線中';
-    if (s === S.ONLINE) {
-      if (transport === 'websocket') label = '已連線 · WebSocket';
-      else if (transport === 'longpoll') label = '已連線 · 長輪詢';
-      else label = '已連線';
-    } else {
-      const labels = {
-        offline: '離線',
-        loading: '載入中...',
-        connecting: '連線中，伺服器可能喚醒中',
-        reconnecting: '斷線重連中',
-        error: '連線失敗',
-      };
-      label = labels[s] || '連線中';
-    }
-    txt.textContent = label;
+    const labels = {
+      offline: '連線中',
+      loading: '載入中...',
+      connecting: '連線中，伺服器可能喚醒中',
+      online: '已連線',
+      reconnecting: '斷線重連中',
+      error: '連線失敗',
+    };
+    txt.textContent = labels[s] || '連線中';
   }
   // 連線按鈕文字
   if (btn) {
@@ -6951,32 +6639,13 @@ function showInitError(err) {
 }
 
 function _initCore() {
-  // v2.7.2：角色為 null 時不要 init，明確導回選角頁
-  if (!GS.player || !GS.player.classId) {
-    console.error('[Init] 嚴重：GS.player 不存在或無 classId，跳過 init 並嘗試導回選角');
-    // 嘗試從伺服器重新載入角色列表並回到選角頁
-    try {
-      const overlay = document.getElementById('auth-overlay');
-      const gameRoot = document.getElementById('game-root');
-      if (gameRoot) gameRoot.classList.add('game-hidden');
-      if (overlay) {
-        overlay.classList.remove('hidden');
-        // 觸發 auth.js 的角色列表刷新
-        if (window.AuthSystem && typeof window.AuthSystem.refreshCharList === 'function') {
-          window.AuthSystem.refreshCharList();
-        }
-      }
-    } catch(e) { console.warn('[Init] 導回選角失敗:', e); }
-    throw new Error('角色資料缺失，請重新選擇角色');
-  }
   // v2.4.0：啟動時非同步載入 assets-manifest（失敗也不影響，走 fallback）
   loadAssetsManifest().then(manifest => {
     if (manifest) {
       console.log('[Init] assets-manifest 已就緒，刷新圖片路徑中...');
       try {
         // 重新載入當前地圖背景、玩家精靈、NPC 精靈等
-        // v2.7.7：manifest 非同步回呼可能在 __resetGameState 之後到達，增加 GS.player 防衛
-        if (GS.currentMap && sceneBg && GS.player) loadMap(GS.currentMap);
+        if (GS.currentMap && sceneBg) loadMap(GS.currentMap);
         refreshAllSprites();
       } catch (e) { console.warn('[Init] manifest 載入後刷新失敗:', e); }
     }
@@ -7119,12 +6788,8 @@ function _initCore() {
   // 绑定事件
   bindEvents();
 
-  // v3.1.1：用 GS.currentMap 載入地圖，不再硬編碼 village
-  //  若 currentMap 為空或無效，才 fallback 到 village
-  const allMaps = getAllMaps();
-  const initialMap = (GS.currentMap && allMaps[GS.currentMap]) ? GS.currentMap : 'village';
-  console.log('[Init] 初始地圖:', initialMap, '(currentMap=' + GS.currentMap + ')');
-  loadMap(initialMap);
+  // 載入地圖
+  loadMap('village');
 
   GS.player.x = worldW / 2;
   GS.player.y = worldH * 0.75;
@@ -7226,11 +6891,22 @@ function _initCore() {
     try { initMultiplayerUI(); } catch (e) { console.warn('initMultiplayerUI error:', e); }
   }
 
-   // v3.1.3：移除重複自動連線 — auth.js 的 startGameCommon() 已是權威連線入口
-   //  這裡再連一次會造成 connect→disconnect→connect 抖動，導致狀態混亂
-   //  保留這段註解做為歷史標記，連線流程統一由 auth.js 管理
+  // ===== v2.0 自動連線多人伺服器 =====
+  if (window.MultiplayerClient && window.AuthSystem) {
+    try {
+      const server = AuthSystem.getCurrentServer();
+      if (server) {
+        const serverUrl = window.location.origin;
+        MultiplayerClient.connect(serverUrl, (window.AuthSystem && AuthSystem.getToken) ? AuthSystem.getToken() : '').then(() => {
+          console.log('[v2.0] 自動連線成功:', serverUrl);
+        }).catch(err => {
+          console.warn('[v2.4.0] 自動連線失敗，重新連線中:', err.message);
+        });
+      }
+    } catch (e) { console.warn('[v2.0] auto connect error:', e); }
+  }
 
- } // end of _initCore
+} // end of _initCore
 
 function worldMaxW() { return Math.max(worldW, CAMERA.worldWidth); }
 function worldMaxH() { return Math.max(worldH, CAMERA.worldHeight); }
@@ -7328,12 +7004,6 @@ function shuffle(arr) {
 }
 
 function initGlobalAIPool() {
-  // v2.7.2：線上模式（伺服器 AI 權威）不做本地隨機生成
-  if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
-    console.log('[AI] 線上模式：跳過本地 AI 池初始化，由伺服器廣播');
-    _aiPoolInitDone = true;
-    return;
-  }
   // 防重复创建：已达到上限或已初始化完成则直接返回
   if (_aiPoolInitDone || GLOBAL_AI_POOL.length >= MAX_AI_PLAYERS) return;
   // 正在初始化中，避免重入
@@ -7810,11 +7480,6 @@ function assignActiveAIToCurrentMap() {
 
 function spawnAIPlayers() {
   try {
-    // v2.7.2：線上模式跳過本地 AI 生成，由伺服器廣播
-    if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
-      console.log('[AI] 線上模式：跳過本地 spawnAIPlayers，使用伺服器 AI');
-      return;
-    }
     // 確保全AI池已初始化
     initGlobalAIPool();
     // 等待AI池初始化完成（異步情況下延遲生成）
@@ -7862,27 +7527,51 @@ function createAISprite(ai) {
   const isEnemy = ai.nation && GS.nation && ai.nation !== GS.nation;
   if (isEnemy) elDiv.classList.add('enemy-ai');
   const s = ai.sprite || SPRITE.warrior;
+  const isImg = !!s.useImg;
   const filter = `drop-shadow(0 0 4px ${s.glow || '#ffe090'}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
-  // v2.9.0：統一用 buildSpriteHTML 完整 8 幀結構，AI 移動/攻擊有正確動畫，不再是單張靜止圖
-  const isMulti = !!(s && s.multiFrame);
-  elDiv.innerHTML = buildSpriteHTML(s, 'hero', !isMulti);
-  if (isMulti) {
-    initUnitAnimState(ai.uid);
-    setUnitAnimState(ai.uid, 'idle', { dir: ai.dir || 'down' });
-  }
-  // 名字標籤：國旗+名稱（覆蓋 buildSpriteHTML 的預設）
-  const nameEl = elDiv.querySelector('.unit-name');
+  // 名字標籤：國旗+名稱
   const n = NATIONS.find(nn => nn.id === ai.nation);
   const flagImg = n ? safeFlagImg(ai.nation, 12) : '';
-  if (nameEl) {
-    nameEl.style.color = isEnemy ? '#ff8080' : '#80d0ff';
-    nameEl.style.fontSize = '10px';
-    nameEl.innerHTML = flagImg + (ai.name || 'AI');
+  const nameEl = document.createElement('div');
+  nameEl.className = 'unit-info';
+  nameEl.innerHTML = `
+    <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:${isEnemy ? '#ff5050' : '#50c8ff'}"></div></div>
+    <div class="unit-name" style="color:${isEnemy ? '#ff8080' : '#80d0ff'};font-size:10px">${flagImg}${ai.name}</div>
+    <div class="unit-level-tag" style="display:none"></div>
+  `;
+  elDiv.appendChild(nameEl);
+  // 精灵图（真實圖片優先，emoji 備用）— 尺寸與玩家一致
+  const wrap = document.createElement('div');
+  wrap.className = 'unit-sprite-wrap';
+  wrap.style.width = '64px';
+  wrap.style.height = '80px';
+  if (isImg) {
+    const imgIdle = document.createElement('img');
+    imgIdle.className = 'unit-sprite-img sprite-frame-idle';
+    imgIdle.src = s.idle;
+    imgIdle.style.filter = filter;
+    imgIdle.alt = '';
+    imgIdle.loading = 'lazy';
+    imgIdle.onerror = function() { if (!this.dataset.err) { this.dataset.err='1'; this.classList.add('frame-error'); } };
+    wrap.appendChild(imgIdle);
+    const tomb = document.createElement('div');
+    tomb.className = 'unit-sprite-tomb';
+    tomb.textContent = '墓';
+    tomb.style.display = 'none';
+    wrap.appendChild(tomb);
+  } else {
+    const emoji = document.createElement('div');
+    emoji.className = 'unit-sprite-emoji';
+    emoji.textContent = s.idle || '技';
+    emoji.dataset.spriteIdle = s.idle || '技';
+    emoji.dataset.spriteAttack = s.attack || s.idle || '技';
+    emoji.dataset.spriteDead = '墓';
+    emoji.style.color = s.color || '#c0a060';
+    emoji.style.fontSize = '52px';
+    emoji.style.filter = filter;
+    wrap.appendChild(emoji);
   }
-  const hpFill = elDiv.querySelector('.unit-hp-fill');
-  if (hpFill) hpFill.style.background = isEnemy ? '#ff5050' : '#50c8ff';
-  const lvTag = elDiv.querySelector('.unit-level-tag');
-  if (lvTag) lvTag.style.display = 'none';
+  elDiv.appendChild(wrap);
   // 阴影
   const shadow = document.createElement('div');
   shadow.className = 'unit-shadow';
@@ -8095,7 +7784,7 @@ function renderTradeSlots() {
     cell.style.cssText = 'width:100%;aspect-ratio:1;background:rgba(0,0,0,0.4);border:1px solid #604020;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer';
     const item = tradeState.myItems[i];
     if (item) {
-      const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
+      const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
       const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
       cell.style.borderColor = rc.color;
       cell.innerHTML = `
@@ -8116,7 +7805,7 @@ function renderTradeSlots() {
     cell.style.cssText = 'width:100%;aspect-ratio:1;background:rgba(0,0,0,0.4);border:1px solid #604020;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative';
     const item = tradeState.partnerItems[i];
     if (item) {
-      const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
+      const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
       const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
       cell.style.borderColor = rc.color;
       cell.innerHTML = `
@@ -8151,7 +7840,7 @@ function showTradeItemPicker(slotIndex) {
       </div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
         ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
-          const iconUrl = it.itemType === 'equipment' ? getEquipRarityIcon(it.type, it.rarity) : getItemIconUrl(it);
+          const iconUrl = it.itemType === 'equipment' ? getEquipIcon(it.type) : getItemIconUrl(it);
           const rc = RARITY_CONFIG[it.rarity] || RARITY_CONFIG.white;
           return `
             <div class="trade-picker-item" data-idx="${idx}" style="aspect-ratio:1;border:2px solid ${rc.color};border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,0.4);position:relative" title="${it.name}${it.count > 1 ? ' ×' + it.count : ''}">
@@ -8595,7 +8284,7 @@ function renderAuctionBrowse(container) {
 }
 
 function renderAuctionItemRow(item, mode) {
-  const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
+  const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
   const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
   const currencyIcon = item.currency === 'gem' ? '鑽' : '金';
   const tax = Math.floor(item.price * AUCTION_TAX_RATE);
@@ -8700,7 +8389,7 @@ function renderAuctionSell(container) {
     <div style="font-size:12px;color:#ffd080;margin-bottom:6px">選擇要掛售的物品：</div>
     <div class="auction-sell-grid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px;max-height:200px;overflow:auto;padding:6px;background:rgba(0,0,0,0.25);border-radius:6px;border:1px solid #402810">
       ${tradeable.length === 0 ? '<div style="grid-column:1/-1;text-align:center;color:#807060;padding:20px;font-size:12px">無可交易物品</div>' : tradeable.map((it, idx) => {
-        const iconUrl = it.itemType === 'equipment' ? getEquipRarityIcon(it.type, it.rarity) : getItemIconUrl(it);
+        const iconUrl = it.itemType === 'equipment' ? getEquipIcon(it.type) : getItemIconUrl(it);
         const rc = RARITY_CONFIG[it.rarity] || RARITY_CONFIG.white;
         return `
           <div class="auction-sell-item" data-idx="${idx}" style="aspect-ratio:1;border:2px solid ${rc.color};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,0.4);position:relative" title="${it.name}${it.count > 1 ? ' ×' + it.count : ''}">
@@ -8728,7 +8417,7 @@ function showAuctionSellForm(item) {
   const detail = document.getElementById('auction-sell-detail');
   if (!detail) return;
   const rc = RARITY_CONFIG[item.rarity] || RARITY_CONFIG.white;
-  const iconUrl = item.itemType === 'equipment' ? getEquipRarityIcon(item.type, item.rarity) : getItemIconUrl(item);
+  const iconUrl = item.itemType === 'equipment' ? getEquipIcon(item.type) : getItemIconUrl(item);
   const maxCount = item.count || 1;
   detail.innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
@@ -8872,25 +8561,6 @@ function onAIPlayerClick(ai) {
 }
 
 function dealDamageToAIPlayer(ai, dmg, damageType, skill, effectType) {
-  // v2.7.5：伺服器 AI 由伺服器權威扣血，本地只發送攻擊事件
-  if (ai && ai.isServerAI && window.MultiplayerClient && MultiplayerClient.connected) {
-    const isCrit = damageType === 'crit' || Math.random() < 0.05;
-    const finalDmg = isCrit ? Math.floor(dmg * 1.5) : dmg;
-    if (typeof MultiplayerClient.reportAttack === 'function') {
-      MultiplayerClient.reportAttack(ai.uid, skill ? skill.id : 0, finalDmg);
-    }
-    // 本地立刻顯示傷害飄字與受擊閃爍（視覺反饋，實際血量等伺服器確認）
-    if (typeof showDamage === 'function') {
-      try { showDamage(ai.x, ai.y - 50, finalDmg, isCrit ? 'crit' : 'normal'); } catch(e) {}
-    }
-    if (ai.el) {
-      ai.el.classList.add('hit-flash');
-      setTimeout(() => ai.el && ai.el.classList.remove('hit-flash'), 150);
-    }
-    addLog(isCrit ? 'crit' : 'damage',
-      `你對【${ai.name}】造成 ${finalDmg} 傷害${isCrit ? '（暴擊）' : ''}${skill?.name ? ' · ' + skill.name : ''}`);
-    return;
-  }
   if (!ai || ai.hp <= 0) return;
   const isCrit = damageType === 'crit' || Math.random() < 0.05;
   const finalDmg = isCrit ? Math.floor(dmg * 1.5) : dmg;
@@ -9738,13 +9408,9 @@ function updateRankings() {
     guild: GS.guild?.name || '散人',
     classId: GS.player.classId,
   });
-  // v2.8.2：在線模式下排行榜從伺服器 AI 池讀取（server 端活躍 AI），離線模式才用本地 GLOBAL_AI_POOL
-  //  確保「排行榜有 AI 但地圖上沒有」的幽靈 AI 不再出現
-  const aiListForRanking = (typeof _serverAIActive !== 'undefined' && _serverAIActive && window._serverAIMap)
-    ? Array.from(_serverAIMap.values())
-    : (GLOBAL_AI_POOL || []);
-  if (aiListForRanking.length > 0) {
-     aiListForRanking.forEach(ai => {
+  // 全服AI玩家數據（真實數據，200個跨地圖AI全數上榜）
+  if (GLOBAL_AI_POOL && GLOBAL_AI_POOL.length > 0) {
+     GLOBAL_AI_POOL.forEach(ai => {
        entries.push({
          isPlayer: false,
          name: ai.name,
@@ -9811,9 +9477,34 @@ function updateRankings() {
 }
 
 // 取得某國家可用公民（真實玩家+AI玩家，10級以上）
+// v4.2.0：優先從伺服器/api/nation/members取得在線真實玩家
+let _nationMembersCache = { nation: '', time: 0, list: [] };
 function getNationCitizens(nationId) {
   const list = [];
-  // 真實玩家
+  // v4.2.0：從伺服器取得在線真實玩家（非本地生成）
+  try {
+    const now = Date.now();
+    if (_nationMembersCache.nation === nationId && (now - _nationMembersCache.time) < 5000) {
+      list.push(..._nationMembersCache.list);
+    } else {
+      // 非同步 fetch，下次呼叫時使用快取
+      fetch('/api/nation/members?nation=' + encodeURIComponent(nationId))
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.ok && data.members) {
+            _nationMembersCache = {
+              nation: nationId,
+              time: Date.now(),
+              list: data.members.map(m => ({
+                isPlayer: true, isOnline: true, name: m.name, level: m.level,
+                power: 0, contribution: 0, classId: m.classId, id: m.id,
+              })),
+            };
+          }
+        }).catch(() => {});
+    }
+  } catch(e) {}
+  // 真實玩家（自己）
   if (GS.nation === nationId) {
     const playerPower = Math.floor(getTotalAtk() + getTotalDef() + getTotalHpMax() * 0.1 + (getTotalCrit() || 0) * 2);
     list.push({
@@ -11267,16 +10958,7 @@ function checkMonsterRespawn(dt) {
 
 
 function initClass() {
-  // v2.7.2：防衛——若 player 或 classId 為空，直接返回避免崩潰
-  if (!GS.player || !GS.player.classId) {
-    console.warn('[initClass] 跳過：player.classId 不存在，player=', GS.player);
-    return;
-  }
   const cls = CLASSES[GS.player.classId];
-  if (!cls) {
-    console.warn('[initClass] 跳過：職業', GS.player.classId, '不存在於 CLASSES');
-    return;
-  }
   // 应用职业基础屬性
   for (const k in cls.baseStats) {
     if (k === 'hpMax') GS.player.hpMax = cls.baseStats.hpMax;
@@ -11684,7 +11366,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <div class="unit-name"></div>
         <div class="unit-level-tag"></div>
       </div>
-      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}${dirClass}" style="width:${size.w}px;height:${size.h}px;background:transparent;">
+      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}${dirClass}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
         ${hasDir ? '' : `<img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>`}
         ${dirLayerHTML}
         <div class="unit-sprite-tomb" style="display:none"></div>
@@ -11714,7 +11396,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
       <div class="unit-name"></div>
       <div class="unit-level-tag"></div>
     </div>
-    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''} ${s.singleFrame ? 'sprite-single-frame' : ''}" style="width:${size.w}px;height:${size.h}px;background:transparent;">
+    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''} ${s.singleFrame ? 'sprite-single-frame' : ''}" style="width:${size.w}px;height:${size.h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
       ${isImg ? `
         <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" onerror="${onErrorHide}"/>
         <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
@@ -11734,7 +11416,6 @@ function buildSpriteHTML(spriteObj, kind, lean) {
     <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:-1;overflow:visible">
       <div class="aura-glow-outer"></div>
       <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-      <div class="aura-flames"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <div class="aura-lightning">
         <div class="bolt bolt-1" style="clip-path: polygon(50% 0%, 70% 25%, 45% 38%, 80% 62%, 55% 75%, 88% 100%, 30% 100%, 45% 79%, 20% 62%, 55% 42%, 25% 25%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
         <div class="bolt bolt-2" style="clip-path: polygon(45% 0%, 75% 21%, 50% 33%, 88% 54%, 60% 67%, 95% 100%, 25% 100%, 38% 75%, 12% 58%, 50% 40%, 20% 21%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
@@ -11897,12 +11578,12 @@ const CLASS_STAT_PREFS = {
 // ===== v2.4.0 創角頁：天堂經典樣式 =====
 // 職業 → 對應真•系列金變 映射
 const CLASS_TRANSFORM_MAP = {
-  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.png' },
-  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_fallen_paladin/portrait.png' },
-  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_assassin/portrait.png' },
-  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_archer/portrait.png' },
-  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/transform/gold/true_death_mage/portrait.png' },
-  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_sorcerer/portrait.png' },
+  warrior: { id: 't_true_death_knight',     name: '真•死亡騎士',    spriteKey: 't_true_death_knight',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_knight/portrait.jpg' },
+  paladin: { id: 't_true_fallen_paladin',  name: '真•墮落聖執者',  spriteKey: 't_true_fallen_paladin',   rarity: '神話級', portrait: 'assets/transform/gold/true_fallen_paladin/portrait.jpg' },
+  rogue:   { id: 't_true_death_assassin',  name: '真•死亡刺客',    spriteKey: 't_true_death_assassin',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_assassin/portrait.jpg' },
+  archer:  { id: 't_true_death_archer',    name: '真•死亡弓箭手',  spriteKey: 't_true_death_archer',     rarity: '神話級', portrait: 'assets/transform/gold/true_death_archer/portrait.jpg' },
+  mage:    { id: 't_true_death_mage',      name: '真•死亡法師',    spriteKey: 't_true_death_mage',       rarity: '神話級', portrait: 'assets/transform/gold/true_death_mage/portrait.jpg' },
+  warlock: { id: 't_true_death_sorcerer',  name: '真•死亡術士',    spriteKey: 't_true_death_sorcerer',   rarity: '神話級', portrait: 'assets/transform/gold/true_death_sorcerer/portrait.jpg' },
 };
 
 // 職業詳細資訊（繁中）
@@ -12374,40 +12055,18 @@ function confirmCC2CharCreate() {
   const serverId = serverInfo?.id || 'local';
   
   if (apiFn) {
+    // v4.2.0：傳遞用戶點擊的槽位，避免伺服器總是塞第一個空槽
+    const slotIdx = window._pendingCreateSlot != null ? window._pendingCreateSlot : 0;
     apiFn('/characters/create', {
       name: name,
       classId: cid,
       server: serverId,
+      slotIdx: slotIdx,
     }).then(result => {
       if (result && result.ok) {
         // v2.5.0：記錄當前角色索引，確保存檔寫對槽位
         GS.currentCharIdx = result.idx != null ? result.idx : 0;
         try { localStorage.setItem('mmo_char_idx', String(GS.currentCharIdx)); } catch(e) {}
-        // v2.7.2：以伺服器回傳的角色資料為權威，確保 GS.player.classId 與 name 正確
-        //  避免創角後 selectedChar 為 null 導致 initClass 崩潰
-        if (!GS.player) GS.player = {};
-        if (result.character) {
-          // 優先使用伺服器回傳的完整角色物件
-          const ch = result.character;
-          GS.player.name = ch.name || name;
-          GS.player.classId = ch.classId || cid;
-          GS.player.level = ch.level || 1;
-          if (ch.hp != null) GS.player.hp = ch.hp;
-          if (ch.hpMax != null) GS.player.hpMax = ch.hpMax;
-        } else {
-          // 舊版相容：只有 name/classId
-          GS.player.name = name;
-          GS.player.classId = cid;
-          GS.player.level = GS.player.level || 1;
-        }
-        // 寫入本機快取（給 onAuthReady 讀）
-        try {
-          localStorage.setItem('mmo_new_char', JSON.stringify({
-            name: GS.player.name,
-            classId: GS.player.classId,
-            level: GS.player.level,
-          }));
-        } catch(e) {}
         enterWorld();
       } else {
         // server 回 ok:false 或非預期格式，顯示具體錯誤
@@ -12628,7 +12287,7 @@ function getTransformSprite(spriteKey) {
 function createPlayerSprite() {
   const src = getPlayerSprite();
   const elUnit = document.createElement('div');
-  elUnit.className = 'world-unit hero idle player-sprite';
+  elUnit.className = 'world-unit hero idle';
   elUnit.dataset.id = 'player';
   elUnit.innerHTML = buildSpriteHTML(src, 'hero');
   // 填充名字和等級：國旗在名稱左側
@@ -12707,7 +12366,6 @@ function updatePlayerSprite() {
         <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;overflow:visible">
           <div class="aura-glow-outer"></div>
           <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-          <div class="aura-flames"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
           <div class="aura-lightning">
             <div class="bolt bolt-1" style="clip-path: polygon(50% 0%, 70% 25%, 45% 38%, 80% 62%, 55% 75%, 88% 100%, 30% 100%, 45% 79%, 20% 62%, 55% 42%, 25% 25%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
             <div class="bolt bolt-2" style="clip-path: polygon(45% 0%, 75% 21%, 50% 33%, 88% 54%, 60% 67%, 95% 100%, 25% 100%, 38% 75%, 12% 58%, 50% 40%, 20% 21%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
@@ -12903,7 +12561,6 @@ function positionUnit(el, x, y, kind) {
 }
 
 function renderPlayer() {
-  if (!GS.player) return; // v2.7.7：null 防衛
   const p = GS.player;
   // 玩家始終在 worldLayer 中
   const parent = worldLayer;
@@ -12974,94 +12631,10 @@ function loadMap(mapId) {
   const map = allMaps[mapId];
   if (!map) return;
 
-  // v2.7.7：GS.player 為 null 時緊急恢復預設值，避免 null.x 崩潰
-  //  可能觸發原因：__resetGameState 後 manifest 非同步回呼、損壞存檔、切換角色競態
-  if (!GS.player) {
-    console.warn('[loadMap] GS.player 為 null，已恢復預設值（map=' + mapId + '）');
-    GS.player = {
-      name: '玩家', classId: 'warrior', level: 1, exp: 0, expMax: 100,
-      x: 200, y: 260, targetX: 200, targetY: 260,
-      hp: 200, hpMax: 200, mp: 100, mpMax: 100,
-      state: 'idle', facing: 'right', attackCooldown: 0,
-      skillCooldowns: [0,0,0,0,0,0,0,0], hitTimer: 0,
-      transformId: null, buffs: {},
-    };
-  }
-  // v2.7.7：確保 aiPlayers / monsters 陣列存在（null 會導致 forEach 崩潰）
-  if (!Array.isArray(GS.aiPlayers)) GS.aiPlayers = [];
-  if (!Array.isArray(GS.monsters)) GS.monsters = [];
-
-  // v2.8.0：完整換地圖清場 — 清除上圖所有世界DOM、精靈、計時器、動畫狀態、事件監聽
-  //  確保連續切 10+ 張圖後 DOM 節點數不增長、記憶體穩定
-  function fullMapCleanup() {
-    // 1. 特效層清空（傷害數字、打擊特效、投射物等）
-    if (el.effectLayer) el.effectLayer.innerHTML = '';
-    // 攻城特效層
-    if (el.siegeEffectLayer) el.siegeEffectLayer.innerHTML = '';
-
-    // 2. 世界層：移除所有非玩家單位（AI/怪物/召喚/NPC 由各自 render 重建，但這裡全清保險）
-    if (worldLayer) {
-      worldLayer.querySelectorAll('.world-unit:not(.player-sprite)').forEach(n => n.remove());
-    }
-
-    // 3. NPC 層清空（renderNPCs 會重建）
-    if (el.npcLayer) el.npcLayer.innerHTML = '';
-
-    // 4. 動畫狀態快取清空（避免舊圖怪物/AI 殘留狀態佔用記憶）
-    if (typeof unitAnimState === 'object' && unitAnimState instanceof Map) {
-      unitAnimState.clear();
-    }
-
-    // 5. 遠端玩家（多人連線）
-    if (window.MultiplayerClient && typeof MultiplayerClient._clearAll === 'function') {
-      try { MultiplayerClient._clearAll(); } catch(e) {}
-    }
-
-    // 6. 目標引用重置
-    if (typeof GS !== 'undefined') {
-      GS.targetAiUid = null;
-      GS.targetMonsterUid = null;
-      GS.targetPlayerUid = null;
-    }
-
-    // 7. 攻城戰相關（若在非攻城圖）
-    if (typeof cleanupCastleSiege === 'function') {
-      try { cleanupCastleSiege(); } catch(e) {}
-    }
-
-    // 8. 召喚物狀態
-    if (typeof summonedDemon !== 'undefined') summonedDemon = null;
-  }
-
   // 切出城堡地圖时清理攻城战状态和元素
   const curMap = allMaps[GS.currentMap];
   if (curMap?.type === 'castle_siege' && map.type !== 'castle_siege') {
     cleanupCastleSiege();
-  }
-
-  // v2.8.0：切圖前完整清場（確保 DOM/狀態不殘留）
-  const oldMap = GS.currentMap;
-  if (GS.currentMap && GS.currentMap !== mapId) {
-    fullMapCleanup();
-    // v2.8.3：防衛檢查 — 確保玩家 sprite 在 fullMapCleanup 後依然存在
-    // 理論上 .world-unit:not(.player-sprite):not(.hero) 不會刪玩家，但保險起見重建
-    let playerExists = false;
-    if (worldLayer && typeof createPlayerSprite === 'function') {
-      const existing = worldLayer.querySelector('[data-id="player"]');
-      if (!existing) {
-        console.warn('[MapSwitch] 玩家 sprite 在 fullMapCleanup 後遺失，重新建立');
-        createPlayerSprite();
-        playerExists = !!worldLayer.querySelector('[data-id="player"]');
-      } else {
-        playerExists = true;
-        // 把玩家元素移到 worldLayer 最後（確保在最上層）
-        if (existing.parentNode === worldLayer) {
-          worldLayer.appendChild(existing);
-        }
-      }
-    }
-    // v2.8.4：結構化切圖 log
-    console.log(`[MAP_SWITCH] from=${oldMap} to=${mapId} playerExists=${playerExists}`);
   }
 
   GS.currentMap = mapId;
@@ -13083,10 +12656,7 @@ function loadMap(mapId) {
   if (el.minimapTitle) el.minimapTitle.textContent = map.name;
 
   // 清空AI玩家DOM（彻底清除旧地图AI，避免残留死图）
-  // v2.7.7：過濾 null/undefined 元素，防止陣列中有空洞時崩潰
-  if (Array.isArray(GS.aiPlayers)) {
-    GS.aiPlayers.forEach(ai => { if (ai && ai.el) { ai.el.remove(); ai.el = null; } });
-  }
+  GS.aiPlayers.forEach(ai => { if (ai.el) { ai.el.remove(); ai.el = null; } });
   GS.aiPlayers = [];
   GS.targetAiUid = null;
   // 清理怪物動畫狀態（unitAnimState中的怪物条目），避免地圖切換後內存泄漏
@@ -13101,13 +12671,10 @@ function loadMap(mapId) {
   }
 
   // 清空怪物
-  if (Array.isArray(GS.monsters)) {
-    GS.monsters.forEach(m => {
-      if (!m) return;
-      const elDiv = worldLayer ? worldLayer.querySelector('[data-id="' + m.uid + '"]') : null;
-      if (elDiv) elDiv.remove();
-    });
-  }
+  GS.monsters.forEach(m => {
+    const elDiv = worldLayer.querySelector(`[data-id="${m.uid}"]`);
+    if (elDiv) elDiv.remove();
+  });
   GS.monsters = [];
   GS.targetMonsterUid = null;
   GS.targetAiUid = null;
@@ -13153,218 +12720,20 @@ function loadMap(mapId) {
   }
 
   // 玩家重置位置（世界中心偏下）
-  if (GS.player) {
-    GS.player.x = CAMERA.worldWidth / 2;
-    GS.player.y = CAMERA.worldHeight * 0.7;
-    GS.player.targetX = GS.player.x;
-    GS.player.targetY = GS.player.y;
-    GS.player.state = 'idle';
-  }
+  GS.player.x = CAMERA.worldWidth / 2;
+  GS.player.y = CAMERA.worldHeight * 0.7;
+  GS.player.targetX = GS.player.x;
+  GS.player.targetY = GS.player.y;
+  GS.player.state = 'idle';
   GS.autoMode = false;
   el.autoBtn.classList.remove('active');
   el.autoLabel.textContent = '自動';
   renderPlayer();
 }
 
-// ==================== v3.1.0 Zone Server 地圖切換 ====================
-// 伺服器主動推送的 map_change 事件處理（被動傳送、主動切換都走這個）
-function handleMapChange(msg) {
-  if (!msg || !msg.targetMap) return;
-  const targetMap = msg.targetMap;
-
-  console.log(`[handleMapChange] ${msg.fromMap || '?'} → ${targetMap} (${msg.mapConfig?.name || ''})`);
-
-  // 1. fade out 過渡
-  const overlay = _getMapTransitionOverlay();
-  overlay.style.opacity = '1';
-
-  setTimeout(() => {
-    // 2. 更新地圖配置（寬高、背景圖）
-    if (msg.mapConfig) {
-      CAMERA.worldWidth = msg.mapConfig.width || 2496;
-      CAMERA.worldHeight = msg.mapConfig.height || 1664;
-      if (msg.mapConfig.background && sceneBg) {
-        safeBackgroundUrl(sceneBg, msg.mapConfig.background);
-        sceneBg.style.backgroundRepeat = 'no-repeat';
-      }
-      if (msg.mapConfig.name && el.locationName) {
-        el.locationName.textContent = msg.mapConfig.name;
-        if (el.minimapTitle) el.minimapTitle.textContent = msg.mapConfig.name;
-      }
-      // BGM 切換
-      if (msg.mapConfig.bgm && window.AudioSystem) {
-        AudioSystem.changeMapMusic(targetMap);
-      }
-    }
-
-    // 3. 清場（移除舊地圖的所有實體）
-    _fullMapCleanupForZone();
-
-    // 4. 更新 GS.currentMap
-    GS.currentMap = targetMap;
-
-    // 5. 更新玩家位置（伺服器權威位置）
-    if (msg.self && GS.player) {
-      GS.player.x = msg.self.x || GS.player.x;
-      GS.player.y = msg.self.y || GS.player.y;
-      GS.player.hp = msg.self.hp != null ? msg.self.hp : GS.player.hp;
-      GS.player.maxHp = msg.self.maxHp != null ? msg.self.maxHp : GS.player.maxHp;
-      GS.player.mp = msg.self.mp != null ? msg.self.mp : GS.player.mp;
-      GS.player.maxMp = msg.self.maxMp != null ? msg.self.maxMp : GS.player.maxMp;
-      GS.player.state = msg.self.state || 'idle';
-      GS.player.dir = msg.self.dir || 'down';
-      if (typeof window.setServerSelfState === 'function') {
-        window.setServerSelfState(msg.self);
-      }
-    }
-
-    // 6. 重建 NPC（從 mapConfig 讀取）
-    if (msg.mapConfig && Array.isArray(msg.mapConfig.npcs) && msg.mapConfig.npcs.length > 0) {
-      // 用伺服器的 NPC 配置渲染
-      _renderNPCsFromConfig(msg.mapConfig.npcs);
-    } else {
-      // fallback：用本地 getAllMaps() 的配置
-      const allMaps = getAllMaps();
-      const map = allMaps[targetMap];
-      if (map) renderNPCs(map);
-    }
-
-    // 7. 重置 AOI 可見實體（清空舊地圖的 seenEntities）
-    if (window.MultiplayerClient && typeof MultiplayerClient._clearAll === 'function') {
-      MultiplayerClient._clearAll();
-    }
-
-    // 8. 新地圖的初始 AOI 實體
-    if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIEnter === 'function') {
-      window.handleAOIEnter(msg.entities);
-    }
-
-    // 9. 更新 AOI 半徑
-    if (msg.aoiRadius && typeof window.setAOIRadius === 'function') {
-      window.setAOIRadius(msg.aoiRadius);
-    }
-
-    // 10. 重新渲染玩家
-    renderPlayer();
-    if (typeof updateCamera === 'function') updateCamera();
-
-    // 11. fade in
-    setTimeout(() => {
-      overlay.style.opacity = '0';
-    }, 150);
-
-    console.log(`[handleMapChange] 切換完成，新地圖=${targetMap}，AOI 實體數=${msg.entities?.length || 0}`);
-  }, 200);
-}
-
-// 地圖切換過渡遮罩
-function _getMapTransitionOverlay() {
-  let overlay = document.getElementById('map-transition-overlay');
-  if (overlay) return overlay;
-  overlay = document.createElement('div');
-  overlay.id = 'map-transition-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:9999;transition:opacity 0.2s ease;';
-  document.body.appendChild(overlay);
-  return overlay;
-}
-
-// Zone 架構下的完整清場（只清世界實體，保留玩家 sprite）
-function _fullMapCleanupForZone() {
-  // 特效層清空
-  if (el.effectLayer) el.effectLayer.innerHTML = '';
-  if (el.siegeEffectLayer) el.siegeEffectLayer.innerHTML = '';
-  // 世界層：移除非玩家單位
-  if (worldLayer) {
-    worldLayer.querySelectorAll('.world-unit:not(.player-sprite):not(.hero)').forEach(n => n.remove());
-  }
-  // NPC 層清空
-  if (el.npcLayer) el.npcLayer.innerHTML = '';
-  // 動畫狀態快取清空
-  if (typeof unitAnimState === 'object' && unitAnimState instanceof Map) {
-    unitAnimState.clear();
-  }
-  // 遠端玩家（多人連線）
-  if (window.MultiplayerClient && typeof MultiplayerClient._clearAll === 'function') {
-    try { MultiplayerClient._clearAll(); } catch(e) {}
-  }
-  // 目標引用重置
-  if (typeof GS !== 'undefined') {
-    GS.targetAiUid = null;
-    GS.targetMonsterUid = null;
-    GS.targetPlayerUid = null;
-  }
-  // 清空 AI 和怪物（本地的，Zone 架構下這些由伺服器 AOI 同步）
-  if (Array.isArray(GS.aiPlayers)) {
-    GS.aiPlayers.forEach(ai => { if (ai && ai.el) { ai.el.remove(); ai.el = null; } });
-    GS.aiPlayers = [];
-  }
-  if (Array.isArray(GS.monsters)) {
-    GS.monsters.forEach(m => {
-      if (!m) return;
-      const elDiv = worldLayer ? worldLayer.querySelector('[data-id="' + m.uid + '"]') : null;
-      if (elDiv) elDiv.remove();
-    });
-    GS.monsters = [];
-  }
-  // 召喚物
-  document.querySelectorAll('.world-unit.summon').forEach(el => el.remove());
-  if (typeof summonedDemon !== 'undefined') summonedDemon = null;
-}
-
-// 從伺服器 mapConfig 渲染 NPC
-function _renderNPCsFromConfig(npcs) {
-  if (!el.npcLayer) return;
-  el.npcLayer.innerHTML = '';
-  // 使用現有 NPC sprite 映射（從 renderNPCs 借用）
-  const npcSprites = {
-    shop:       { emoji: '🛒', color: '#8B4513' },
-    blacksmith: { emoji: '⚒️', color: '#666' },
-    warehouse:  { emoji: '📦', color: '#8B6914' },
-    inn:        { emoji: '🏨', color: '#B8860B' },
-    bulletin:   { emoji: '📋', color: '#DEB887' },
-    quest:      { emoji: '📜', color: '#FFD700' },
-    dungeon_master: { emoji: '🗡️', color: '#8B0000' },
-    premium_shop:   { emoji: '💎', color: '#9400D3' },
-    main_quest:     { emoji: '✨', color: '#FFD700' },
-    guard:      { emoji: '🛡️', color: '#4682B4' },
-    trader:     { emoji: '💰', color: '#DAA520' },
-  };
-  for (const npc of npcs) {
-    const npcEl = document.createElement('div');
-    npcEl.className = 'npc-unit';
-    npcEl.dataset.id = npc.npcId || npc.id;
-    npcEl.style.cssText = `
-      position:absolute;
-      left:${npc.x}px;
-      top:${npc.y}px;
-      transform:translate(-50%, -100%);
-      width:40px;
-      height:48px;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:2px;
-      cursor:pointer;
-      z-index:10;
-    `;
-    const sprite = npcSprites[npc.npcId || npc.id] || { emoji: '👤', color: '#888' };
-    npcEl.innerHTML = `
-      <div style="font-size:20px;line-height:1;">${sprite.emoji}</div>
-      <div style="font-size:10px;color:#fff;background:rgba(0,0,0,0.6);padding:1px 4px;border-radius:2px;white-space:nowrap;">${npc.name}</div>
-    `;
-    npcEl.onclick = () => { if (typeof handleNPCClick === 'function') handleNPCClick(npc); };
-    el.npcLayer.appendChild(npcEl);
-  }
-}
-
- // 暴露給 multiplayer.js 的全域函數
- window.handleMapChange = handleMapChange;
-
- // 從本地 map 配置渲染 NPC（loadMap 時呼叫）
- function renderNPCs(map) {
-   if (!el.npcLayer) return;
-   el.npcLayer.innerHTML = '';
-   if (!map.npcs) return;
+function renderNPCs(map) {
+  npcLayer.innerHTML = '';
+  if (!map.npcs) return;
   // NPC id 到 SPRITE key 的映射
   const npcSpriteMap = {
     shop: 'npc_shop',
@@ -13384,7 +12753,6 @@ function _renderNPCsFromConfig(npcs) {
     postman: 'npc_postman',
     trader: 'npc_merchant_new',
   };
-  window.NPC_SPRITE_MAP = npcSpriteMap;
   let npcIdx = 0;
   map.npcs.forEach(npc => {
     const elDiv = document.createElement('div');
@@ -13442,57 +12810,46 @@ function _renderNPCsFromConfig(npcs) {
       else if (npc.id === 'blacksmith') {
         const hasWeapon = GS.equipment.weapon;
         const cost = hasWeapon ? (GS.equipment.weapon.level || 0) * 500 + 200 : 0;
-        uiAlert(`當前武器：${hasWeapon ? GS.equipment.weapon.name + ' +' + (GS.equipment.weapon.level || 0) : '未裝備'}\n強化費用：${cost} 金幣\n\n（強化功能即將開放）`, '鐵匠鋪', { npcId: 'blacksmith', npcName: '鐵匠', npcTitle: '鐵匠鋪掌櫃' });
+        alert(`鐵匠鋪\n\n當前武器：${hasWeapon ? GS.equipment.weapon.name + ' +' + (GS.equipment.weapon.level || 0) : '未裝備'}\n強化費用：${cost} 金幣\n\n（強化功能即將開放）`);
       }
-      else if (npc.id === 'warehouse') {
-        // v2.7.3：倉庫管理員 → 開啟倉庫面板（不是背包）
-        openWarehousePanel();
-      }
+      else if (npc.id === 'warehouse') openSidePage('bag');
       else if (npc.id === 'quest') {
         if (GS.quest.current >= GS.quest.total) {
           const gold = 500, exp = 200;
-          uiConfirm(`擊殺哥布林 ${GS.quest.current}/${GS.quest.total}\n\n獎勵：${gold} 金幣、${exp} 經驗\n\n是否領取獎勵？`, '任務完成', { npcId: 'quest', npcName: '任務官', npcTitle: '米德加特派駐' }).then(ok => {
-            if (ok) {
-              GS.resources.gold += gold;
-              GS.player.exp += exp;
-              GS.quest.current = 0; GS.quest.total = 5;
-              if (el.questCurrent) el.questCurrent.textContent = '0';
-              if (el.questTotal) el.questTotal.textContent = '5';
-              addLog('system', `✓ 完成任務「${GS.quest.name}」，獲得 ${gold} 金幣、${exp} 經驗`);
-              updateUI();
-            }
-          });
+          if (confirm(`任務完成！\n擊殺哥布林 ${GS.quest.current}/${GS.quest.total}\n\n獎勵：${gold} 金幣、${exp} 經驗\n\n是否領取獎勵？`)) {
+            GS.resources.gold += gold;
+            GS.player.exp += exp;
+            GS.quest.current = 0; GS.quest.total = 5;
+            el.questCurrent.textContent = '0'; el.questTotal.textContent = '5';
+            addLog('system', `✓ 完成任務「${GS.quest.name}」，獲得 ${gold} 金幣、${exp} 經驗`);
+            updateUI();
+          }
         } else {
-          uiAlert(`前往野外討伐 ${GS.quest.total} 隻哥布林吧！\n\n進度：${GS.quest.current}/${GS.quest.total}`, '任務', { npcId: 'quest', npcName: '任務官', npcTitle: '米德加特派駐' });
+          alert(`任務官：前往野外討伐 ${GS.quest.total} 隻哥布林吧！\n\n進度：${GS.quest.current}/${GS.quest.total}`);
         }
       }
       else if (npc.id === 'premium_shop') {
-        uiAlert(`這裡販售稀有裝備與高級消耗品\n（高級商店功能即將開放）`, '高級商人', { npcId: 'premium_shop', npcName: '高級商人', npcTitle: '珍寶閣掌櫃' });
+        alert(`高級商人\n\n這裡販售稀有裝備與高級消耗品\n（高級商店功能即將開放）`);
       }
       else if (npc.id === 'inn') {
         if (GS.player.hp >= getTotalHpMax()) {
-          uiAlert('你的體力飽滿，不需要休息哦~', '旅館', { npcId: 'inn', npcName: '旅館老板娘', npcTitle: '小憩客棧' });
+          alert('旅館老板娘：你的體力飽滿，不需要休息哦~');
         } else if (GS.resources.gold < 100) {
-          uiAlert('休息需要 100 金幣，你攜帶的金幣不足。', '旅館', { npcId: 'inn', npcName: '旅館老板娘', npcTitle: '小憩客棧' });
-        } else {
-          uiConfirm('休息一晚需要 100 金幣，是否要休息？', '旅館', { npcId: 'inn', npcName: '旅館老板娘', npcTitle: '小憩客棧' }).then(ok => {
-            if (ok) {
-              GS.resources.gold -= 100;
-              GS.player.hp = getTotalHpMax();
-              GS.player.mp = (CLASSES[GS.player.classId]?.mpMax || 100);
-              addLog('system', '棧 在旅館休息，體力魔力完全恢復');
-              updateUI();
-              renderPlayer();
-              showToast('體力魔力已完全恢復', 'success');
-            }
-          });
+          alert('旅館老板娘：休息需要 100 金幣，你攜帶的金幣不足。');
+        } else if (confirm('旅館老板娘：休息一晚需要 100 金幣，是否要休息？')) {
+          GS.resources.gold -= 100;
+          GS.player.hp = getTotalHpMax();
+          GS.player.mp = (CLASSES[GS.player.classId]?.mpMax || 100);
+          addLog('system', '棧 在旅館休息，體力魔力完全恢復');
+          updateUI();
+          renderPlayer();
         }
       }
       else if (npc.id === 'bulletin') {
-        uiAlert(`• 米德加特原野出現大量哥布林，冒險者請注意安全\n• 鐵匠鋪現已開放強化業務\n• 公會招募中，詳情請至國家管理處查詢\n• 深淵蝙蝠王出沒幽暗洞窟，請高級冒險者前往討伐`, '村莊佈告欄');
+        alert(`榜 村莊佈告欄\n\n• 米德加特原野出現大量哥布林，冒險者請注意安全\n• 鐵匠鋪現已開放強化業務\n• 公會招募中，詳情請至國家管理處查詢\n• 深淵蝙蝠王出沒幽暗洞窟，請高級冒險者前往討伐`);
       }
       else if (npc.id === 'dungeon_master') {
-        uiAlert(`• 試煉之塔（Lv.20+）\n• 無限之塔（Lv.40+）\n• 夢幻之島（Lv.60+）\n\n（副本功能即將開放）`, '副本管理員', { npcId: 'dungeon_master', npcName: '副本管理員', npcTitle: '冒險者公會' });
+        alert(`鑰️ 副本管理員\n\n• 試煉之塔（Lv.20+）\n• 無限之塔（Lv.40+）\n• 夢幻之島（Lv.60+）\n\n（副本功能即將開放）`);
       }
       else if (npc.id === 'main_quest') {
         const mq = GS.mainQuest || { chapter: 1, step: 0 };
@@ -13511,18 +12868,15 @@ function _renderNPCsFromConfig(npcs) {
         const curTitle = titles[mq.chapter - 1] || titles[0];
         const curStep = steps[mq.step] || steps[steps.length - 1];
         if (mq.step === 0) {
-          uiConfirm(`年輕的冒險者，你終於來了。\n\n【主線】${curTitle}\n目標：${curStep}\n\n是否接受這個神聖的使命？`, '主線任務', { npcId: 'main_quest', npcName: npc.name, npcTitle: '神聖教會·大祭司' }).then(ok => {
-            if (ok) {
-              GS.mainQuest = { chapter: 1, step: 1 };
-              addLog('system', `卷 接受主線任務：${curTitle}`);
-              showToast('已接受主線任務：' + curTitle, 'success');
-            }
-          });
+          if (confirm(`王 ${npc.name}：年輕的冒險者，你終於來了。\n\n【主線】${curTitle}\n目標：${curStep}\n\n是否接受這個神聖的使命？`)) {
+            GS.mainQuest = { chapter: 1, step: 1 };
+            addLog('system', `卷 接受主線任務：${curTitle}`);
+          }
         } else {
-          uiAlert(`主線進度：${curTitle}\n當前任務：${curStep}\n\n（主線任務系統逐步開放中）`, '主線任務', { npcId: 'main_quest', npcName: npc.name, npcTitle: '神聖教會·大祭司' });
+          alert(`主線進度：${curTitle}\n當前任務：${curStep}\n\n（主線任務系統逐步開放中）`);
         }
       }
-      else uiAlert('你好，冒險者！', npc.name, { npcId: npc.id, npcName: npc.name });
+      else alert(npc.name + '：你好，冒险者！');
     });
     npcLayer.appendChild(elDiv);
   });
@@ -13658,11 +13012,7 @@ function spawnMapBoss(map, slot = 'boss') {
   m.bossSlot = slot;
   m.bossMapId = map.id;
   const oldSprite = m.sprite;
-  // v2.8.4：統一走 getMonsterSprite（Boss 類型加 boss_ 前綴也能正確解析）
-  const bossSpriteKey = 'boss_' + boss.type;
-  m.sprite = getMonsterSprite(bossSpriteKey);
-  // 如果 boss_ 前綴沒命中（fallback 到普通怪），再嘗試 boss_demon 作為終極兜底
-  if (!m.sprite || !m.sprite.useImg) m.sprite = SPRITE.boss_demon;
+  m.sprite = SPRITE['boss_' + boss.type] || SPRITE.boss_demon;
   // 如果Boss sprite是多帧而原怪物sprite不是（或反之），需要重建DOM以匹配帧结构
   const wasMulti = oldSprite && oldSprite.multiFrame;
   const isMulti = m.sprite && m.sprite.multiFrame;
@@ -13763,146 +13113,10 @@ function checkBossRespawn() {
   }
 }
 
-// v2.8.2：怪物精靈解析 — 帶大類 fallback，零「？」
-//  先從 MONSTER_SPRITES 精確匹配，找不到則按大類 fallback
-//  大類規則：類人型(goblin/orc/lizardman/troll/ogre/bandit/shaman/darkmage) → goblin
-//             亡靈系(skeleton/zombie/ghost/lich/death_knight/bone_dragon) → skeleton
-//             節肢動物(spider/scorpion) → spider
-//             野獸系(wolf/boar/bear/hellhound/direwolf/cerberus/griffin) → orc
-//             特殊型(slime/bat/demon/dragon/hydra/naga/golem) → 各自有圖或就近
-const MONSTER_FALLBACK_MAP = {
-  // 類人型 → goblin
-  wolf: 'orc', boar: 'orc', bear: 'orc', hellhound: 'orc',
-  monster_direwolf: 'orc', monster_hellhound: 'orc', cerberus: 'orc',
-  griffin: 'orc', armored_bear: 'orc', wild_boar: 'orc',
-  // 亡靈系 → skeleton
-  zombie: 'skeleton', ghost: 'skeleton', lich: 'skeleton',
-  death_knight: 'skeleton', bone_dragon: 'skeleton', wraith: 'skeleton',
-  monster_wraith: 'skeleton', skeleton_soldier: 'skeleton', skeleton_archer: 'skeleton',
-  skeleton_warrior: 'skeleton', skeleton_knight: 'skeleton', skeleton_mage: 'skeleton',
-  small_skeleton: 'skeleton', ghostLord: 'skeleton',
-  // 類人型 → goblin
-  troll: 'orc', ogre: 'orc', bandit: 'orc', shaman: 'orc',
-  darkmage: 'orc', darkorc: 'orc', orc_warrior: 'orc', orc_chief: 'orc',
-  elderShaman: 'orc', banditBoss: 'orc', bandit_archer: 'orc', bandit_leader: 'orc',
-  goblin_archer: 'goblin', goblin_patrol: 'goblin', goblin_scout: 'goblin',
-  goblin_warrior: 'goblin', goblin_shaman: 'goblin', goblin_king: 'goblin',
-  forest_goblin: 'goblin', forest_goblin_chief: 'goblin', eliteGoblin: 'goblin',
-  lizardman_shaman: 'lizardman', dark_knight: 'skeleton', dark_mage: 'skeleton',
-  demon_priest: 'demon', baphomet: 'demon', demon_lord: 'demon',
-  // 節肢 → spider
-  giant_spider: 'spider', poisonSpider: 'spider', poison_spider: 'spider',
-  spiderling: 'spider', spider_queen: 'spider', royalScorpion: 'scorpion',
-  monster_scorpion: 'scorpion',
-  // 特殊 → 就近
-  slime_blue: 'slime', slime_green: 'slime', goldenSlime: 'slime', gold_slime: 'slime',
-  icewolf: 'orc', black_wolf: 'orc', timber_wolf: 'orc', wild_wolf: 'orc',
-  cave_bat: 'bat', forest_bat: 'bat', firebat: 'bat',
-  stone_golem: 'stone_golem', lava_golem: 'stone_golem', golem: 'stone_golem',
-  darkSorcerer: 'orc', zombies: 'skeleton',
-  hydra: 'demon', naga: 'lizardman', chimera: 'demon', kraken: 'demon',
-  monster_braindevil: 'demon', monster_gargoyle: 'stone_golem',
-  // 變種 → 原種
-  darkorc: 'orc', icewolf: 'orc', firebat: 'bat', elderShaman: 'orc',
-};
-
-function getMonsterSprite(type) {
-  if (!type) return SPRITE.goblin;
-  // v2.8.3：中文名 → type 對照（地圖配置 name 是中文、伺服器可能直接傳中文名）
-  //  放在第一步，確保不論 type 是英文 key 還是中文名都能解析到精靈
-  const cnMap = {
-    // 哥布林系
-    '哥布林': 'goblin', '哥布林弓手': 'goblin', '哥布林巡邏兵': 'goblin',
-    '哥布林戰士': 'goblin', '哥布林法師': 'goblin', '哥布林偵察兵': 'goblin',
-    '哥布林薩滿': 'shaman', '哥布林酋長': 'orc', '森林哥布林': 'goblin',
-    '森林哥布林隊長': 'goblin', '精英哥布林': 'goblin',
-    // 骷髏系
-    '骷髏': 'skeleton', '骷髏兵': 'skeleton', '小骷髏兵': 'skeleton',
-    '骷髏戰士': 'skeleton', '骷髏弓箭手': 'skeleton', '骷髏騎士': 'skeleton',
-    '骷髏法師': 'darkmage', '骷髏王': 'skeleton', '骷髏將軍': 'skeleton',
-    // 史萊姆
-    '史萊姆': 'slime', '藍史萊姆': 'slime', '綠史萊姆': 'slime',
-    '金色史萊姆': 'slime', '史萊姆王': 'slime',
-    // 蝙蝠
-    '蝙蝠': 'bat', '洞穴蝙蝠': 'bat', '森林蝙蝠': 'bat', '火焰蝙蝠': 'bat',
-    '吸血蝙蝠': 'bat',
-    // 蜘蛛
-    '蜘蛛': 'spider', '毒蜘蛛': 'spider', '巨型蜘蛛': 'spider',
-    '小蜘蛛': 'spider', '蜘蛛后': 'spider_queen', '蜘蛛女王': 'spider_queen',
-    // 野狼
-    '野狼': 'wolf', '灰狼': 'wolf', '黑狼': 'wolf', '雪原狼': 'monster_direwolf',
-    '地獄犬': 'monster_hellhound', '地獄獵犬': 'monster_hellhound',
-    '三頭犬': 'cerberus', '三頭地獄犬': 'cerberus',
-    // 獸人/巨魔/食人魔
-    '獸人': 'orc', '獸人戰士': 'orc', '獸人酋長': 'orc', '黑暗獸人': 'orc',
-    '巨魔': 'troll', '山怪': 'troll', '食人魔': 'ogre', '雙頭食人魔': 'ogre',
-    // 僵屍/幽靈/巫師
-    '僵屍': 'zombie', '殭屍': 'zombie', '僵屍兵': 'zombie', '殭屍王': 'zombie',
-    '幽靈': 'ghost', '鬼魂': 'ghost', '幽靈王': 'ghost', '惡靈': 'ghost',
-    '法師': 'darkmage', '黑暗法師': 'darkmage', '暗黑法師': 'darkmage',
-    '巫師': 'shaman', '薩滿': 'shaman', '老薩滿': 'shaman', '巫師長': 'shaman',
-    '巫妖': 'lich', '死靈法師': 'lich',
-    // 蠍子/蛇
-    '蠍子': 'scorpion', '巨蠍': 'scorpion', '蠍王': 'scorpion',
-    '沙漠蠍': 'monster_scorpion',
-    '蛇': 'lizardman', '眼鏡蛇': 'lizardman', '巨蛇': 'lizardman',
-    // 蜥蜴人/石巨人/石魔像
-    '蜥蜴人': 'lizardman', '蜥蜴人戰士': 'lizardman', '蜥蜴人薩滿': 'lizardman',
-    '石巨人': 'stone_golem', '石魔像': 'stone_golem', '熔岩巨人': 'lava_golem',
-    '熔岩魔像': 'lava_golem', '魔像': 'stone_golem',
-    // 惡魔/惡夢/石像鬼
-    '惡魔': 'demon', '小惡魔': 'demon', '惡魔領主': 'demon', '惡魔領主': 'demon',
-    '巴風特': 'demon', '巴弗滅': 'demon', '墮落天使': 'demon',
-    '石像鬼': 'monster_gargoyle', '鬼臉惡魔': 'monster_braindevil',
-    // 巨龍/骨龍
-    '巨龍': 'dragon', '紅龍': 'dragon', '黑龍': 'dragon', '遠古巨龍': 'dragon',
-    '骨龍': 'bone_dragon', '骷髏龍': 'bone_dragon',
-    // 其他
-    '山賊': 'bandit', '盜賊': 'bandit', '強盜': 'bandit', '山賊頭目': 'bandit',
-    '熊': 'armored_bear', '巨熊': 'armored_bear', '裝甲熊': 'armored_bear',
-    '獅鷲': 'griffin', '獅鷲獸': 'griffin',
-    '海德拉': 'hydra', '九頭蛇': 'hydra',
-    '那加': 'naga', '娜迦': 'naga', '蛇女': 'naga',
-    '奇美拉': 'chimera', '合成獸': 'chimera',
-    '北海巨妖': 'kraken', '克拉肯': 'kraken',
-    '死亡騎士': 'darkmage', '闇黑騎士': 'darkmage', '黑騎士': 'darkmage',
-    // 變異體/特殊
-    '哥布林精英': 'goblin', '骷髏精英': 'skeleton', '毒蠍': 'scorpion',
-    '寒冰狼': 'wolf', '火焰骷髏': 'skeleton', '暗影法師': 'darkmage',
-  };
-  let resolvedType = type;
-  if (cnMap[type]) resolvedType = cnMap[type];
-
-  // v2.8.3：console.log 排查 sprite key（只在 type 是中文/未命中時打印，避免刷屏）
-  if (cnMap[type] || (!MONSTER_SPRITES[type] && !SPRITE[type] && !MONSTER_FALLBACK_MAP[type])) {
-    console.log('[getMonsterSprite] key=', type, '→ resolvedType=', resolvedType);
-  }
-
-  // 1. 精確匹配 MONSTER_SPRITES
-  if (MONSTER_SPRITES[resolvedType] && MONSTER_SPRITES[resolvedType].useImg) {
-    if (cnMap[type]) console.log('[getMonsterSprite] result=MONSTER_SPRITES[' + resolvedType + '].useImg=true');
-    return MONSTER_SPRITES[resolvedType];
-  }
-  // 2. 精確匹配 SPRITE
-  if (SPRITE[resolvedType] && SPRITE[resolvedType].useImg) {
-    if (cnMap[type]) console.log('[getMonsterSprite] result=SPRITE[' + resolvedType + '].useImg=true');
-    return SPRITE[resolvedType];
-  }
-  // 3. fallback map
-  const fb = MONSTER_FALLBACK_MAP[resolvedType];
-  if (fb) {
-    if (SPRITE[fb] && SPRITE[fb].useImg) return SPRITE[fb];
-    if (MONSTER_SPRITES[fb] && MONSTER_SPRITES[fb].useImg) return MONSTER_SPRITES[fb];
-  }
-  // 4. 終極 fallback → goblin（類人型最常見）
-  console.warn('[Sprite] missing monster type, fallback to goblin:', type, '(resolved=' + resolvedType + ')');
-  return SPRITE.goblin;
-}
-
 function createMonster(type, name, level, behavior = 'passive') {
   const baseHp = 40 + level * 12;
   const baseAtk = 4 + level * 1.2;
-  const sprite = getMonsterSprite(type);
+  const sprite = MONSTER_SPRITES[type] || SPRITE.goblin;
   // 全地圖尺寸隨機生成（使用世界地圖大小，避免容器未測寬時擠在一起）
   const mapW = CAMERA.worldWidth || WORLD_W || 2496;
   const mapH = CAMERA.worldHeight || WORLD_H || 1664;
@@ -14484,7 +13698,7 @@ function updatePlayer(dt) {
   const dx = p.targetX - p.x;
   const dy = p.targetY - p.y;
   const dist = Math.hypot(dx, dy);
-  let speed = 106;  // v2.7.1: 基礎移速 +25% (85 → 106)，走動更順暢
+  let speed = 85;
   // 計算移動速度加成（v2.6.0 統一函數）
   const moveSpdBonus = getTotalWalkSpeedPct();
   if (moveSpdBonus > 0) speed *= (1 + moveSpdBonus / 100);
@@ -14512,7 +13726,7 @@ function updatePlayer(dt) {
     p.facing = dx >= 0 ? 'right' : 'left';
     // ===== 多人連線：節流廣播移動 =====
     if (window.MultiplayerClient && MultiplayerClient.connected) {
-      try { MultiplayerClient.sendPosition(p.x, p.y, p.facing, { hp: p.hp, transformId: GS.transformId || null }); } catch (e) { /* ignore */ }
+      try { MultiplayerClient.reportMove(p.x, p.y, p.facing); } catch (e) { /* ignore */ }
     }
   } else {
     if (p.state === 'walking') p.state = 'idle';
@@ -15574,7 +14788,6 @@ function updateMonsters(dt, ts) {
   const p = GS.player;
   GS.monsters.forEach(m => {
     if (m.hp <= 0) return;
-    const el = m.el;  // v2.7.1: 修復未定義 el 導致 ReferenceError 中斷全怪物 AI
     // 攻城战建筑不参与怪物AI（由 updateSiege 处理）
     if (m.isSiegeStructure) {
       if (m.hitTimer > 0) m.hitTimer -= dt;
@@ -16109,19 +15322,19 @@ function rollConsumableDrop(level, isBoss) {
     pool.push({ item: { id: 'mp2', name: '中型魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.mp2, effect: { mp: 100 } }, w: 20 });
     pool.push({ item: { id: 'move1', name: '行走加速藥水', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.move1, effect: { moveSpeed: 20, duration: 3600 } }, w: 8 });
     pool.push({ item: { id: 'town_scroll', name: '回城卷軸', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.teleport, effect: { teleport: 'town' } }, w: 5 });
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 12 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 12 });
   } else if (level < 45) {
     pool.push({ item: { id: 'hp4', name: '體力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.hp3, effect: { hp: 500 } }, w: 25 });
     pool.push({ item: { id: 'mp4', name: '高級魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.mp3, effect: { mp: 200 } }, w: 15 });
     pool.push({ item: { id: 'spd1', name: '加速藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.spd1, effect: { atkSpeed: 20, moveSpeed: 20, duration: 1800 } }, w: 10 });
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 15 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 15 });
     pool.push({ item: { id: 'mgem', name: '魔法寶石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.mgem, effect: {} }, w: 10 });
     pool.push({ item: { id: 'town_scroll', name: '回城卷軸', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.teleport, effect: { teleport: 'town' } }, w: 5 });
   } else {
     pool.push({ item: { id: 'hp4', name: '體力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.hp3, effect: { hp: 500 } }, w: 20 });
     pool.push({ item: { id: 'mp4', name: '高級魔力藥水', type: 'consumable', itemType: 'consumable', rarity: 'blue', icon: ITEM_ICONS.mp3, effect: { mp: 200 } }, w: 12 });
     pool.push({ item: { id: 'spd2', name: '狂暴藥水', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.spd2, effect: { atkSpeed: 30, moveSpeed: 30, duration: 1800 } }, w: 8 });
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 12 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 12 });
     pool.push({ item: { id: 'revive_scroll', name: '復活卷軸', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.revive_scroll, effect: { revive: true } }, w: 5 });
      pool.push({ item: { id: 'tscroll', name: '變身卷軸', type: 'consumable', itemType: 'consumable', rarity: 'purple', icon: ITEM_ICONS.tscroll, effect: {} }, w: 3 });
      pool.push({ item: { id: 'mgem', name: '魔法寶石', type: 'consumable', itemType: 'material', rarity: 'blue', icon: ITEM_ICONS.mgem, effect: {} }, w: 10 });
@@ -16129,7 +15342,7 @@ function rollConsumableDrop(level, isBoss) {
    }
   // Boss加碼：增加高級道具權重
   if (isBoss) {
-    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, effect: { enhanceScroll: true } }, w: 20 });
+    pool.push({ item: { id: 'enhance_scroll', name: '裝備強化卷', type: 'consumable', itemType: 'consumable', rarity: 'green', icon: ITEM_ICONS.enhance_stone, effect: { enhanceScroll: true } }, w: 20 });
     pool.push({ item: { id: 'revive_scroll', name: '復活卷軸', type: 'consumable', itemType: 'consumable', rarity: 'red', icon: ITEM_ICONS.revive_scroll, effect: { revive: true } }, w: 15 });
   }
   if (pool.length === 0) return null;
@@ -16317,8 +15530,6 @@ function openEquipDetailModal(slotId) {
     const enhanceBonusPct = enhanceLv * 5; // 每級 +5%
     const isWeapon = isWeaponSlot(slotId);
     const isArmor = isArmorSlot(slotId);
-    // v2.8.2：強制用 getEquipRarityIcon 單一圖標，忽略 eq.icon（舊存檔可能含拼貼圖）
-    const equipIcon = getEquipRarityIcon(eq.type, eq.rarity);
     const statRows = Object.entries(eq.baseStats || {}).map(([k, v]) => {
       let display = `+${v}${k === 'crit' || k === 'critDmg' ? '%' : ''}`;
       if (enhanceLv > 0 && ((k === 'atk' && isWeapon) || (k === 'def' && isArmor))) {
@@ -16334,7 +15545,7 @@ function openEquipDetailModal(slotId) {
     body.innerHTML = `
       <div class="equip-detail-header">
         <div class="equip-detail-icon" style="display:flex;align-items:center;justify-content:center;position:relative">
-          <img src="${equipIcon}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>
+          <img src="${eq.icon || slotIconUrl(slotId)}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>
           ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:-4px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:10px;font-weight:800;padding:0 6px;border-radius:6px;line-height:16px">+${enhanceLv}</div>` : ''}
         </div>
         <div class="equip-detail-name">${eq.name}</div>
@@ -18164,15 +17375,6 @@ function doGacha(pool, count, mode) {
   });
   updateUI();
   updateSlotDisplay();
-  // v2.7.2：抽完英雄/寵物立即存檔並同步到伺服器，確保入帳
-  if (typeof saveGame === 'function') {
-    try { saveGame(); } catch(e) { console.warn('[Gacha] 存檔失敗:', e); }
-  }
-  if (typeof syncAccountSharedFromLocal === 'function') {
-    syncAccountSharedFromLocal().catch(e =>
-      console.warn('[Gacha] 同步伺服器失敗:', e)
-    );
-  }
   // 史詩以上全服公告
   announceGachaResults(results, pool === SUMMON_POOL ? '英雄' : '寵物');
   return results;
@@ -18198,12 +17400,6 @@ function addCardToCollection(card, poolType) {
     const newCard = { ...card, count: 1, level: card.level || 1 };
     ownedList.push(newCard);
     console.log(`[addCardToCollection] END 新卡：${card.name}，owned=true，count=1（${poolType}）`);
-    // v2.7.2：新卡入帳後非同步同步到伺服器，確保重登後仍在
-    if (typeof syncAccountSharedFromLocal === 'function') {
-      syncAccountSharedFromLocal().catch(e =>
-        console.warn('[addCardToCollection] 同步伺服器失敗:', e)
-      );
-    }
     return { card: newCard, isNew: true };
   }
 }
@@ -18718,7 +17914,7 @@ function renderCodexPage() {
         ${items.map(item => {
           const own = equipIds.has(item.id);
           const rarityInfo = RARITY_CONFIG[item.rarity];
-          const iconUrl = getEquipRarityIcon(item.type, item.rarity);
+          const iconUrl = ITEM_ICONS[item.type] || ITEM_ICONS.weapon;
           return `
             <div class="codex-card rarity-${item.rarity} ${own ? '' : 'locked'}" data-id="${item.id}" data-type="equip">
               <div class="codex-card-inner">
@@ -19210,7 +18406,7 @@ function showCodexDetail(id, type) {
     if (!item) return;
     rarity = item.rarity;
     stats = item.baseStats || item.stats || {};
-    const iconUrl = getEquipRarityIcon(item.type, item.rarity);
+    const iconUrl = EQUIP_ICON_MAP[item.type] || ITEM_ICONS.weapon;
     spriteHtml = owned
       ? `<img src="${iconUrl}" style="width:80px;height:80px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6))"/>`
       : `<div style="width:80px;height:80px;background:#222;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#555;font-size:32px">?</div>`;
@@ -19703,35 +18899,18 @@ function useTransformTicket(tfId) {
 
 // 檢查變身是否到期
 // ==================== Buff 系統 ====================
-// v2.7.1: buff icon 全部替換為有色彩文字的圓角方塊（原 assetUrl 指向深灰佔位檔 → 顯示問號）
-// v2.7.3：buff icon 改用內聯 SVG，確保不依賴外部檔案、不會出現 ?
-function _buffSVG(color, symbol, symbol2) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.95"/><stop offset="100%" stop-color="${color}" stop-opacity="0.6"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="5" fill="url(#g)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/><text x="16" y="21" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff" font-family="Arial, sans-serif" style="text-shadow:0 1px 2px rgba(0,0,0,0.5)">${symbol}</text>${symbol2 ? `<text x="16" y="28" text-anchor="middle" font-size="8" fill="#fff" font-family="Arial" opacity="0.9">${symbol2}</text>` : ''}</svg>`;
-  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-}
 const BUFF_ICONS = {
-  transform:  _buffSVG('#c03030', '变', '身'),
-  atkspd:     _buffSVG('#e09020', '攻', '速'),
-  movespd:    _buffSVG('#30b060', '移', '速'),
-  exp:        _buffSVG('#4080e0', '經', '驗'),
-  drop:       _buffSVG('#b060d0', '掉', '寶'),
-  shield:     _buffSVG('#60a0e0', '盾', ''),
-  atkpot:     _buffSVG('#d04040', '力', ''),
-  defpot:     _buffSVG('#4090d0', '防', ''),
-  berserk:    _buffSVG('#e04040', '狂', ''),
-  dodge:      _buffSVG('#40d0c0', '閃', ''),
-  hp:         _buffSVG('#e06060', '血', ''),
-  mp:         _buffSVG('#6080e0', '魔', ''),
-  atkPct:     _buffSVG('#d04040', '力', '%'),
-  defPct:     _buffSVG('#4090d0', '防', '%'),
-  crit:       _buffSVG('#e0a020', '暴', ''),
-  allStat:    _buffSVG('#c060e0', '全', ''),
-  warcry:     _buffSVG('#d06020', '吼', ''),
-  windwalk:   _buffSVG('#30b0a0', '風', ''),
-  ironwall:   _buffSVG('#6080a0', '鐵', ''),
+  transform:  assetUrl('aadkrgnianeeg_ve_miaoda'),
+  atkspd:     assetUrl('aadkrgyn27sli_ve_miaoda'),
+  movespd:    assetUrl('aadkrgx6ejygg_ve_miaoda'),
+  exp:        assetUrl('aadkrgyumjgag_ve_miaoda'),
+  drop:       assetUrl('aadkrg2chcolq_ve_miaoda'),
+  shield:     assetUrl('aadkrg5b5ssco_ve_miaoda'),
+  atkpot:     assetUrl('aadkrgyrnfyci_ve_miaoda'),
+  defpot:     assetUrl('aadkrgzhmdgdg_ve_miaoda'),
+  berserk:    assetUrl('aadkrg42s6ggo_ve_miaoda'),
+  dodge:      assetUrl('aadkrgxgcxmcg_ve_miaoda'),
 };
-// 找不到類型時的預設 icon
-const DEFAULT_BUFF_ICON = _buffSVG('#888888', '?', '');
 
 // 初始化 activeBuffs
 function initBuffs() {
@@ -19753,7 +18932,7 @@ function addBuff(type, name, desc, durationSec, stats) {
     GS.activeBuffs.push({
       id: 'buff_' + type + '_' + Date.now(),
       type, name, desc,
-      icon: BUFF_ICONS[type] || DEFAULT_BUFF_ICON,
+      icon: BUFF_ICONS[type] || BUFF_ICONS.shield,
       endTime,
       stats: stats || {},
     });
@@ -19929,9 +19108,9 @@ const TRANSFORM_RARITY_SPEED_BONUS = {
   green:   { walk: 15, atk: 15 },
   blue:    { walk: 20, atk: 20 },
   purple:  { walk: 25, atk: 25 },
-  red:     { walk: 35, atk: 35 },
-  gold:    { walk: 45, atk: 45 },
-  true:    { walk: 55, atk: 55 },  // 真金系列
+  red:     { walk: 30, atk: 30 },
+  gold:    { walk: 35, atk: 35 },
+  true:    { walk: 45, atk: 45 },  // 真金系列
 };
 
 function addTransformBuff() {
@@ -20510,7 +19689,7 @@ function renderEquipTabPanel() {
       const enhanceLv = eq.enhanceLevel || 0;
       return `<div class="equip-slot-card has-item rarity-${eq.rarity}" data-equip-slot="${slot}" style="border-color:${rc.color}">
         <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center;position:relative">
-          <img src="${getEquipRarityIcon(eq.type, eq.rarity)}" style="width:36px;height:36px;object-fit:contain;border-radius:8px;display:block"/>
+          <img src="${eq.icon || slotIconUrl(slot)}" style="width:36px;height:36px;object-fit:contain;border-radius:8px;display:block"/>
           ${enhanceLv > 0 ? `<div style="position:absolute;top:-4px;right:-4px;background:linear-gradient(180deg,#ffd040,#b07020);color:#2a1a05;font-size:8px;font-weight:800;padding:0 4px;border-radius:4px;line-height:12px">+${enhanceLv}</div>` : ''}
         </div>
         <div class="equip-slot-name">${eq.name}</div>
@@ -20847,7 +20026,7 @@ function renderEquipPanel() {
       return `
         <div class="equip-slot-item has-item rarity-${eq.rarity}" data-equip-slot="${slot}">
           <div class="equip-slot-level-badge">+${level}</div>
-          <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${getEquipRarityIcon(eq.type, eq.rarity)}" style="width:32px;height:32px;object-fit:contain;border-radius:8px;display:block"/></div>
+          <div class="equip-slot-icon" style="display:flex;align-items:center;justify-content:center"><img src="${eq.icon || iconUrl}" style="width:32px;height:32px;object-fit:contain;border-radius:8px;display:block"/></div>
           <div class="equip-slot-name">${eq.name}</div>
         </div>
       `;
@@ -21105,7 +20284,7 @@ function renderBagPage() {
           const isEquip = item.itemType === 'equipment';
           let iconHtml = '';
           if (isEquip) {
-            const iconUrl = getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity);
+            const iconUrl = getEquipIcon(item.type === 'accessory' ? 'ring1' : item.type);
             iconHtml = `<img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px"/>`;
           } else if (item.itemType === 'consumable') {
             const iconUrl = getItemIconUrl(item);
@@ -21131,7 +20310,10 @@ function renderBagPage() {
         }).join('')
       }
     </div>
-    <div style="display:flex;justify-content:flex-end;align-items:center;padding:8px 10px;margin-top:6px;border-top:1px solid rgba(240,192,64,0.2);background:rgba(20,14,8,0.4)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-top:6px;border-top:1px solid rgba(240,192,64,0.2);background:rgba(20,14,8,0.4)">
+      <div style="font-size:10px;color:var(--parchment-dark)">
+        物品：${items.length}/${20 + Math.floor((GS.player.level || 1) * 0.5)} 格
+      </div>
       <div style="display:flex;gap:6px">
         <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #608040, #3a5a20);border:1px solid #80a060;color:#d0ffb0;border-radius:4px;cursor:pointer;font-weight:600" data-one-click-equip>劍 一鍵穿戴</button>
         <button class="bag-use-all-btn" style="padding:6px 10px;font-size:10px;background:linear-gradient(135deg, #8b6520, #5a3a10);border:1px solid var(--gold-dark);color:var(--gold-bright);border-radius:4px;cursor:pointer;font-weight:600">雷 一鍵使用</button>
@@ -21270,7 +20452,7 @@ function renderEnhancePage() {
 
   const renderEquipIcon = (eq) => {
     const lvl = eq.enhanceLevel || 0;
-    const iconUrl = getEquipRarityIcon(eq.type === 'accessory' ? 'ring1' : eq.type, eq.rarity) || ITEM_ICON_MAP.default;
+    const iconUrl = getEquipIcon(eq.type === 'accessory' ? 'ring1' : eq.type) || ITEM_ICON_MAP.default;
     return `
       <div style="width:56px;height:56px;position:relative;border:2px solid ${RARITY_CONFIG[eq.rarity]?.color || '#999'};border-radius:8px;background:linear-gradient(180deg,rgba(30,20,10,0.9),rgba(15,10,5,0.95));display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px ${RARITY_CONFIG[eq.rarity]?.color || '#999'}44">
         <img src="${iconUrl}" style="width:70%;height:70%;object-fit:contain;display:block"/>
@@ -21693,14 +20875,9 @@ function showItemDetail(item) {
   const isTreasure = item.itemType === 'treasure';
   const isCard = item.itemType === 'card';
 
-  // 取得圖標：裝備用 getEquipRarityIcon（避免裝備誤顯示為寶箱），其他用 getItemIconUrl
+  // 取得圖標：優先用 item.icon URL，其次用類型
   let iconHtml = '';
-  let iconUrl;
-  if (item.itemType === 'equipment') {
-    iconUrl = getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity);
-  } else {
-    iconUrl = getItemIconUrl(item);
-  }
+  const iconUrl = getItemIconUrl(item);
   iconHtml = `<img src="${iconUrl}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;display:block"/>`;
 
   let detailHtml = `
@@ -21921,7 +21098,7 @@ function renderShopPage() {
       { id: 'move1', name: '行走加速藥水', desc: '移動速度+20%，持續1小時', price: 200, icon: ITEM_ICONS.move1, currency: 'gold', rarity: 'green', effect: { moveSpeed: 20, duration: 3600 } },
       { id: 'mgem', name: '魔法寶石', desc: '強力技能必備消耗品', price: 1000, icon: ITEM_ICONS.mgem, currency: 'gold', rarity: 'blue', effect: {} },
       { id: 'town_scroll', name: '回城卷軸', desc: '立刻傳送回村莊', price: 500, icon: ITEM_ICONS.teleport, currency: 'gold', rarity: 'green', effect: { teleport: 'town' } },
-      { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_scroll, currency: 'gold', rarity: 'green', type: 'enhance_scroll', effect: { enhanceScroll: true } },
+      { id: 'enhance_scroll', name: '裝備強化卷', desc: '用於強化裝備等級，超過安定值失敗則裝備消失', price: ENHANCE_SCROLL_PRICE, icon: ITEM_ICONS.enhance_stone, currency: 'gold', rarity: 'green', type: 'enhance_scroll', effect: { enhanceScroll: true } },
     ],
     gem: [
       { id: 'exp_potion', name: '經驗藥水', desc: '立刻獲得1000經驗', price: 120, icon: ITEM_ICONS.hp3, currency: 'gem' },
@@ -21933,7 +21110,7 @@ function renderShopPage() {
       { id: 'mystery_chest', name: '神秘寶箱', desc: '隨機開出道具或裝備', price: 100, icon: ITEM_ICONS.chest, currency: 'gem', type: 'consumable', effect: { mysteryChest: true } },
       { id: 'revive_gem', name: '復活卷軸', desc: '死亡後原地復活', price: 50, icon: ITEM_ICONS.revive_scroll, currency: 'gem', type: 'consumable', effect: { revive: true } },
       { id: 'bag_expand', name: '背包擴充卷', desc: '使用後背包容量+1格（最多200格）', price: 100, icon: ITEM_ICONS.quest_scroll, currency: 'gem', type: 'bag_expand' },
-      { id: 'enhance_boost_scroll', name: '強化機率提升卷', desc: '強化時使用，提升10%成功率（最多到90%）', price: ENHANCE_BOOST_SCROLL_PRICE, icon: ITEM_ICONS.enhance_boost_scroll, currency: 'gem', rarity: 'blue', type: 'enhance_boost_scroll', effect: { enhanceBoost: true } },
+      { id: 'enhance_boost_scroll', name: '強化機率提升卷', desc: '強化時使用，提升10%成功率（最多到90%）', price: ENHANCE_BOOST_SCROLL_PRICE, icon: ITEM_ICONS.bless_stone, currency: 'gem', rarity: 'blue', type: 'enhance_boost_scroll', effect: { enhanceBoost: true } },
       { id: 'true_death_pack', name: '真•死亡體驗包', desc: '內含6種真死亡金變體驗券各3張（共18張），使用後可體驗對應金變外觀與屬性4小時，不受職業限制。限購1次。', price: 3000, icon: ITEM_ICONS.chest, currency: 'gem', rarity: 'gold', type: 'true_death_pack', limitOnce: true },
     ],
     equip: [
@@ -21946,18 +21123,7 @@ function renderShopPage() {
     { key: 'gem', name: '鑽石商店' },
   ];
   const items = shopItems[activeTab] || [];
-  // v2.8.4：裝備 icon 統一走 getEquipRarityIcon（單一入口，確保不會顯示拼貼圖）
-  const renderIcon = (item) => {
-    let url;
-    if (item.itemType === 'equipment' || item.slot) {
-      url = getEquipRarityIcon(item.slot || item.type || 'weapon', item.rarity || 'white');
-    } else if (item.icon) {
-      url = item.icon;
-    } else {
-      url = getItemIconUrl(item);
-    }
-    return `<img src="${url}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt=""/><div class="item-icon-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:24px;color:#c0a060">◆</div>`;
-  };
+  const renderIcon = (url) => `<img src="${url}" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:6px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt=""/><div class="item-icon-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:24px;color:#c0a060">◆</div>`;
   
   // 取得當前選擇數量（預設1）
   if (!GS.shopQty) GS.shopQty = {};
@@ -21979,7 +21145,7 @@ function renderShopPage() {
           <div class="shop-item-row" data-shop-item="${item.id}" data-tab="${activeTab}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:linear-gradient(90deg, rgba(40,28,16,0.85), rgba(25,18,10,0.7));border:1px solid rgba(240,192,64,0.25);border-radius:8px;box-shadow:inset 0 0 20px rgba(0,0,0,0.3)">
             <!-- 左側：商品圖標 -->
             <div class="shop-item-icon-wrap" style="width:52px;height:52px;border-radius:8px;border:2px solid var(--gold-dark);background:radial-gradient(circle at 50% 40%, rgba(30,22,14,0.95), rgba(10,7,4,0.98));display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.6), inset 0 0 8px rgba(240,192,64,0.15)">
-              ${renderIcon(item)}
+              ${renderIcon(item.icon)}
             </div>
             <!-- 中間：商品名稱 + 描述 + 價格 -->
             <div style="flex:1;min-width:0">
@@ -21994,10 +21160,10 @@ function renderShopPage() {
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
               <!-- 數量選擇器：− 數量 + MAX -->
               <div class="shop-qty-row" style="display:flex;align-items:center;gap:0;overflow:hidden;border-radius:6px;border:1px solid var(--gold-dark);background:rgba(0,0,0,0.4)">
-                <button class="shop-qty-btn minus" data-shop-qty="minus:${item.id}" style="width:28px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:16px;cursor:pointer;font-weight:700;line-height:1">−</button>
-                <input class="shop-qty-input" data-shop-qty-input="${item.id}" type="text" inputmode="numeric" value="${qty}" min="1" max="999" style="width:42px;text-align:center;font-size:14px;font-weight:700;color:var(--parchment-light);background:rgba(0,0,0,0.5);height:28px;border:none;border-right:1px solid rgba(240,192,64,0.2);outline:none;padding:0"/>
-                <button class="shop-qty-btn plus" data-shop-qty="plus:${item.id}" style="width:28px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:16px;cursor:pointer;font-weight:700;line-height:1">+</button>
-                <button class="shop-qty-btn max" data-shop-qty="max:${item.id}" style="padding:0 8px;height:28px;background:linear-gradient(180deg, rgba(100,70,30,0.9), rgba(60,40,15,0.95));border:none;color:var(--gold-bright);font-size:11px;cursor:pointer;font-weight:700;letter-spacing:1px">MAX</button>
+                <button class="shop-qty-btn minus" data-shop-qty="minus:${item.id}" style="width:32px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:18px;cursor:pointer;font-weight:700;line-height:1">−</button>
+                <span class="shop-qty-num" style="width:44px;text-align:center;font-size:15px;font-weight:700;color:var(--parchment-light);background:rgba(0,0,0,0.3);height:28px;display:flex;align-items:center;justify-content:center;border-right:1px solid rgba(240,192,64,0.2)">${qty}</span>
+                <button class="shop-qty-btn plus" data-shop-qty="plus:${item.id}" style="width:32px;height:28px;background:linear-gradient(180deg, rgba(60,40,20,0.8), rgba(30,20,10,0.9));border:none;border-right:1px solid rgba(240,192,64,0.2);color:var(--gold-bright);font-size:18px;cursor:pointer;font-weight:700;line-height:1">+</button>
+                <button class="shop-qty-btn max" data-shop-qty="max:${item.id}" style="padding:0 10px;height:28px;background:linear-gradient(180deg, rgba(100,70,30,0.9), rgba(60,40,15,0.95));border:none;color:var(--gold-bright);font-size:12px;cursor:pointer;font-weight:700;letter-spacing:1px">MAX</button>
               </div>
               <!-- 購買按鈕 -->
               ${isLimitedBought
@@ -22293,101 +21459,59 @@ function bindPageEvents(page) {
     el.pageContent.querySelectorAll('[data-buy-id]').forEach(btn => {
       btn.addEventListener('click', () => handleShopBuy(btn.dataset.buyId, btn.dataset.buyTab, Number(btn.dataset.buyQty) || 1));
     });
-    // 數量選擇器按鈕（− / + / MAX）
+    // 數量選擇器
     el.pageContent.querySelectorAll('[data-shop-qty]').forEach(btn => {
       btn.addEventListener('click', () => {
         const [action, itemId] = btn.dataset.shopQty.split(':');
         if (!GS.shopQty) GS.shopQty = {};
         let qty = GS.shopQty[itemId] || 1;
-        const tab = btn.closest('.shop-item-row')?.querySelector('[data-buy-id]')?.dataset.buyTab || 'consumable';
-        const priceInfo = _getShopPriceInfo(itemId, tab);
-        const isGem = priceInfo?.currency === 'gem';
-        const balance = isGem ? (GS.resources?.gem || 0) : (GS.resources?.gold || 0);
-        const maxByMoney = priceInfo && priceInfo.price > 0 ? Math.max(1, Math.floor(balance / priceInfo.price)) : 99;
-        const maxQty = Math.min(999, Math.max(1, maxByMoney));
-        if (action === 'plus') qty = Math.min(maxQty, qty + 1);
+        if (action === 'plus') qty = Math.min(99, qty + 1);
         else if (action === 'minus') qty = Math.max(1, qty - 1);
-        else if (action === 'max') qty = maxQty;
-        _updateShopQtyRow(btn, itemId, qty);
-      });
-    });
-    // 數量輸入框：直接鍵入
-    el.pageContent.querySelectorAll('[data-shop-qty-input]').forEach(input => {
-      input.addEventListener('input', () => {
-        const itemId = input.dataset.shopQtyInput;
-        let val = parseInt(input.value.replace(/\D/g, ''));
-        if (isNaN(val) || val < 1) val = 1;
-        if (val > 999) val = 999;
-        if (!GS.shopQty) GS.shopQty = {};
-        GS.shopQty[itemId] = val;
-        _updateShopQtyRow(input, itemId, val);
-      });
-      input.addEventListener('blur', () => {
-        const itemId = input.dataset.shopQtyInput;
-        const qty = GS.shopQty?.[itemId] || 1;
-        input.value = qty;
-      });
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      });
-    });
-  }
-
-  // v2.7.8：商店輔助函數
-  function _getShopPriceInfo(itemId, tab) {
-    const shopItems = {
-      consumable: [
-        { id: 'hp1', price: 50 }, { id: 'hp2', price: 200 }, { id: 'hp4', price: 500 },
-        { id: 'mp1', price: 75 }, { id: 'mp2', price: 250 }, { id: 'mp4', price: 800 },
-        { id: 'spd1', price: 400 }, { id: 'spd2', price: 50, currency: 'gem' }, { id: 'move1', price: 200 },
-        { id: 'mgem', price: 1000 }, { id: 'town_scroll', price: 500 },
-        { id: 'enhance_stone_low', price: 5000 }, { id: 'enhance_stone_mid', price: 50, currency: 'gem' },
-        { id: 'enhance_stone_high', price: 200, currency: 'gem' },
-        { id: 'enhance_scroll', price: ENHANCE_SCROLL_PRICE },
-      ],
-      gem: [
-        { id: 'exp_potion', price: 120, currency: 'gem' },
-        { id: 'gold_pouch', price: 100, currency: 'gem' },
-        { id: 'enhance_ticket', price: ENHANCE_TICKET_COST, currency: 'gem' },
-        { id: 'mgem_gem', price: 150, currency: 'gem' },
-        { id: 'exp_boost_scroll', price: 100, currency: 'gem' },
-        { id: 'drop_boost_scroll', price: 100, currency: 'gem' },
-        { id: 'mystery_chest', price: 100, currency: 'gem' },
-        { id: 'revive_gem', price: 50, currency: 'gem' },
-        { id: 'bag_expand', price: 100, currency: 'gem' },
-        { id: 'enhance_boost_scroll', price: ENHANCE_BOOST_SCROLL_PRICE, currency: 'gem' },
-      ],
-      equip: [{ id: 'w1', price: 5000 }],
-    };
-    return (shopItems[tab] || []).find(x => x.id === itemId);
-  }
-
-  function _updateShopQtyRow(el, itemId, qty) {
-    const row = el.closest('.shop-item-row');
-    const inputEl = row?.querySelector('.shop-qty-input');
-    if (inputEl) inputEl.value = qty;
-    const buyBtn = row?.querySelector('[data-buy-id]');
-    if (buyBtn) {
-      buyBtn.dataset.buyQty = qty;
-      const tab = buyBtn.dataset.buyTab;
-      const info = _getShopPriceInfo(itemId, tab);
-      if (info) {
-        const total = info.price * qty;
-        const isGem = info.currency === 'gem';
-        const balance = isGem ? (GS.resources?.gem || 0) : (GS.resources?.gold || 0);
-        const cannotAfford = total > balance;
-        const currencyLabel = isGem ? '💎' : '💰';
-        buyBtn.innerHTML = `<span>${currencyLabel}</span><span>${total.toLocaleString()}</span>`;
-        buyBtn.disabled = cannotAfford;
-        if (cannotAfford) {
-          buyBtn.style.opacity = '0.5';
-          buyBtn.style.cursor = 'not-allowed';
-        } else {
-          buyBtn.style.opacity = '1';
-          buyBtn.style.cursor = 'pointer';
+        else if (action === 'max') qty = 99;
+        GS.shopQty[itemId] = qty;
+        // 只刷新該行，而非整頁
+        const row = btn.closest('.shop-item-row');
+        const qtyEl = row?.querySelector('.shop-qty-num');
+        if (qtyEl) qtyEl.textContent = qty;
+        const buyBtn = row?.querySelector('[data-buy-id]');
+        if (buyBtn) {
+          buyBtn.dataset.buyQty = qty;
+          // 取得價格並重新計算
+          const tab = buyBtn.dataset.buyTab;
+          const shopItems = {
+            consumable: [
+              { id: 'hp1', price: 50 }, { id: 'hp2', price: 200 }, { id: 'hp4', price: 500 },
+              { id: 'mp1', price: 75 }, { id: 'mp2', price: 250 }, { id: 'mp4', price: 800 },
+              { id: 'spd1', price: 400 }, { id: 'spd2', price: 50, currency: 'gem' }, { id: 'move1', price: 200 },
+              { id: 'mgem', price: 1000 }, { id: 'town_scroll', price: 500 },
+              { id: 'enhance_stone_low', price: 5000 }, { id: 'enhance_stone_mid', price: 50, currency: 'gem' },
+              { id: 'enhance_stone_high', price: 200, currency: 'gem' },
+              { id: 'enhance_scroll', price: ENHANCE_SCROLL_PRICE },
+            ],
+            gem: [
+              { id: 'exp_potion', price: 120, currency: 'gem' },
+              { id: 'gold_pouch', price: 100, currency: 'gem' },
+              { id: 'enhance_ticket', price: ENHANCE_TICKET_COST, currency: 'gem' },
+              { id: 'mgem_gem', price: 150, currency: 'gem' },
+              { id: 'exp_boost_scroll', price: 100, currency: 'gem' },
+              { id: 'drop_boost_scroll', price: 100, currency: 'gem' },
+              { id: 'mystery_chest', price: 100, currency: 'gem' },
+              { id: 'revive_gem', price: 50, currency: 'gem' },
+              { id: 'bag_expand', price: 100, currency: 'gem' },
+              { id: 'enhance_boost_scroll', price: ENHANCE_BOOST_SCROLL_PRICE, currency: 'gem' },
+            ],
+            equip: [
+              { id: 'w1', price: 5000 },
+            ],
+          };
+          const tabItems = shopItems[tab] || [];
+          const target = tabItems.find(x => x.id === itemId);
+          if (target) {
+            buyBtn.textContent = `購買 ${(target.price * qty).toLocaleString()}`;
+          }
         }
-      }
-    }
+      });
+    });
   }
 
   if (page === 'bag') {
@@ -22506,9 +21630,8 @@ function bindTransformCardEvents() {
       e.stopPropagation();
       const tid = btn.dataset.useTransformId;
       if (activateTransform(tid)) {
-        // v2.7.5：重新 render 完整 HeroPage（含子分欄列），而非只有 transform panel
-        el.pageContent.innerHTML = renderHeroPage();
-        bindPageEvents('hero');
+        el.pageContent.innerHTML = renderTransformPanel();
+        bindTransformCardEvents();
         renderPlayer();
       }
     });
@@ -22528,9 +21651,8 @@ function bindTransformCardEvents() {
         updateRankings();
         updateUI();
         renderPlayer();
-        // v2.7.5：重新 render 完整 HeroPage（含子分欄列）
-        el.pageContent.innerHTML = renderHeroPage();
-        bindPageEvents('hero');
+        el.pageContent.innerHTML = renderTransformPanel();
+        bindTransformCardEvents();
       }
   });
   // 變身卡片點擊（顯示詳情）
@@ -22577,9 +21699,8 @@ function bindTransformCardEvents() {
       if (useBtn) useBtn.onclick = () => {
         if (activateTransform(tid)) {
           document.getElementById('transform-detail-modal').remove();
-          // v2.7.5：重新 render 完整 HeroPage（含子分欄列）
-          el.pageContent.innerHTML = renderHeroPage();
-          bindPageEvents('hero');
+          el.pageContent.innerHTML = renderTransformPanel();
+          bindTransformCardEvents();
           renderPlayer();
         }
       };
@@ -22591,9 +21712,8 @@ function bindTransformCardEvents() {
         removeTransformBuff();
         calcCP();
         document.getElementById('transform-detail-modal').remove();
-        // v2.7.5：重新 render 完整 HeroPage（含子分欄列）
-        el.pageContent.innerHTML = renderHeroPage();
-        bindPageEvents('hero');
+        el.pageContent.innerHTML = renderTransformPanel();
+        bindTransformCardEvents();
         renderPlayer();
         updateUI();
       };
@@ -22690,7 +21810,7 @@ function handleShopBuy(id, tab, qty = 1) {
     } else if (id === 'bag_expand') {
       const curMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
       const canAdd = Math.min(qty, BAG_MAX_SLOTS - curMax);
-      if (canAdd <= 0) { showToast('背包已達最大容量', 'error'); return; }
+      if (canAdd <= 0) { alert('背包已達最大容量'); return; }
       buyGemItem(100 * canAdd, () => {
         GS.bagMaxSlots = curMax + canAdd;
         addLog('shop', `購買背包擴充卷 ×${canAdd}，容量 ${curMax} → ${curMax + canAdd}`);
@@ -22703,7 +21823,7 @@ function handleShopBuy(id, tab, qty = 1) {
       });
     } else if (id === 'true_death_pack') {
       // 限購1次檢查
-      if (GS.boughtTrueDeathPack) { showToast('此商品僅限購買1次', 'error'); return; }
+      if (GS.boughtTrueDeathPack) { alert('此商品僅限購買1次'); return; }
       buyGemItem(3000, () => {
         GS.boughtTrueDeathPack = true;
         const tickets = [
@@ -22715,22 +21835,13 @@ function handleShopBuy(id, tab, qty = 1) {
           { id: 'ticket_death_holy', name: '真墮落聖執者體驗券', tfId: 't_true_fallen_paladin' },
         ];
         tickets.forEach(t => {
-          // v2.7.9：每種體驗券用各自的券據圖標（可區分，不再共用 quest_scroll）
-          const ticketIconMap = {
-            ticket_death_knight:   ITEM_ICONS.ticket_death_knight,
-            ticket_death_mage:     ITEM_ICONS.ticket_death_mage,
-            ticket_death_archer:   ITEM_ICONS.ticket_death_archer,
-            ticket_death_assassin: ITEM_ICONS.ticket_death_assassin,
-            ticket_death_warlock:  ITEM_ICONS.ticket_death_sorcerer,
-            ticket_death_holy:     ITEM_ICONS.ticket_fallen_paladin,
-          };
           addToInventory({
             id: t.id,
             name: t.name,
             type: 'transform_ticket',
             itemType: 'consumable',
             rarity: 'gold',
-            icon: ticketIconMap[t.id] || ITEM_ICONS.ticket_death_knight,
+            icon: ITEM_ICONS.quest_scroll,
             count: 3,
             bound: true,
             soulbound: true,
@@ -22760,7 +21871,7 @@ function handleShopBuy(id, tab, qty = 1) {
     const def = itemDefs[id];
     if (!def) { addLog('system', '未知商品'); return; }
     const totalPrice = def.price * qty;
-    if (GS.resources.gold < totalPrice) { showToast('金幣不足，無法購買', 'error'); return; }
+    if (GS.resources.gold < totalPrice) { alert('金幣不足'); return; }
     // 檢查背包容量
     const curBagCount = GS.inventory.length;
     const bagMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
@@ -22788,7 +21899,7 @@ function handleShopBuy(id, tab, qty = 1) {
       count: qty, effect: def.effect || {},
     }, qty);
     if (!added) {
-      showToast('背包已滿，無法購買', 'error');
+      alert('背包已滿，無法購買');
       return;
     }
     GS.resources.gold -= totalPrice;
@@ -22802,7 +21913,6 @@ function handleShopBuy(id, tab, qty = 1) {
       }
     }
     addLog('shop', `購買了【${def.name}】 ×${qty}`);
-    showToast(`購買成功：${def.name} ×${qty}（花費 ${totalPrice.toLocaleString()} 金幣）`, 'success');
   } else if (tab === 'equip') {
     // 裝備商店：真實購買邏輯
     const equipDefs = {
@@ -22810,9 +21920,9 @@ function handleShopBuy(id, tab, qty = 1) {
     };
     const def = equipDefs[id];
     if (!def) { addLog('system', '未知裝備'); return; }
-    if (GS.resources.gold < def.price * qty) { showToast('金幣不足，無法購買', 'error'); return; }
+    if (GS.resources.gold < def.price) { alert('金幣不足'); return; }
     const bagMax = GS.bagMaxSlots || BAG_BASE_SLOTS;
-    if (GS.inventory.length >= bagMax) { showToast('背包已滿，無法購買', 'error'); return; }
+    if (GS.inventory.length >= bagMax) { alert('背包已滿'); return; }
     const equipItem = {
       id: def.id,
       name: def.name,
@@ -22825,18 +21935,17 @@ function handleShopBuy(id, tab, qty = 1) {
       enhanceLevel: 0,
       bound: false,
     };
-    const added = addToInventory(equipItem, qty);
-    if (!added) { showToast('背包已滿，無法購買', 'error'); return; }
-    GS.resources.gold -= def.price * qty;
-    collectTax(def.price * qty, 0);
-    addLog('shop', `購買了【${def.name}】 ×${qty}`);
-    showToast(`購買成功：${def.name} ×${qty}（花費 ${(def.price * qty).toLocaleString()} 金幣）`, 'success');
+    const added = addToInventory(equipItem, 1);
+    if (!added) { alert('背包已滿'); return; }
+    GS.resources.gold -= def.price;
+    collectTax(def.price, 0);
+    addLog('shop', `購買了【${def.name}】`);
   }
   updateUI();
 }
 
 function buyGemItem(cost, onBuy) {
-  if (GS.resources.gem < cost) { showToast('鑽石不足，無法購買', 'error'); return; }
+  if (GS.resources.gem < cost) { alert('鑽石不足！'); return; }
   GS.resources.gem -= cost;
   onBuy();
   updateUI();
@@ -23038,12 +22147,6 @@ function exportGameFile() {
 // 原始碼僅由營運方保管，不對玩家開放
 
 function openMenuPage(page) {
-  // v2.7.5：有專屬 overlay 的頁面(auction/settings/codex/synth)不開空白 side-page
-  const noSidePages = ['auction', 'settings', 'codex', 'synth'];
-  if (noSidePages.includes(page)) {
-    closeSideMenu();
-    return;
-  }
   closeSideMenu();
   openSidePage('menu_' + page);
   el.pageTitle.textContent = getMenuPageTitle(page);
@@ -25211,8 +24314,7 @@ function spawnSiegeDefenders(castle) {
 
 // 渲染守城NPC精靈（使用8幀多幀精靈圖，與普通怪物一致）
 function renderSiegeDefenderSprite(guard) {
-  // v2.8.4：統一走 getMonsterSprite，不直接碰 SPRITE
-  const sp = getMonsterSprite(guard.sprite || guard.spriteKey || 'bandit');
+  const sp = guard.sprite || SPRITE[guard.spriteKey] || SPRITE.warrior;
   const isMultiFrame = !!(sp.multiFrame);
 
   const elDiv = document.createElement('div');
@@ -25821,8 +24923,6 @@ function gameLoop(ts) {
     if (window.MultiplayerClient && MultiplayerClient.connected) {
       try { MultiplayerClient.tick(dt); } catch (e) { console.error('multiplayer tick error:', e); }
     }
-    // v2.7.2：伺服器級 AI 插值更新（權威）
-    try { updateServerAIs(dt); } catch (e) { console.error('serverAI tick error:', e); }
     try { renderPlayer(); } catch (e) { console.error('renderPlayer error:', e); }
 
     // 攻城战更新（城堡地圖内进行）
@@ -26180,21 +25280,6 @@ function bindEvents() {
       window.AuthSystem.logout();
     } else {
       // fallback：直接重整（init 會回到首頁）
-      location.reload();
-    }
-  });
-  // v2.9.0：更換角色按鈕（返回角色選擇頁，不登出帳號）
-  const settingsSwitchCharBtn = $('settings-switch-char-btn');
-  if (settingsSwitchCharBtn) settingsSwitchCharBtn.addEventListener('click', () => {
-    if (!confirm('確定要更換角色嗎？當前進度將自動保存。')) return;
-    el.settingsPanel.classList.remove('open');
-    // 調用角色選擇頁顯示函數（由 auth.js 提供或由 game.js 橋接）
-    if (window.AuthSystem && typeof window.AuthSystem.showCharSelect === 'function') {
-      window.AuthSystem.showCharSelect();
-    } else if (typeof window.showCharacterSelectScreen === 'function') {
-      window.showCharacterSelectScreen();
-    } else {
-      // fallback：重整後 auth.js 會顯示角色選擇
       location.reload();
     }
   });
@@ -26561,7 +25646,7 @@ function bindEvents() {
   el.menuBtn.addEventListener('click', openSideMenu);
   el.sideMenuClose.addEventListener('click', closeSideMenu);
   el.sideMenuOverlay.addEventListener('click', closeSideMenu);
-  document.querySelectorAll('.side-menu-item[data-menu]').forEach(item => {
+  document.querySelectorAll('.side-menu-item').forEach(item => {
     item.addEventListener('click', () => openMenuPage(item.dataset.menu));
   });
 
@@ -27026,1296 +26111,5 @@ window.hideCharCreate = function() {
   const screen = $('char-create-screen');
   if (screen) screen.classList.add('hidden');
 };
-
-// ===== v2.7.2：伺服器級 AI 橋接 =====
-//  線上模式：伺服器為權威，本地只渲染與插值；不隨機生成
-//  離線模式：維持客戶端本地生成（WS + long-poll 都失敗時）
-
-let _serverAIActive = false;        // 目前是否使用伺服器 AI
-let _serverAIMap = new Map();       // aiId -> aiData（伺服器原格式）
-let _serverAICurrentMap = null;     // 當前地圖的伺服器 AI 列表
-let _offlineMode = false;           // 是否離線模式
-let _serverInstanceId = null;       // 伺服器實例 ID（診斷用）
-let _currentServerId = null;        // 當前連接的伺服器 ID
-
-/**
- * v2.7.3：進入在線模式（在 join 發出時就調用，禁止本地生成 AI）
- *  - 即使 join 還沒返回，也先把本地 AI 生成閘門關掉
- *  - 若 join 失敗，會由 multiplayer 的狀態變更重新開啟離線模式
- */
-window.setServerOnline = function(serverId, mapId) {
-  _serverAIActive = true;
-  _offlineMode = false;
-  _currentServerId = serverId || null;
-  // 清空本地活躍 AI（如果有的話）
-  if (GS && GS.aiPlayers) GS.aiPlayers = [];
-  if (typeof worldLayer !== 'undefined' && worldLayer) {
-    worldLayer.querySelectorAll('.world-unit.ai-player').forEach(el => el.remove());
-  }
-};
-
-window._setServerInstanceId = function(id) {
-  _serverInstanceId = id;
-  if (typeof updateConnectionIndicator === 'function') updateConnectionIndicator();
-};
-
-/**
- * 設定伺服器廣播的 AI 清單（來自 WebSocket 或 long-poll）
- *  - 以 ai.id 為主鍵做增量更新
- *  - 本地只做渲染與移動插值，不做邏輯/隨機生成
- *  v2.7.5：補接 ai_damaged / ai_killed / ai_attack / ai_respawn 事件
- */
-window.setServerAIs = function(ais, serverId, mapId) {
-  if (!ais || !Array.isArray(ais)) return;
-  // v2.7.7：過濾 null/undefined 元素，避免伺服器廣播異常導致客戶端崩潰
-  const validAis = ais.filter(a => a && typeof a === 'object' && a.id);
-  _serverAIActive = true;
-  _offlineMode = false;
-
-  // 更新快取
-  _serverAICurrentMap = { serverId, mapId, ais: [...validAis] };
-  validAis.forEach(ai => { _serverAIMap.set(ai.id, ai); });
-
-  // 若未進入遊戲，先延遲
-  if (!GS || !worldLayer) return;
-  if (mapId && GS.currentMap && mapId !== GS.currentMap) {
-    // 不是當前地圖，先快取，切圖再用
-    return;
-  }
-  renderServerAIsToWorld(ais);
-};
-
-let _lastServerAISnapshotHash = ''; // v2.7.5：快照hash，未變不重建DOM
-let _lastServerAICount = 0;
-
-/**
- * 把伺服器 AI 清單渲染到 worldLayer
- *  v2.7.5：數量未變時只更新屬性（位置/HP），不重建DOM；大幅降低卡頓
- */
-function renderServerAIsToWorld(ais) {
-  if (!worldLayer) return;
-
-  // v2.7.7：修復 AI:local 根因 —  validAis 從未在函式內定義，導致 ReferenceError
-  //  進而讓伺服器 AI 永遠無法渲染，指示器一直顯示 AI:local
-  const validAis = (ais && Array.isArray(ais))
-    ? ais.filter(a => a && typeof a === 'object' && a.id)
-    : [];
-
-  // v2.7.5：計算快照hash（只看 id+數量），相同則增量更新位置/HP即可
-  const curIds = validAis.map(a => a.id).sort().join(',');
-  const countChanged = validAis.length !== _lastServerAICount;
-
-  if (!countChanged && curIds === _lastServerAISnapshotHash) {
-    // 只有位置/HP變動：增量更新
-    updateServerAIsFromSnapshot(validAis);
-    return;
-  }
-
-  // 數量或id變動 → 重建（但仍儘量比對差異）
-  _lastServerAISnapshotHash = curIds;
-  _lastServerAICount = validAis.length;
-
-  // 把現有的 ai-player DOM 全部清掉（舊的本地 AI）
-  const oldAIs = worldLayer.querySelectorAll('.world-unit.ai-player');
-  oldAIs.forEach(el => el.remove());
-
-  // 清空本地活躍 AI 標記（避免舊程式繼續驅動）
-  if (GS.aiPlayers) GS.aiPlayers = [];
-
-  // 建立伺服器 AI 的精靈（包裝成 createAISprite 可接受的格式）
-  const wrapped = validAis.map(sai => wrapServerAI(sai));
-  GS.aiPlayers = wrapped;
-
-  // 分幀建立 DOM
-  let idx = 0;
-  const BATCH = 10;
-  function spawnBatch() {
-    const end = Math.min(idx + BATCH, wrapped.length);
-    for (; idx < end; idx++) {
-      try { if (wrapped[idx]) createAISprite(wrapped[idx]); } catch(e) {}
-    }
-    if (idx < wrapped.length) requestAnimationFrame(spawnBatch);
-  }
-  spawnBatch();
-}
-
-/** v2.7.5：快照未變動數量時，只更新每隻AI的位置/HP/方向/等級等 */
-function updateServerAIsFromSnapshot(ais) {
-  if (!GS || !GS.aiPlayers || !worldLayer) return;
-  const byId = new Map();
-  for (const ai of GS.aiPlayers) byId.set(ai.uid, ai);
-  for (const sai of ais) {
-    const local = byId.get(sai.id);
-    if (!local) continue;
-    // 更新目標位置（updateServerAIs 會做插值）
-    local.targetX = sai.x;
-    local.targetY = sai.y;
-    local.serverDir = sai.dir;
-    // 更新 HP（伺服器權威）
-    if (sai.hp != null) local.hp = sai.hp;
-    if (sai.maxHp != null) local.hpMax = sai.maxHp;
-    // 等級與國家（通常不變，保險更新）
-    if (sai.level != null) local.level = sai.level;
-    if (sai.nation) local.nation = sai.nation;
-    // 死亡狀態
-    if (sai.dead) {
-      local.dead = true;
-      if (local.el) local.el.style.opacity = '0.25';
-    } else if (local.dead) {
-      local.dead = false;
-      if (local.el) local.el.style.opacity = '';
-    }
-  // 更新 HP bar
-  if (local && local.el) {
-      const hpFill = local.el.querySelector('.unit-hp-fill');
-      const pct = Math.max(0, Math.min(100, (local.hp / (local.hpMax || 1)) * 100));
-      if (hpFill) hpFill.style.width = pct + '%';
-      const nameEl = local.el.querySelector('.unit-name');
-      if (nameEl && nameEl.textContent !== local.name) nameEl.textContent = local.name;
-    }
-  }
-}
-
-/** 把伺服器 AI 格式轉換為 createAISprite 可吃的格式 */
-function wrapServerAI(sai) {
-  const clsId = sai.classId || 'warrior';
-  const cls = CLASSES[clsId] || CLASSES.warrior;
-  return {
-    uid: sai.id,                 // 伺服器 id 直接當 uid 用（確保同 id 客戶端一致）
-    name: sai.name || 'AI',
-    level: sai.level || 1,
-    classId: clsId,
-    nation: sai.nation || 'liang',
-    hp: sai.hp != null ? sai.hp : 100,
-    hpMax: sai.maxHp || sai.hpMax || 100,
-    x: sai.x || 500,
-    y: sai.y || 500,
-    // v2.7.5：插值目標位置（伺服器快照的實際位置，客戶端平滑過去）
-    targetX: sai.x || 500,
-    targetY: sai.y || 500,
-    dir: sai.dir || 'down',
-    isAI: true,
-    isServerAI: true,
-    serverId: sai.serverId || 'zeus',
-    mapId: sai.mapId || 'village_01',
-    dead: !!sai.dead,
-    _spriteClass: clsId,
-    y: sai.y || 500,
-    dir: sai.dir || 'down',
-    isAI: true,
-    isServerAI: true,            // 標記為伺服器 AI
-    mapId: sai.mapId || GS.currentMap,
-    state: 'idle',
-    sprite: cls?.sprite || null,
-    el: null,
-    targetX: sai.x || 500,
-    targetY: sai.y || 500,
-    _lastServerX: sai.x || 500,
-    _lastServerY: sai.y || 500,
-    _interpStart: 0,
-  };
-}
-
-/** 標示離線模式（WS + long-poll 都失敗時） */
-window.setOfflineMode = function(isOffline) {
-  _offlineMode = !!isOffline;
-  if (isOffline) {
-    _serverAIActive = false;
-    // UI 標示：離線模式小標籤
-    let tag = document.getElementById('offline-mode-tag');
-    if (!tag) {
-      tag = document.createElement('div');
-      tag.id = 'offline-mode-tag';
-      tag.style.cssText = 'position:fixed;top:4px;left:50%;transform:translateX(-50%);z-index:9999;padding:2px 10px;background:#5a3020;color:#ffc080;font-size:10px;border:1px solid #804020;border-radius:0 0 6px 6px;font-family:inherit;letter-spacing:2px;';
-      tag.textContent = '離 線 模 式';
-      document.body.appendChild(tag);
-    }
-    tag.style.display = 'block';
-  } else {
-    const tag = document.getElementById('offline-mode-tag');
-    if (tag) tag.style.display = 'none';
-  }
-};
-
-/**
- * 伺服器 AI 插值更新（在 gameLoop 中呼叫）
- *  與本地 AI 的 walk/move 邏輯解耦，純粹依伺服器座標插值
- */
-function updateServerAIs(dt) {
-  if (!_serverAIActive || !GS.aiPlayers || GS.aiPlayers.length === 0) return;
-  const now = Date.now();
-  GS.aiPlayers.forEach(ai => {
-    if (!ai || !ai.isServerAI || !ai.el) return;
-    if (ai.targetX == null) return;
-    const dx = ai.targetX - ai.x;
-    const dy = ai.targetY - ai.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const wasMoving = ai._wasMoving;
-    const isMoving = dist >= 1.5;
-    ai._wasMoving = isMoving;
-    if (isMoving) {
-      const speed = 120; // px/s（與玩家接近）
-      const step = Math.min(dist, speed * dt / 1000);
-      ai.x += (dx / dist) * step;
-      ai.y += (dy / dist) * step;
-      // v2.9.0：移動中 → walk 動畫
-      if (ai.state !== 'walking' && ai.sprite?.multiFrame) {
-        ai.state = 'walking';
-        // 初始化動畫狀態（若尚未）
-        if (unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
-          setUnitAnimState(ai.uid, 'walk', { dir: ai.dir || 'down' });
-        }
-      }
-    } else {
-      // 停下 → idle
-      if (ai.state !== 'idle' && ai.sprite?.multiFrame) {
-        ai.state = 'idle';
-        if (unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
-          setUnitAnimState(ai.uid, 'idle', { dir: ai.dir || 'down' });
-        }
-      }
-    }
-    // 更新 DOM 位置
-    if (typeof window.positionUnit === 'function') {
-      try { positionUnit(ai.el, ai.x, ai.y, 'ai'); } catch(e) {}
-    } else {
-      ai.el.style.left = (ai.x - 32) + 'px';
-      ai.el.style.bottom = ai.y + 'px';
-    }
-    // 方向
-    if (Math.abs(dx) > Math.abs(dy)) {
-      ai.dir = dx > 0 ? 'right' : 'left';
-    } else {
-      ai.dir = dy > 0 ? 'up' : 'down';
-    }
-  });
-}
-
-// ========== v2.7.5：伺服器 AI 戰鬥事件處理 ==========
-//  處理 WS/LP 推來的 ai_damaged / ai_killed / ai_attack / ai_respawn 事件
-//  玩家攻擊 AI 的傷害已由伺服器權威計算，這裡負責視覺表現與獎勵
-
-/** 全域事件接收：由 multiplayer.js 呼叫（WS 與 LP 雙通道共用） */
-window._handleServerAIEvent = function(type, data) {
-  if (!type || !data) return;
-  switch (type) {
-    case 'ai_damaged': handleServerAIDamaged(data); break;
-    case 'ai_killed':  handleServerAIKilled(data); break;
-    case 'ai_attack':  handleServerAIAttack(data); break;
-    case 'ai_respawn': handleServerAIRespawn(data); break;
-  }
-};
-
-function handleServerAIDamaged(data) {
-  const { aiId, hp, maxHp, damage, attackerId } = data || {};
-  if (!aiId) return;
-  // 找本地 AI 並更新 HP
-  const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
-  if (!ai) return;
-  ai.hp = hp != null ? hp : Math.max(0, (ai.hp || 100) - (damage || 0));
-  ai.hpMax = maxHp || ai.hpMax || 100;
-  // 更新 HP bar
-  if (ai.el) {
-    const hpFill = ai.el.querySelector('.unit-hp-fill');
-    const pct = Math.max(0, Math.min(100, (ai.hp / ai.hpMax) * 100));
-    if (hpFill) hpFill.style.width = pct + '%';
-  }
-  // 受擊閃爍
-  if (ai.el) {
-    ai.el.classList.add('hit-flash');
-    setTimeout(() => ai.el && ai.el.classList.remove('hit-flash'), 150);
-  }
-  // 傷害飄字（若是玩家打擊）
-  if (damage && attackerId === (window.MultiplayerClient?.myId || '')) {
-    if (typeof showDamage === 'function' && ai.x && ai.y) {
-      try { showDamage(ai.x, ai.y + 20, damage, 'normal'); } catch(e) {}
-    }
-  }
-}
-
-function handleServerAIKilled(data) {
-  const { aiId, killerId, expReward, goldReward, respawnIn } = data || {};
-  const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
-  if (!ai) return;
-  ai.dead = true;
-  if (ai.el) {
-    ai.el.style.opacity = '0.2';
-    ai.el.style.filter = 'grayscale(1) brightness(0.5)';
-  }
-  // 玩家是擊殺者 → 給獎勵
-  if (killerId === (window.MultiplayerClient?.myId || '')) {
-    if (expReward) {
-      GS.player.exp = (GS.player.exp || 0) + expReward;
-      addLog('combat', `擊敗 ${ai.name}，獲得 ${expReward} 經驗`);
-      checkLevelUp();
-    }
-    if (goldReward) {
-      GS.resources.gold = (GS.resources.gold || 0) + goldReward;
-    }
-    updateUI();
-  }
-}
-
-function handleServerAIAttack(data) {
-  const { aiId, targetId, damage, aiX, aiY } = data || {};
-  if (!targetId) return;
-  // 攻擊的是自己 → 玩家受傷
-  if (targetId === window.MultiplayerClient?.myId) {
-    if (typeof damagePlayer === 'function' && damage) {
-      try { damagePlayer(damage, '伺服器 AI'); } catch(e) {}
-    }
-    // 受擊震動/閃屏
-    if (window.AudioSystem && typeof AudioSystem.sfxHit === 'function') {
-      try { AudioSystem.sfxHit(); } catch(e) {}
-    }
-  }
-  // 不論打誰，都顯示 AI 攻擊動作
-  if (aiId) {
-    const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
-    if (ai && ai.el) {
-      ai.el.classList.add('attack-anim');
-      setTimeout(() => ai.el && ai.el.classList.remove('attack-anim'), 300);
-    }
-  }
-}
-
-function handleServerAIRespawn(data) {
-  const { aiId, x, y } = data || {};
-  const ai = GS.aiPlayers && GS.aiPlayers.find(a => a.uid === aiId);
-  if (!ai) return;
-  ai.dead = false;
-  ai.hp = ai.hpMax || 100;
-  if (x != null) { ai.x = x; ai.targetX = x; }
-  if (y != null) { ai.y = y; ai.targetY = y; }
-  if (ai.el) {
-    ai.el.style.opacity = '';
-    ai.el.style.filter = '';
-    const hpFill = ai.el.querySelector('.unit-hp-fill');
-    if (hpFill) hpFill.style.width = '100%';
-  }
-}
-
-// ========== v2.7.5：玩家攻擊伺服器 AI → 透過 multiplayer 送出，由伺服器扣血 ==========
-//  攔截 dealDamageToAIPlayer：如果是伺服器 AI，不本地扣血，改由廣播通知伺服器
-const _origDealDamageToAI = typeof dealDamageToAIPlayer === 'function' ? dealDamageToAIPlayer : null;
-function _serverAIDamageHook(ai, dmg, damageType, skill, effectType) {
-  if (ai && ai.isServerAI && window.MultiplayerClient && MultiplayerClient.connected) {
-    // 伺服器 AI：透過 multiplayer 攻擊 API 送出（伺服器權威扣血）
-    if (typeof MultiplayerClient.reportAttack === 'function') {
-      MultiplayerClient.reportAttack(ai.uid, skill ? skill.id : 0, dmg);
-    }
-    return; // 不本地扣血
-  }
-  if (_origDealDamageToAI) return _origDealDamageToAI.apply(this, arguments);
-}
-// 若 game.js 本來有 dealDamageToAIPlayer，替換掉
-if (typeof dealDamageToAIPlayer === 'function') {
-  dealDamageToAIPlayer = _serverAIDamageHook;
-}
-
-// ========== v2.7.3：倉庫系統（帳號共享） ==========
-//  資料存在 localStorage 中（以 accountId 為 key），同帳號不同角色互通
-//  有伺服器端時可升級為 API 同步
-(function() {
-  const WAREHOUSE_MAX_SLOTS = 100;
-  const _accountKey = function() {
-    try {
-      const tok = (window.AuthSystem && AuthSystem.getToken) ? AuthSystem.getToken() : '';
-      const acc = (window.AuthSystem && AuthSystem.getAccount) ? AuthSystem.getAccount() : {};
-      return 'wh_' + (acc.id || acc.username || tok.slice(0, 16) || 'guest');
-    } catch(e) { return 'wh_guest'; }
-  };
-
-  function getWarehouse() {
-    try {
-      const key = _accountKey();
-      const raw = localStorage.getItem(key);
-      if (raw) return JSON.parse(raw);
-    } catch(e) {}
-    return { items: [], gold: 0 };
-  }
-
-  function saveWarehouse(wh) {
-    try {
-      const key = _accountKey();
-      localStorage.setItem(key, JSON.stringify(wh));
-    } catch(e) { showToast('倉庫保存失敗', 'error'); }
-  }
-
-  function renderWarehousePanel() {
-    const wh = getWarehouse();
-    const items = wh.items || [];
-    const gridCols = 8;
-    const totalSlots = WAREHOUSE_MAX_SLOTS;
-    const slots = [];
-    for (let i = 0; i < totalSlots; i++) {
-      const item = items[i];
-      if (item) {
-        const iconUrl = item.itemType === 'equipment'
-          ? (typeof getEquipIcon === 'function' ? getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity) : '')
-          : (typeof getItemIconUrl === 'function' ? getItemIconUrl(item) : '');
-        const countStr = (item.count && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : '';
-        slots.push(`
-          <div class="bag-cell rarity-${item.rarity || 'common'}" data-wh-idx="${i}" style="aspect-ratio:1;position:relative;background:rgba(20,14,8,0.5);border:2px solid #8b6520;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">
-            <img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.style.display='none'"/>
-            ${countStr}
-          </div>`);
-      } else {
-        slots.push(`<div class="bag-cell" data-wh-idx="${i}" style="aspect-ratio:1;background:rgba(20,14,8,0.2);border:1px dashed rgba(139,101,32,0.3);border-radius:4px"></div>`);
-      }
-    }
-    return `
-      <div style="padding:10px 12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-size:12px;color:#f0c040;font-weight:700">帳號倉庫</div>
-          <div style="font-size:11px;color:#d4af37">${items.length}/${totalSlots} 格</div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(${gridCols},1fr);gap:4px">
-          ${slots.join('')}
-        </div>
-        <div style="margin-top:10px;padding:8px;background:rgba(0,0,0,0.3);border-radius:4px;font-size:11px;color:#b0a080;line-height:1.5">
-          💡 點擊背包物品<b>存入</b>、點擊倉庫物品<b>取出</b><br/>
-          同帳號所有角色共享此倉庫（變身/英雄/守護不影響）
-        </div>
-      </div>
-    `;
-  }
-
-  function openWarehousePanel() {
-    // 用 modal 呈現倉庫（不是側邊頁）
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(2px);';
-    overlay.id = 'warehouse-modal-overlay';
-    
-    const panel = document.createElement('div');
-    panel.style.cssText = 'width:100%;max-width:480px;max-height:85vh;overflow-y:auto;background:linear-gradient(180deg,#3a2818,#1a1208);border:2px solid #8b6520;border-radius:8px;box-shadow:0 0 30px rgba(240,192,64,0.2);color:#e8d9b0;font-family:inherit;';
-    
-    // 標題列
-    const header = document.createElement('div');
-    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid rgba(240,192,64,0.3);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(90deg,rgba(240,192,64,0.1),transparent);';
-    header.innerHTML = '<div style="font-size:15px;font-weight:700;color:#f0c040;letter-spacing:1px">🏛 倉 庫</div>';
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background:none;border:none;color:#d4af37;font-size:16px;cursor:pointer;padding:2px 8px;';
-    closeBtn.onclick = () => overlay.remove();
-    header.appendChild(closeBtn);
-    panel.appendChild(header);
-    
-    // 內容區：背包（上）+ 倉庫（下），雙向操作
-    const content = document.createElement('div');
-    content.style.cssText = 'max-height:calc(85vh - 50px);overflow-y:auto;';
-    
-    function refresh() {
-      content.innerHTML = renderBagForWarehouse() + renderWarehousePanel();
-      bindWarehouseEvents(content);
-    }
-    
-    panel.appendChild(content);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-    
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-    
-    refresh();
-  }
-
-  // 倉庫用的迷你背包（只顯示可存入的物品）
-  function renderBagForWarehouse() {
-    const items = (typeof GS !== 'undefined' && GS.inventory) ? GS.inventory.filter(it => it && !it.bound && !it.soulbound) : [];
-    const slots = [];
-    for (let i = 0; i < 30; i++) {
-      const item = items[i];
-      if (item) {
-        const iconUrl = item.itemType === 'equipment'
-          ? (typeof getEquipIcon === 'function' ? getEquipRarityIcon(item.type === 'accessory' ? 'ring1' : item.type, item.rarity) : '')
-          : (typeof getItemIconUrl === 'function' ? getItemIconUrl(item) : '');
-        const countStr = (item.count && item.count > 1) ? `<span style="position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000">${item.count}</span>` : '';
-        slots.push(`
-          <div class="bag-cell rarity-${item.rarity || 'common'}" data-bag-wh-idx="${i}" style="aspect-ratio:1;position:relative;background:rgba(20,14,8,0.5);border:2px solid #8b6520;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden" title="點擊存入：${item.name}">
-            <img src="${iconUrl}" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.style.display='none'"/>
-            ${countStr}
-          </div>`);
-      } else {
-        slots.push(`<div class="bag-cell" style="aspect-ratio:1;background:rgba(20,14,8,0.2);border:1px dashed rgba(139,101,32,0.3);border-radius:4px"></div>`);
-      }
-    }
-    return `
-      <div style="padding:10px 12px;border-bottom:1px solid rgba(240,192,64,0.2)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div style="font-size:12px;color:#b09060;font-weight:700">背包（點擊存入）</div>
-          <div style="font-size:10px;color:#8b6520">${items.length} 件可存</div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px">
-          ${slots.join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  function bindWarehouseEvents(container) {
-    // 從背包存入
-    container.querySelectorAll('[data-bag-wh-idx]').forEach(cell => {
-      cell.addEventListener('click', () => {
-        const idx = parseInt(cell.dataset.bagWhIdx);
-        const unbound = (GS.inventory || []).filter(it => it && !it.bound && !it.soulbound);
-        const item = unbound[idx];
-        if (!item) return;
-        const wh = getWarehouse();
-        if (wh.items.length >= WAREHOUSE_MAX_SLOTS) { showToast('倉庫已滿', 'error'); return; }
-        // 從背包移除，加到倉庫
-        const realIdx = GS.inventory.indexOf(item);
-        if (realIdx >= 0) GS.inventory.splice(realIdx, 1);
-        wh.items.push(JSON.parse(JSON.stringify(item)));
-        saveWarehouse(wh);
-        showToast('已存入：' + item.name, 'success');
-        // 刷新介面
-        const overlay = document.getElementById('warehouse-modal-overlay');
-        if (overlay) {
-          const content = overlay.querySelector('div > div:nth-child(2)');
-          if (content) {
-            content.innerHTML = renderBagForWarehouse() + renderWarehousePanel();
-            bindWarehouseEvents(content);
-          }
-        }
-        if (typeof updateUI === 'function') updateUI();
-        if (typeof renderBagPage === 'function' && el && el.pageContent && el.sidePage && el.sidePage.classList.contains('open')) {
-          // 若背包側頁開著也刷新
-        }
-      });
-    });
-    // 從倉庫取出
-    container.querySelectorAll('[data-wh-idx]').forEach(cell => {
-      cell.addEventListener('click', () => {
-        const idx = parseInt(cell.dataset.whIdx);
-        const wh = getWarehouse();
-        const item = wh.items[idx];
-        if (!item) return;
-        // 加到背包
-        if (typeof addToInventory === 'function') {
-          const ok = addToInventory(item, item.count || 1);
-          if (!ok) { showToast('背包空間不足', 'error'); return; }
-        } else {
-          if (GS.inventory.length >= (GS.bagMaxSlots || 60)) { showToast('背包空間不足', 'error'); return; }
-          GS.inventory.push(item);
-        }
-        wh.items.splice(idx, 1);
-        saveWarehouse(wh);
-        showToast('已取出：' + item.name, 'success');
-        const overlay = document.getElementById('warehouse-modal-overlay');
-        if (overlay) {
-          const content = overlay.querySelector('div > div:nth-child(2)');
-          if (content) {
-            content.innerHTML = renderBagForWarehouse() + renderWarehousePanel();
-            bindWarehouseEvents(content);
-          }
-        }
-        if (typeof updateUI === 'function') updateUI();
-      });
-    });
-  }
-
-  window.openWarehousePanel = openWarehousePanel;
-  window._getWarehouse = getWarehouse;
-})();
-
-// ========== v2.7.3：Buff 點擊 tooltip（單個 buff 詳情） ==========
-(function() {
-  const _origRender = typeof renderBuffBar === 'function' ? renderBuffBar : null;
-  if (!_origRender) return;
-  // monkey-patch renderBuffBar 加上單獨點擊事件
-  window.renderBuffBar = function() {
-    _origRender();
-    if (!el || !el.buffBar) return;
-    el.buffBar.querySelectorAll('.buff-icon').forEach(icon => {
-      // 移除舊的（預設 showAllBuffsWindow 綁的）
-      const newIcon = icon.cloneNode(true);
-      icon.parentNode.replaceChild(newIcon, icon);
-      newIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const buffType = newIcon.dataset.buffType;
-        showBuffDetailTooltip(newIcon, buffType);
-      });
-    });
-  };
-
-  function showBuffDetailTooltip(anchorEl, buffType) {
-    // 先移除舊的
-    const old = document.getElementById('buff-detail-tooltip');
-    if (old) { old.remove(); }
-    const buffs = (GS && GS.activeBuffs) ? GS.activeBuffs.filter(b => b.type === buffType) : [];
-    if (buffs.length === 0) return;
-    const b = buffs[0];
-    const now = Date.now();
-    const remain = Math.max(0, b.endTime - now);
-    const mins = Math.floor(remain / 60000);
-    const secs = Math.floor((remain % 60000) / 1000);
-    const timeStr = remain >= 3600000
-      ? Math.floor(remain/3600000) + 'h' + Math.floor((remain%3600000)/60000) + 'm'
-      : mins + 'm' + secs + 's';
-    
-    const tip = document.createElement('div');
-    tip.id = 'buff-detail-tooltip';
-    tip.style.cssText = 'position:fixed;z-index:10002;padding:10px 12px;background:rgba(20,14,8,0.92);border:1px solid #8b6520;border-radius:6px;color:#e8d9b0;font-size:12px;line-height:1.5;min-width:160px;max-width:220px;box-shadow:0 4px 15px rgba(0,0,0,0.6);font-family:inherit;pointer-events:none;';
-    tip.innerHTML = `
-      <div style="font-weight:700;color:#f0c040;margin-bottom:4px;font-size:13px">${b.name || '增益效果'}</div>
-      <div style="color:#b09060;font-size:11px;margin-bottom:6px">${b.desc || ''}</div>
-      <div style="color:#a0e0a0;font-size:11px">效果：${b.effectText || b.valueText || '持續中'}</div>
-      <div style="margin-top:4px;color:#ffd070;font-size:11px">剩餘：${timeStr}</div>
-    `;
-    document.body.appendChild(tip);
-    
-    // 定位在 buff 圖示旁
-    const rect = anchorEl.getBoundingClientRect();
-    let left = rect.right + 8;
-    let top = rect.top;
-    if (left + 220 > window.innerWidth) left = rect.left - 228;
-    if (top + 100 > window.innerHeight) top = window.innerHeight - 110;
-    tip.style.left = left + 'px';
-    tip.style.top = top + 'px';
-    
-    // 點外部關閉
-    setTimeout(() => {
-      const closeHandler = (e) => {
-        if (!tip.contains(e.target) && !anchorEl.contains(e.target)) {
-          tip.remove();
-          document.removeEventListener('click', closeHandler);
-        }
-      };
-      document.addEventListener('click', closeHandler);
-    }, 10);
-  }
-})();
-
-// ========== v2.7.3：體驗券 icon 導正（用變身 portrait 當券圖） ==========
-(function() {
-  // 在遊戲啟動後補上體驗券的自訂 icon 對照
-  // v2.7.9：優先使用券據圖標（ITEM_ICONS.ticket_death_*），portrait 作為 fallback
-  const _ticketIcons = {
-    ticket_death_knight:   ITEM_ICONS.ticket_death_knight,
-    ticket_death_mage:     ITEM_ICONS.ticket_death_mage,
-    ticket_death_archer:   ITEM_ICONS.ticket_death_archer,
-    ticket_death_assassin: ITEM_ICONS.ticket_death_assassin,
-    ticket_death_warlock:  ITEM_ICONS.ticket_death_sorcerer,
-    ticket_death_holy:     ITEM_ICONS.ticket_fallen_paladin,
-  };
-
-  // patch getItemIconUrl 以支援體驗券
-  const _origGetItemIcon = typeof getItemIconUrl === 'function' ? getItemIconUrl : null;
-  if (_origGetItemIcon) {
-    window.getItemIconUrl = function(item) {
-      if (item && item.id && _ticketIcons[item.id]) {
-        return _ticketIcons[item.id];
-      }
-      if (item && item.effect && item.effect.useTransformTicket && item.effect.transformId) {
-        // 動態對照：用 transformId 找 portrait
-        const portraitPath = 'assets/transform/gold/' + (item.effect.transformId.replace(/^t_/, '')) + '/portrait.png';
-        return portraitPath;
-      }
-      return _origGetItemIcon(item);
-    };
-  }
-})();
-
-// ========== v2.7.3：全域原生 alert/confirm/prompt 攔截 ==========
-//  保險機制：任何漏網的原生呼叫都轉成 uiAlert/uiConfirm
-//  注意：confirm/prompt 原生是同步阻塞，轉成 modal 是異步，
-//  為避免破壞既有同步邏輯，只對已知不依賴返回值的 alert 做替換
-(function() {
-  const _origAlert = window.alert;
-  window.alert = function(msg) {
-    // 遊戲內用 uiAlert（非同步，不阻塞）
-    if (typeof window.uiAlert === 'function' && document.readyState !== 'loading') {
-      window.uiAlert(msg, '系統提示').catch(() => {});
-      return undefined;
-    }
-    return _origAlert.call(window, msg);
-  };
-})();
-
-// ========== v2.7.3：商店購買成敗 toast ==========
-(function() {
-  const _origBuy = typeof handleShopBuy === 'function' ? handleShopBuy : null;
-  if (!_origBuy) return;
-  window.handleShopBuy = function(id, tab, qty) {
-    // 記錄購買前的資源
-    const beforeGold = GS.resources.gold;
-    const beforeGem = GS.resources.gem;
-    const beforeInvCount = GS.inventory.length;
-    
-    // 呼叫原始函式
-    try {
-      _origBuy(id, tab, qty);
-    } catch(e) {
-      showToast('購買失敗：' + e.message, 'error');
-      return;
-    }
-    
-    // 根據資源變化判斷成敗（簡單啟發式）
-    // 實際成敗會在各 buy* 函式內部處理，這裡補 toast
-    const goldDiff = beforeGold - GS.resources.gold;
-    const gemDiff = beforeGem - GS.resources.gem;
-    if (goldDiff > 0 || gemDiff > 0) {
-      showToast(`購買成功 ×${qty || 1}`, 'success');
-    }
-  };
-  
-  // buyGemItem 補失敗 toast
-  const _origBuyGem = typeof buyGemItem === 'function' ? buyGemItem : null;
-  if (_origBuyGem) {
-    window.buyGemItem = function(cost, onSuccess) {
-      if (GS.resources.gem < cost) {
-        showToast('鑽石不足', 'error');
-        return false;
-      }
-      return _origBuyGem(cost, onSuccess);
-    };
-  }
-})();
-
-// ========== v2.7.3：連線指示器 ==========
-// 常駐顯示：傳輸方式 / serverId / mapId / AI 來源與數量
-(function() {
-  let indicator = null;
-
-  function ensureIndicator() {
-    if (indicator) return indicator;
-    indicator = document.createElement('div');
-    indicator.id = 'connection-indicator';
-    indicator.style.cssText = 'position:fixed;top:2px;right:4px;z-index:9998;padding:2px 8px;font-size:10px;color:#d4af37;background:rgba(20,14,8,0.75);border:1px solid rgba(240,192,64,0.4);border-radius:0 0 4px 4px;font-family:inherit;letter-spacing:0.5px;pointer-events:auto;cursor:pointer;';
-    indicator.title = '連線狀態（點擊查看詳情）';
-    document.body.appendChild(indicator);
-    return indicator;
-  }
-
-  function getTransportLabel() {
-    try {
-      if (window.MultiplayerClient) return MultiplayerClient.transport || 'offline';
-    } catch(e) {}
-    return 'offline';
-  }
-
-  function getTransportColor(tr) {
-    if (tr === 'websocket') return '#50ff80';
-    if (tr === 'longpoll') return '#ffd040';
-    return '#ff6060';
-  }
-
-  function update() {
-    const ind = ensureIndicator();
-    const tr = getTransportLabel();
-    const color = getTransportColor(tr);
-    let sid = '-', mid = '-', aiSrc = 'local', aiCount = 0, iid = '-';
-    let wsFailReason = '';
-    let isOffline = false;
-    let serverLabel = '';
-    try {
-      if (window.MultiplayerClient) {
-        sid = MultiplayerClient.serverId || '-';
-        mid = MultiplayerClient.mapId || '-';
-        wsFailReason = MultiplayerClient.wsFailureReason || MultiplayerClient.getWsFailureReason?.() || '';
-        isOffline = MultiplayerClient.transport === 'offline' || MultiplayerClient.status === 'offline';
-      }
-      // v2.8.2：狀態列 ON/OFF 只反映「自己這條連線是否成功連上 server」
-      //  不論其他玩家、AI 是否在線，只要自己連上了就顯示 ON
-      //  連線協定優先級：WS > LP > OFF，只要有任一條連上就算在線
-      const mpStatus = window.MultiplayerClient ? MultiplayerClient.status : 'offline';
-      const connected = mpStatus === 'online';
-      const trEff = connected ? tr : 'offline';
-      const trColorEff = connected ? color : '#ff6060';
-      // AI 來源：在線且 serverAI 已啟用 = server；在線但 AI 還沒到 = loading；離線 = offline
-      if (!connected) {
-        aiSrc = 'offline';
-      } else if (typeof _serverAIActive !== 'undefined' && _serverAIActive) {
-        aiSrc = 'server';
-      } else {
-        aiSrc = 'loading';
-      }
-      aiCount = (typeof GS !== 'undefined' && GS && GS.aiPlayers) ? GS.aiPlayers.length : 0;
-      if (typeof _serverInstanceId !== 'undefined') iid = (_serverInstanceId || '-').slice(0, 8);
-      // 伺服器名稱縮寫（zeus → ZEUS 全大寫）
-      if (sid && sid !== '-') serverLabel = sid.toUpperCase().slice(0, 8);
-      else serverLabel = '-';
-    } catch(e) {}
-
-    // v2.8.2：傳輸標籤統一用 trEff（連線狀態為準），顏色用 trColorEff
-    const trLabel = trEff === 'websocket' ? 'ON' : (trEff === 'longpoll' ? 'LP' : 'OFF');
-    const trColor = trColorEff;
-    // AI 來源顏色：server 綠 / local 黃 / offline 紅
-    let aiColor = '#ffd040';
-    if (aiSrc === 'server') aiColor = '#50ff80';
-    else if (aiSrc === 'offline') aiColor = '#ff6060';
-    const aiLabel = aiSrc === 'server' ? 'AI:SVR' : (aiSrc === 'offline' ? 'AI:OFF' : (aiSrc === 'loading' ? 'AI:…' : 'AI:LOC'));
-    // 當前帳號（最多 8 字）
-    let accName = '-';
-    try {
-      if (window.AuthSystem && AuthSystem.getCurrentAccount) {
-        accName = AuthSystem.getCurrentAccount() || '-';
-      } else if (typeof localStorage !== 'undefined') {
-        accName = localStorage.getItem('mmo_account') || '-';
-      }
-    } catch(e) {}
-    if (accName.length > 8) accName = accName.slice(0, 7) + '…';
-
-      // v2.8.2：AI:loading 用橘色，提醒用戶 AI 還在載入（不影響 ON/OFF 判斷）
-      const aiColorEff = aiSrc === 'loading' ? '#ffaa40' : aiColor;
-      ind.innerHTML =
-      '<span style="color:' + trColor + ';font-weight:700">' + trLabel + '</span>' +
-      '<span style="opacity:0.4">·</span>' +
-      '<span style="color:#d4af37">' + serverLabel + '</span>' +
-      '<span style="opacity:0.4">·</span>' +
-      '<span style="color:' + aiColorEff + ';font-weight:600">' + aiLabel + '(' + aiCount + ')</span>' +
-      '<span style="opacity:0.4">·</span>' +
-      '<span style="opacity:0.7;font-size:10px">' + accName + '</span>' +
-      '<span style="opacity:0.4">·</span>' +
-      '<span style="opacity:0.6">' + iid + '</span>';
-
-    let tooltip =
-      '連線傳輸：' + tr + '\n' +
-      '伺服器：' + sid + '\n' +
-      '地圖：' + mid + '\n' +
-      'AI 來源：' + aiSrc + '（' + aiCount + ' 個）\n' +
-      '實例：' + iid;
-    if (wsFailReason && tr !== 'websocket') {
-      tooltip += '\n\nWebSocket 失敗原因：\n' + wsFailReason;
-    }
-    if (isOffline) {
-      tooltip += '\n\n⚠ 離線模式：所有 AI 為本地生成，\n   不會與其他玩家同步。';
-    }
-    ind.title = tooltip;
-  }
-
-  window.updateConnectionIndicator = update;
-  setInterval(update, 2000);
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    setTimeout(update, 2000);
-  } else {
-    window.addEventListener('load', () => setTimeout(update, 2000));
-  }
-})();
-
-// ========== v2.7.3：遊戲風 Modal (uiAlert / uiConfirm / uiPrompt) ==========
-(function() {
-  let activeModal = null;
-
-  function createOverlay() {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px);';
-    return overlay;
-  }
-
-  function showModal(title, contentHtml, buttons, opts) {
-    opts = opts || {};
-    if (activeModal) { activeModal.overlay.remove(); }
-    const overlay = createOverlay();
-    const panel = document.createElement('div');
-    panel.style.cssText = 'min-width:280px;max-width:90vw;max-height:80vh;overflow-y:auto;background:linear-gradient(180deg, #3a2818 0%, #2a1c10 50%, #1a1208 100%);border:2px solid #8b6520;border-radius:8px;box-shadow:0 0 30px rgba(240,192,64,0.2),inset 0 1px 0 rgba(255,220,120,0.15);color:#e8d9b0;font-family:inherit;';
-
-    // NPC 頭像區（有 npcId 時顯示）
-    if (opts.npcId && typeof window.SPRITE !== 'undefined') {
-      const npcMap = window.NPC_SPRITE_MAP || {
-        shop: 'npc_shop', blacksmith: 'npc_blacksmith', warehouse: 'npc_warehouse',
-        quest: 'npc_quest', premium_shop: 'npc_luxury', inn: 'npc_inn',
-        main_quest: 'npc_priest', dungeon_master: 'npc_dungeon', guard: 'npc_guard',
-        trader: 'npc_merchant_new', bulletin: 'npc_board', witch: 'npc_witch',
-        arena_master: 'npc_arena', healer: 'npc_healer', wizard: 'npc_wizard',
-        postman: 'npc_postman',
-      };
-      const spKey = npcMap[opts.npcId] || 'npc_shop';
-      const sp = window.SPRITE[spKey];
-      const headerRow = document.createElement('div');
-      headerRow.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(240,192,64,0.3);background:linear-gradient(90deg, rgba(240,192,64,0.08), transparent);';
-      const avatar = document.createElement('div');
-      avatar.style.cssText = 'width:48px;height:48px;border:2px solid #8b6520;border-radius:6px;overflow:hidden;background:rgba(20,14,8,0.6);flex-shrink:0;display:flex;align-items:center;justify-content:center;position:relative;';
-      if (sp && sp.useImg && sp.idle) {
-        const img = document.createElement('img');
-        img.src = sp.idle;
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.8));';
-        // v2.8.2：圖片加載失敗時用 PortraitGenerator 生成 SVG fallback，絕不顯示「？」
-        img.onerror = function() {
-          this.style.display = 'none';
-          const name = opts.npcName || 'NPC';
-          const fb = document.createElement('img');
-          fb.src = (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.npcPortraitToDataURL) 
-            ? PortraitGenerator.npcPortraitToDataURL(spKey, name)
-            : '';
-          if (fb.src) {
-            fb.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
-            avatar.appendChild(fb);
-          } else {
-            avatar.textContent = name.charAt(0);
-            avatar.style.color = '#d4af37';
-            avatar.style.fontSize = '20px';
-            avatar.style.fontWeight = '700';
-          }
-        };
-        avatar.appendChild(img);
-      } else {
-        // v2.8.2：找不到 sprite 時也用 PortraitGenerator fallback，不用「？」
-        const name = opts.npcName || 'NPC';
-        const fb = document.createElement('img');
-        fb.src = (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.npcPortraitToDataURL) 
-          ? PortraitGenerator.npcPortraitToDataURL(spKey, name)
-          : '';
-        if (fb.src) {
-          fb.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
-          avatar.appendChild(fb);
-        } else {
-          avatar.textContent = name.charAt(0);
-          avatar.style.color = '#d4af37';
-          avatar.style.fontSize = '20px';
-          avatar.style.fontWeight = '700';
-        }
-      }
-      headerRow.appendChild(avatar);
-      const titleWrap = document.createElement('div');
-      titleWrap.style.cssText = 'flex:1';
-      const titleEl = document.createElement('div');
-      titleEl.style.cssText = 'font-size:15px;font-weight:700;color:#f0c040;text-shadow:0 1px 2px #000;letter-spacing:1px;';
-      titleEl.textContent = title || opts.npcName || 'NPC';
-      titleWrap.appendChild(titleEl);
-      if (opts.npcTitle) {
-        const sub = document.createElement('div');
-        sub.style.cssText = 'font-size:10px;color:#b09060;margin-top:2px;';
-        sub.textContent = opts.npcTitle;
-        titleWrap.appendChild(sub);
-      }
-      headerRow.appendChild(titleWrap);
-      panel.appendChild(headerRow);
-    } else if (title) {
-      const titleEl = document.createElement('div');
-      titleEl.style.cssText = 'padding:12px 16px;border-bottom:1px solid rgba(240,192,64,0.3);font-size:16px;font-weight:700;color:#f0c040;text-shadow:0 1px 2px #000;letter-spacing:1px;background:linear-gradient(90deg, rgba(240,192,64,0.1), transparent);';
-      titleEl.textContent = title;
-      panel.appendChild(titleEl);
-    }
-
-    const body = document.createElement('div');
-    body.style.cssText = 'padding:16px;font-size:14px;line-height:1.6;';
-    if (typeof contentHtml === 'string') {
-      body.innerHTML = contentHtml.replace(/\n/g, '<br/>');
-    } else {
-      body.appendChild(contentHtml);
-    }
-    panel.appendChild(body);
-
-    const btnBar = document.createElement('div');
-    btnBar.style.cssText = 'display:flex;gap:10px;justify-content:center;padding:12px 16px;border-top:1px solid rgba(240,192,64,0.2);background:rgba(0,0,0,0.2);';
-
-    buttons.forEach(btn => {
-      const b = document.createElement('button');
-      b.textContent = btn.text;
-      const isPrimary = btn.primary;
-      const isDanger = btn.danger;
-      let bg = 'linear-gradient(180deg, #5a4020, #3a2810)';
-      let bc = '#8b6520';
-      let color = '#e8d9b0';
-      if (isPrimary) { bg = 'linear-gradient(180deg, #c89630, #8b6520)'; bc = '#f0c040'; color = '#1a1208'; }
-      if (isDanger) { bg = 'linear-gradient(180deg, #a03030, #601818)'; bc = '#d04040'; color = '#ffe0e0'; }
-      b.style.cssText = 'padding:8px 20px;font-size:13px;font-weight:700;background:' + bg + ';border:2px solid ' + bc + ';color:' + color + ';border-radius:4px;cursor:pointer;font-family:inherit;letter-spacing:1px;min-width:80px;transition:all 0.15s;';
-      b.addEventListener('mouseenter', () => { b.style.transform = 'translateY(-1px)'; b.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)'; });
-      b.addEventListener('mouseleave', () => { b.style.transform = ''; b.style.boxShadow = ''; });
-      b.addEventListener('click', () => { if (btn.onClick) btn.onClick(); });
-      btnBar.appendChild(b);
-    });
-    panel.appendChild(btnBar);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-    activeModal = { overlay, panel };
-
-    setTimeout(() => {
-      const firstBtn = panel.querySelector('button');
-      if (firstBtn) firstBtn.focus();
-    }, 10);
-
-    const escHandler = (e) => {
-      if (e.key === 'Escape') {
-        const cancelBtn = buttons.find(b => !b.primary);
-        if (cancelBtn && cancelBtn.onClick) cancelBtn.onClick();
-        document.removeEventListener('keydown', escHandler);
-      }
-    };
-    document.addEventListener('keydown', escHandler);
-  }
-
-  function closeModal() {
-    if (activeModal) { activeModal.overlay.remove(); activeModal = null; }
-  }
-
-  window.uiAlert = function(message, title, opts) {
-    return new Promise((resolve) => {
-      showModal(title || '系統提示', String(message), [
-        { text: '確定', primary: true, onClick: () => { closeModal(); resolve(true); } }
-      ], opts);
-    });
-  };
-
-  window.uiConfirm = function(message, title, opts) {
-    return new Promise((resolve) => {
-      showModal(title || '確認', String(message), [
-        { text: '取消', onClick: () => { closeModal(); resolve(false); } },
-        { text: '確定', primary: true, onClick: () => { closeModal(); resolve(true); } }
-      ], opts);
-    });
-  };
-
-  window.uiPrompt = function(message, defaultValue, title) {
-    return new Promise((resolve) => {
-      const wrapper = document.createElement('div');
-      const safeDefault = (defaultValue != null ? String(defaultValue) : '').replace(/"/g, '&quot;');
-      wrapper.innerHTML = '<div style="margin-bottom:10px;">' + String(message).replace(/\n/g, '<br/>') + '</div>' +
-        '<input type="text" id="game-modal-input" value="' + safeDefault + '" style="width:100%;padding:8px 10px;font-size:14px;background:#1a1208;color:#e8d9b0;border:1px solid #8b6520;border-radius:4px;font-family:inherit;outline:none;"/>';
-      showModal(title || '輸入', wrapper, [
-        { text: '取消', onClick: () => { closeModal(); resolve(null); } },
-        { text: '確定', primary: true, onClick: () => {
-          const input = wrapper.querySelector('#game-modal-input');
-          const val = input ? input.value : '';
-          closeModal();
-          resolve(val);
-        }}
-      ]);
-      setTimeout(() => {
-        const input = wrapper.querySelector('#game-modal-input');
-        if (input) { input.focus(); input.select(); }
-      }, 10);
-    });
-  };
-})();
-
-// ========== v2.7.3：遊戲風 Toast ==========
-(function() {
-  let container = null;
-  function ensureContainer() {
-    if (container) return container;
-    container = document.createElement('div');
-    container.id = 'game-toast-container';
-    container.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;display:flex;flex-direction:column;gap:6px;pointer-events:none;';
-    document.body.appendChild(container);
-    return container;
-  }
-
-  window.showToast = function(message, type) {
-    const c = ensureContainer();
-    const t = document.createElement('div');
-    t.style.cssText = 'padding:8px 16px;font-size:13px;color:#e8d9b0;background:rgba(20,14,8,0.9);border:1px solid #8b6520;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,0.5);font-family:inherit;letter-spacing:0.5px;white-space:nowrap;opacity:0;transform:translateY(-10px);transition:all 0.3s;';
-    if (type === 'success') { t.style.borderColor = '#50a050'; t.style.color = '#a0e0a0'; }
-    else if (type === 'error') { t.style.borderColor = '#c04040'; t.style.color = '#ff9090'; }
-    else if (type === 'warn') { t.style.borderColor = '#c09030'; t.style.color = '#ffd070'; }
-    t.textContent = message;
-    c.appendChild(t);
-    requestAnimationFrame(() => {
-      t.style.opacity = '1';
-      t.style.transform = 'translateY(0)';
-    });
-    setTimeout(() => {
-      t.style.opacity = '0';
-      t.style.transform = 'translateY(-10px)';
-      setTimeout(() => t.remove(), 300);
-    }, 2200);
-  };
-})();
-
-// ============================================================
-//  v3.0.0：Server Authoritative AOI 實體管理
-//  所有遠端實體（玩家/AI/怪物）由伺服器透過 AOI 事件管理
-//  客戶端只負責渲染，不生成本地 AI/怪物
-// ============================================================
-(function() {
-  // AOI 實體快取：id -> entity data + DOM element
-  const aoiEntities = new Map();
-
-  // 取得或建立 AOI 實體的 DOM
-  function getOrCreateEntity(data) {
-    let ent = aoiEntities.get(data.id);
-    if (ent) {
-      updateEntityDOM(ent, data);
-      return ent;
-    }
-    ent = { data, el: null };
-    aoiEntities.set(data.id, ent);
-
-    // 根據 kind 建立不同的精靈
-    if (data.kind === 'player') {
-      ent.el = createPlayerEntity(data);
-    } else if (data.kind === 'ai') {
-      ent.el = createAIEntity(data);
-    } else {
-      ent.el = createGenericEntity(data);
-    }
-    return ent;
-  }
-
-  function createPlayerEntity(data) {
-    const el = document.createElement('div');
-    el.className = 'world-unit remote-player idle';
-    el.dataset.id = data.id;
-    el.style.position = 'absolute';
-    el.style.left = data.x + 'px';
-    el.style.top = data.y + 'px';
-    el.style.transform = 'translate(-50%, -100%)';
-
-    const cls = SPRITE[data.classId] || SPRITE.warrior;
-    const size = { w: 48, h: 64 };
-    el.innerHTML = buildSpriteHTML(cls, {
-      size,
-      kind: 'hero',
-      name: data.name,
-      level: data.level,
-      showHp: true,
-      showName: true,
-      dir: data.dir || 'down',
-    });
-
-    // 名字顏色（國家區分）
-    const nameEl = el.querySelector('.unit-name');
-    if (nameEl) nameEl.style.color = '#7ec8ff';
-
-    worldLayer.appendChild(el);
-    return el;
-  }
-
-  function createAIEntity(data) {
-    const el = document.createElement('div');
-    el.className = 'world-unit ai-player idle';
-    el.dataset.id = data.id;
-    el.style.position = 'absolute';
-    el.style.left = data.x + 'px';
-    el.style.top = data.y + 'px';
-    el.style.transform = 'translate(-50%, -100%)';
-
-    const cls = SPRITE[data.classId] || SPRITE.warrior;
-    const size = { w: 44, h: 56 };
-    el.innerHTML = buildSpriteHTML(cls, {
-      size,
-      kind: 'hero',
-      name: data.name,
-      level: data.level,
-      showHp: true,
-      showName: true,
-      dir: data.dir || 'down',
-    });
-
-    // 敵對國家上色
-    if (data.nation && GS.nation && data.nation !== GS.nation) {
-      el.classList.add('enemy-ai');
-    }
-
-    worldLayer.appendChild(el);
-    return el;
-  }
-
-  function createGenericEntity(data) {
-    const el = document.createElement('div');
-    el.className = 'world-unit';
-    el.dataset.id = data.id;
-    el.style.position = 'absolute';
-    el.style.left = data.x + 'px';
-    el.style.top = data.y + 'px';
-    el.style.transform = 'translate(-50%, -100%)';
-    el.style.width = '40px';
-    el.style.height = '50px';
-    el.style.background = 'rgba(100,100,100,0.5)';
-    el.style.borderRadius = '4px';
-    worldLayer.appendChild(el);
-    return el;
-  }
-
-  function updateEntityDOM(ent, data) {
-    ent.data = data;
-    const el = ent.el;
-    if (!el) return;
-    // 位置插值目標（由 tick 做平滑移動）
-    ent.targetX = data.x;
-    ent.targetY = data.y;
-    ent.targetDir = data.dir || ent.targetDir || 'down';
-    // HP/MP 更新
-    const hpFill = el.querySelector('.unit-hp-fill');
-    if (hpFill && data.maxHp) {
-      hpFill.style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
-    }
-    // 等級更新
-    const levelTag = el.querySelector('.unit-level-tag');
-    if (levelTag && data.level != null) {
-      levelTag.textContent = 'Lv.' + data.level;
-    }
-  }
-
-  function removeEntity(id) {
-    const ent = aoiEntities.get(id);
-    if (ent && ent.el) {
-      ent.el.remove();
-    }
-    aoiEntities.delete(id);
-  }
-
-  // AOI tick：平滑插值移動所有實體
-  function tickAOI(dt) {
-    if (aoiEntities.size === 0) return;
-    const speed = 200; // 插值速度，越大越緊貼伺服器位置
-    for (const ent of aoiEntities.values()) {
-      if (ent.targetX == null || !ent.el) continue;
-      const dx = ent.targetX - parseFloat(ent.el.style.left || '0');
-      const dy = ent.targetY - parseFloat(ent.el.style.top || '0');
-      const dist = Math.hypot(dx, dy);
-      if (dist < 1) continue;
-      const step = (speed * dt) / 1000;
-      const ratio = Math.min(1, step / dist);
-      const newX = parseFloat(ent.el.style.left) + dx * ratio;
-      const newY = parseFloat(ent.el.style.top) + dy * ratio;
-      ent.el.style.left = newX + 'px';
-      ent.el.style.top = newY + 'px';
-    }
-  }
-
-  // 對外 API（給 multiplayer.js 呼叫）
-  window.handleAOIEnter = function(entities) {
-    for (const data of entities) {
-      try { getOrCreateEntity(data); } catch(e) { console.warn('[AOI] enter 失敗:', e.message, data); }
-    }
-  };
-
-  window.handleAOIUpdate = function(entities) {
-    for (const data of entities) {
-      try { getOrCreateEntity(data); } catch(e) { /* ignore */ }
-    }
-  };
-
-  window.handleAOILeave = function(ids) {
-    for (const id of ids) {
-      removeEntity(id);
-    }
-  };
-
-  window.setAOIRadius = function(r) {
-    console.log('[AOI] 可見半徑 =', r, 'px');
-  };
-
-  window.setServerSelfState = function(self) {
-    console.log('[AOI] 伺服器端自身狀態:', self);
-    // 將來可用於伺服器端糾正位置
-  };
-
-  // 清除所有 AOI 實體（切換地圖/登出時呼叫）
-  window.clearAOIEntities = function() {
-    for (const ent of aoiEntities.values()) {
-      if (ent.el) ent.el.remove();
-    }
-    aoiEntities.clear();
-    console.log('[AOI] 已清除所有實體');
-  };
-
-  window._aoiTick = tickAOI;
-
-  // 掛鉤到遊戲主循環
-  const origGameLoop = window._gameLoopTick;
-  if (typeof origGameLoop === 'function') {
-    window._gameLoopTick = function(dt) {
-      origGameLoop(dt);
-      tickAOI(dt);
-    };
-  }
-
-  console.log('[v3.0] AOI 實體管理模組已載入');
-})();
 
 })();

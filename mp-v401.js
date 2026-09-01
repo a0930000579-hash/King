@@ -214,7 +214,7 @@
         if (srv && srv.id) serverId = srv.id;
       }
       if (!serverId && GS.currentServerId) serverId = GS.currentServerId;
-      if (!serverId) serverId = currentServerId || 'monarch-blade';
+      if (!serverId) serverId = currentServerId || 'zeus';
       currentServerId = serverId;
       currentMapId = mapId;
       if (!myPlayerId) {
@@ -613,7 +613,7 @@
              const joinMapId = currentMapId || (typeof GS !== 'undefined' && GS?.player?.mapId) || 'village';
              const _acct = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? AuthSystem.getAccount() : ((typeof GS !== 'undefined' && GS?.player?.id) || 'unknown');
              const joinPlayerId = myPlayerId || (typeof GS !== 'undefined' && GS?.player?.id) || (_acct + ':0');
-             const joinServerId = currentServerId || 'monarch-blade';
+             const joinServerId = currentServerId || 'zeus';
              if (!currentMapId) currentMapId = joinMapId;
              if (!myPlayerId) myPlayerId = joinPlayerId;
              // v4.0.8：進一步縮小join_map，移除名字/職業/等級（auth時伺服器端已知道）

@@ -778,7 +778,7 @@ function createWsServer(httpServer) {
       return;
     }
     // v4.0.5：支援縮短的欄位名稱（s→serverId, m→mapId, p→playerId, n→name, c→classId, l→level）
-    const serverId = msg.serverId || msg.s || 'monarch-blade';
+    const serverId = msg.serverId || msg.s || 'zeus';
     const mapId = msg.mapId || msg.m || 'village';
     console.log('[WS-JOIN] serverId=' + serverId + ' mapId=' + mapId + ' playerId=' + (msg.playerId||msg.p||'?'));
 
@@ -802,12 +802,14 @@ function createWsServer(httpServer) {
     let snapshot;
     try {
       snapshot = gameWorld.playerJoin(serverId, mapId, client.wsId, {
+        id: client.playerId,  // v4.2.0：使用客戶端的playerId（帳號:charIdx），保持兩端一致
         account: client.account,
         name: client.name,
         classId: client.classId,
         level: client.level,
-        x: msg.x || 400,
-        y: msg.y || 400,
+        // v4.2.0：基於wsId給位置偏移，避免多個玩家堆疊在同一點
+        x: (msg.x || 400) + ((client.wsId % 5) * 40),
+        y: (msg.y || 400) + ((client.wsId % 3) * 30),
         hp: msg.hp || 100,
         maxHp: msg.maxHp || 100,
         mp: msg.mp || 50,

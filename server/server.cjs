@@ -1056,6 +1056,38 @@ async function handleApi(req, res, pathname, query) {
     return;
   }
 
+  // GET /api/nation/members — 國家成員API（伺服器原生，非本地生成）
+  if (req.method === 'GET' && pathname === '/api/nation/members') {
+    try {
+      const nation = params.get('nation') || params.get('n') || '';
+      const gw = require('./game-world.cjs');
+      const members = [];
+      if (gw && gw.gameWorld && gw.gameWorld.worlds) {
+        for (const [serverId, world] of gw.gameWorld.worlds) {
+          for (const [mapId, zone] of world.zones) {
+            for (const [wsId, player] of zone.players) {
+              if (!nation || player.nation === nation) {
+                members.push({
+                  wsId, id: player.id, name: player.name || 'Player',
+                  account: player.account || '', classId: player.classId || 'warrior',
+                  level: player.level || 1, x: player.x || 0, y: player.y || 0,
+                  nation: player.nation || '', mapId, serverId, online: true,
+                });
+              }
+            }
+          }
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, nation, count: members.length, members }));
+      return;
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+      return;
+    }
+  }
+
   // GET /api/players — 在線玩家詳細診斷（用於排查多人同屏問題）
   if (req.method === 'GET' && pathname === '/api/players') {
     try {
@@ -1657,12 +1689,19 @@ async function handleApi(req, res, pathname, query) {
     if (!unique) return sendJson(res, 409, { error: '此名稱已被使用' });
     const charCount = await db.getCharacterCount(accName, serverId);
     if (charCount >= 3) return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
-    // v2.5.8：找到第一個空槽位作為新角色索引（刪除後可能有中間空槽）
+    // v4.2.0：優先使用客戶端指定的槽位（用戶點擊的那個），否則找第一個空槽位
     const charList = await db.listCharacters(accName, serverId);
     let slotIdx = 0;
-    for (let i = 0; i < 3; i++) {
-      if (!charList[i]) { slotIdx = i; break; }
-      if (i === 2) slotIdx = 3; // 不應該到這裡
+    const requestedSlot = body.slotIdx != null ? parseInt(body.slotIdx) : (body.charIdx != null ? parseInt(body.charIdx) : -1);
+    if (requestedSlot >= 0 && requestedSlot < 3 && !charList[requestedSlot]) {
+      slotIdx = requestedSlot;
+      console.log('[CharCreate] 使用客戶端指定槽位: ' + slotIdx);
+    } else {
+      // 後備：找第一個空槽位
+      for (let i = 0; i < 3; i++) {
+        if (!charList[i]) { slotIdx = i; break; }
+      }
+      console.log('[CharCreate] 使用第一個空槽位: ' + slotIdx + ' (客戶端請求=' + requestedSlot + ')');
     }
     const newChar = {
       name, classId, level: 1, exp: 0, created: true, createdAt: Date.now(),
