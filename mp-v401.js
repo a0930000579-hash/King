@@ -649,6 +649,8 @@
              _updateWsBadge('online', 'WS在線');
              _wsDiag('[v4.0.7] 收到join_map_ok，WS模式正式啟用');
              console.log('[GAME-WS] 收到 join_map_ok，WebSocket 模式正式啟用');
+             // v4.1.3：連線成功後啟動閒置檢測
+             if (typeof _resetIdleTimer === 'function') _resetIdleTimer();
            }
            // v4.0.7：處理entities（其他玩家和AI），更新在線人數
            try {
@@ -1382,8 +1384,61 @@
     }
   }
 
+   // ========== v4.1.3：閒置檢測 — 5分鐘無操作自動斷線並回到首頁 ==========
+  let _idleTimer = null;
+  let _idleStartTime = Date.now();
+  const IDLE_TIMEOUT = 5 * 60 * 1000; // 5分鐘
+
+  function _resetIdleTimer() {
+    _idleStartTime = Date.now();
+    if (_idleTimer) {
+      clearTimeout(_idleTimer);
+    }
+    _idleTimer = setTimeout(() => {
+      console.log('[GAME-WS] ⏰ 閒置超過5分鐘，自動斷線');
+      try {
+        if (typeof window.addLog === 'function') {
+          addLog('system', '閒置超過5分鐘，已自動斷線，請重新登入');
+        }
+      } catch(e) {}
+      // 斷開WebSocket
+      try { MultiplayerClient.disconnect(); } catch(e) {}
+      // 回到遊戲首頁
+      setTimeout(() => {
+        try {
+          if (typeof window.location !== 'undefined') {
+            window.location.href = window.location.origin + window.location.pathname;
+          }
+        } catch(e) {}
+      }, 500);
+    }, IDLE_TIMEOUT);
+  }
+
+  // 監聽用戶操作，重置閒置計時
+  if (typeof window !== 'undefined') {
+    ['click', 'keydown', 'touchstart', 'mousemove', 'scroll'].forEach(evt => {
+      window.addEventListener(evt, () => {
+        if (useWebSocket && wsConnected) {
+          _resetIdleTimer();
+        }
+      }, { passive: true });
+    });
+    // 頁面可見時重置，隱藏時保持計時
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && useWebSocket && wsConnected) {
+        _resetIdleTimer();
+      }
+    });
+  }
+
+  // 連線成功後啟動閒置檢測
+  const _origSetStatus = setStatus;
+  // 在join_map_ok處理中啟動閒置計時（通過攔截wsConnected設置）
+
    // ========== 暴露到全域 ==========
   window.MultiplayerClient = MultiplayerClient;
+  window.MultiplayerClient.resetIdleTimer = _resetIdleTimer;
+  window.MultiplayerClient.getIdleTime = () => Date.now() - _idleStartTime;
 
   // 頁面關閉/刷新前主動斷線
   if (typeof window !== 'undefined') {
