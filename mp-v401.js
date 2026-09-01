@@ -752,15 +752,44 @@
         }
         break;
       case 'aoi_enter':
-        if (msg.entities && Array.isArray(msg.entities) && typeof window.handleAOIEnter === 'function') {
-          window.handleAOIEnter(msg.entities);
+        // v4.1.5：正確處理aoi_enter，把新玩家加入remotePlayers
+        try {
+          if (msg.entities && Array.isArray(msg.entities)) {
+            const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0)));
+            playerEntities.forEach(p => {
+              const pid = p.playerId || p.id;
+              if (pid && pid !== myPlayerId) {
+                addOrUpdateRemotePlayer({
+                  id: pid,
+                  name: p.name || 'Player',
+                  class: p.classId || p.class || 'warrior',
+                  level: p.level || 1,
+                  x: p.x, y: p.y, dir: p.dir || 0,
+                  transform: p.transformId || p.transform,
+                  moving: p.moving || false,
+                });
+                console.log('[GAME-WS] aoi_enter: 玩家進入視野 ' + pid + ' ' + (p.name || ''));
+              }
+            });
+            // 更新在線人數
+            const onlineCount = remotePlayers.size + 1;
+            if (typeof _setOnlineCount === 'function') {
+              _setOnlineCount(onlineCount);
+            }
+            // 通知game.js渲染
+            if (typeof window.handleAOIEnter === 'function') {
+              window.handleAOIEnter(msg.entities);
+            }
+          }
+        } catch(e) {
+          console.error('[GAME-WS] aoi_enter處理異常:', e);
         }
         break;
       case 'aoi_update':
         // v4.1.2：正確處理aoi_update，更新remotePlayers和在線人數
         try {
           if (msg.entities && Array.isArray(msg.entities)) {
-            const playerEntities = msg.entities.filter(e => e && (e.type === 'player' || e.playerId || e.id));
+            const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0)));
             // 更新remotePlayers
             playerEntities.forEach(p => {
               const pid = p.playerId || p.id;
