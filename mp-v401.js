@@ -395,19 +395,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.0] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.2.2] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.0] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.2.2] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.0] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.2.2] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -805,7 +805,9 @@
         // v4.1.2：正確處理aoi_update，更新remotePlayers和在線人數
         try {
           if (msg.entities && Array.isArray(msg.entities)) {
+            console.log('[GAME-WS] aoi_update entities數=' + msg.entities.length + ' 內容=' + JSON.stringify(msg.entities).substring(0,200));
             const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0)));
+            console.log('[GAME-WS] aoi_update 過濾後玩家數=' + playerEntities.length + ' myPlayerId=' + myPlayerId);
             // 更新remotePlayers
             playerEntities.forEach(p => {
               const pid = p.playerId || p.id;
@@ -1109,7 +1111,7 @@
     const seen = new Set();
     entities.forEach(ent => {
       if (!ent || !ent.id) return;
-      if (ent.id === mySocketId) return;
+      if (ent.id === myPlayerId) return;
       seen.add(ent.id);
       addOrUpdateRemotePlayer(ent);
     });
@@ -1119,7 +1121,7 @@
   }
 
   function handlePlayerMove(data) {
-    if (data.id === mySocketId) return;
+    if (data.id === myPlayerId) return;
     let p = remotePlayers.get(data.id);
     if (!p) {
       p = createRemotePlayer({ id: data.id, x: data.x, y: data.y, dir: data.dir });
@@ -1134,7 +1136,7 @@
   }
 
   function addOrUpdateRemotePlayer(ent) {
-    if (ent.id === mySocketId) return;
+    if (ent.id === myPlayerId) return;
     let p = remotePlayers.get(ent.id);
     const wPos = serverToWorld(ent.x || 0, ent.y || 0);
     if (!p) {
