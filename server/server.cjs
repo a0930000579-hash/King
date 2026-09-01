@@ -955,9 +955,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '4.1.8',
-      build: '4.1.8-2609012300',
-      buildId: '4.1.8-2609012300',
+      version: '4.1.9',
+      build: '4.1.9-2609012330',
+      buildId: '4.1.9-2609012330',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1052,6 +1052,51 @@ async function handleApi(req, res, pathname, query) {
       sendJson(res, 200, { ok: true, logs: logs.slice(-50), count: logs.length });
     } catch(e) {
       sendJson(res, 500, { error: e.message });
+    }
+    return;
+  }
+
+  // GET /api/players — 在線玩家詳細診斷（用於排查多人同屏問題）
+  if (req.method === 'GET' && pathname === '/api/players') {
+    try {
+      const gameWorld = require('./game-world.cjs');
+      const worlds = {};
+      if (gameWorld._getAllWorlds) {
+        const allWorlds = gameWorld._getAllWorlds();
+        for (const [serverId, gw] of allWorlds) {
+          worlds[serverId] = { maps: {} };
+          if (gw.zones) {
+            for (const [mapId, zone] of gw.zones) {
+              const players = [];
+              for (const [wsId, entity] of zone.players) {
+                players.push({
+                  wsId,
+                  entityId: entity.id,
+                  name: entity.name,
+                  account: entity.account,
+                  classId: entity.classId,
+                  level: entity.level,
+                  x: Math.round(entity.x),
+                  y: Math.round(entity.y),
+                  hp: entity.hp,
+                  nation: entity.nation,
+                  seenEntities: Array.from(entity.seenEntities || []),
+                });
+              }
+              worlds[serverId].maps[mapId] = {
+                playerCount: zone.players.size,
+                entityCount: zone.entities.size,
+                players,
+              };
+            }
+          }
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, worlds, totalWorlds: Object.keys(worlds).length, time: Date.now() }, null, 2));
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack }));
     }
     return;
   }

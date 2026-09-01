@@ -395,19 +395,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.1.2] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.1.9] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.1.2] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.1.9] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.1.2] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.1.9] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -656,8 +656,24 @@
            try {
              if (msg.entities && Array.isArray(msg.entities)) {
                const _acct2 = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? AuthSystem.getAccount() : ((typeof GS !== 'undefined' && GS?.player?.id) || 'unknown');
-               const playerEntities = msg.entities.filter(e => e && e.type === 'player' && e.id !== (myPlayerId || (_acct2+':0')));
+               const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || (e.id && String(e.id).indexOf(':') > 0)) && e.id !== (myPlayerId || (_acct2+':0')));
                console.log('[GAME-WS] entities中玩家數=' + playerEntities.length + ' 總實體數=' + msg.entities.length);
+               // v4.1.9：直接把玩家加入remotePlayers，不依賴game.js的handleAOIEnter
+               playerEntities.forEach(p => {
+                 const pid = p.playerId || p.id;
+                 if (pid && pid !== myPlayerId) {
+                   addOrUpdateRemotePlayer({
+                     id: pid,
+                     name: p.name || 'Player',
+                     class: p.classId || p.class || 'warrior',
+                     level: p.level || 1,
+                     x: p.x, y: p.y, dir: p.dir || 0,
+                     transform: p.transformId || p.transform,
+                     moving: p.moving || false,
+                   });
+                   console.log('[GAME-WS] join_map_ok: 加入遠端玩家 ' + pid + ' ' + (p.name || ''));
+                 }
+               });
                if (typeof window.handleAOIEnter === 'function') {
                  window.handleAOIEnter(msg.entities);
                }

@@ -32,6 +32,15 @@ const { createAIEngine } = require('./ai-engine.cjs');
 //  常數設定
 // ============================================================
 const TICK_INTERVAL_MS = 100;
+
+// v4.1.8：診斷日誌（寫入 global._wsDiagLogs，可通過 /api/ws-diag 查看）
+function _diagLog(msg) {
+  try {
+    if (!global._wsDiagLogs) global._wsDiagLogs = [];
+    global._wsDiagLogs.push(new Date().toISOString() + '  ' + msg);
+    if (global._wsDiagLogs.length > 200) global._wsDiagLogs.shift();
+  } catch(e) {}
+}
 const AOI_RADIUS = 800;
 const MOVE_SPEED = 180;
 const TELEPORT_COOLDOWN_MS = 3000; // 傳送冷卻，避免來回彈跳
@@ -172,6 +181,7 @@ class Zone {
     this.entities.set(entity.id, entity);
     this.players.set(wsId, entity);
     console.log(`[Zone] ${this.mapId}: 玩家加入 ${entity.name} (${entity.id}), 總玩家=${this.players.size}`);
+    _diagLog(`[Zone-AOI] 玩家加入 mapId=${this.mapId} wsId=${wsId} entityId=${entity.id} name=${entity.name} 總玩家=${this.players.size} 總實體=${this.entities.size}`);
     return entity;
   }
 
@@ -267,9 +277,11 @@ class Zone {
       const visibleIds = new Set();
       const enterEntities = [];
       const moveEntities = [];
+      let checkedCount = 0;
 
       for (const entity of this.entities.values()) {
         if (entity.id === player.id) continue;
+        checkedCount++;
         const dist = Math.hypot(entity.x - player.x, entity.y - player.y);
         if (dist <= AOI_RADIUS) {
           visibleIds.add(entity.id);
@@ -311,6 +323,12 @@ class Zone {
           ids: leaveIds,
           time: Date.now(),
         });
+      }
+      // v4.1.8：診斷日誌（每10次tick輸出一次，避免日誌過多）
+      if (!this._aoiLogCounter) this._aoiLogCounter = 0;
+      this._aoiLogCounter++;
+      if (this._aoiLogCounter % 50 === 0) {
+        _diagLog(`[Zone-AOI] 廣播 mapId=${this.mapId} wsId=${wsId} playerId=${player.id} 檢查實體=${checkedCount} enter=${enterEntities.length} move=${moveEntities.length} leave=${leaveIds.length} 總玩家=${this.players.size} 總實體=${this.entities.size}`);
       }
     }
   }
@@ -362,6 +380,7 @@ class Zone {
       }
     }
     console.log('[GameWorld-AOI] 📡 broadcastEnter完成，共發送給 ' + sentCount + ' 個玩家');
+    _diagLog(`[Zone-AOI] broadcastEnter mapId=${this.mapId} 新玩家=${enteringEntity.id} 在線玩家=${this.players.size} 發送給=${sentCount}人`);
   }
 
   _serializeEntity(e) {
@@ -665,9 +684,15 @@ function getStats() {
   };
 }
 
+// v4.1.9：診斷用，取得所有世界
+function _getAllWorlds() {
+  return gameWorlds;
+}
+
 module.exports = {
   getWorld,
   getGameWorld,
+  _getAllWorlds,
   getMapConfig,
   playerJoin,
   playerLeave,
