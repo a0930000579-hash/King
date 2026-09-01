@@ -107,10 +107,19 @@ class Zone {
     this._aiInitialized = true;
     console.log(`[Zone] ${this.mapId}: 初始化伺服器 AI (count=${aiCount}, level=${initLevel})`);
     this.aiEngine = createAIEngine({ serverId: this.serverId });
-    const aiList = this.aiEngine.ensureMapAI(this.mapId, {
-      count: aiCount,
-      initLevel,
-    });
+    // v4.2.0 修復：ai-engine.cjs 沒有 ensureMapAI，改用 adjustCount + getAIList
+    try {
+      if (typeof this.aiEngine.start === 'function') this.aiEngine.start();
+      this.aiEngine.adjustCount(this.serverId, this.mapId, aiCount, { initLevel, forceReset: true });
+    } catch(e) {
+      console.warn(`[Zone] ${this.mapId}: adjustCount 失敗（不影響玩家加入）:`, e.message);
+    }
+    let aiList = [];
+    try {
+      aiList = this.aiEngine.getAIList(this.serverId, this.mapId) || [];
+    } catch(e) {
+      console.warn(`[Zone] ${this.mapId}: getAIList 失敗:`, e.message);
+    }
     for (const ai of aiList) {
       const entity = this._aiToEntity(ai);
       this.entities.set(entity.id, entity);
@@ -234,7 +243,8 @@ class Zone {
     // AI 引擎更新
     if (this.aiEngine && typeof this.aiEngine.tick === 'function') {
       try {
-        this.aiEngine.tick(this.mapId, dt);
+        // v4.2.0：ai-engine 的 tick 是全域驅動，不帶參數
+        this.aiEngine.tick();
       } catch (e) {
         // AI tick 錯誤不影響主循環
       }
@@ -448,11 +458,17 @@ class GameWorld {
     console.log('[GameWorld] 🎮 playerJoin被呼叫: mapId=' + mapId + ' wsId=' + wsId + ' account=' + (playerData?.account || 'unknown'));
     const zone = this.getZone(mapId);
     console.log('[GameWorld] 🎮 取得zone: ' + mapId + '，zone內玩家數=' + zone.players.size);
+    // v4.2.0：AI初始化失敗不應阻擋玩家加入
     if (aiConfig && aiConfig.aiCount != null) {
-      zone.ensureAIEngine(
-        parseInt(aiConfig.aiCount) || 8,
-        parseInt(aiConfig.initLevel) || 1
-      );
+      try {
+        zone.ensureAIEngine(
+          parseInt(aiConfig.aiCount) || 8,
+          parseInt(aiConfig.initLevel) || 1
+        );
+      } catch(e) {
+        console.warn('[GameWorld] ensureAIEngine 失敗（不影響玩家加入）:', e.message);
+        _diagLog('[GameWorld-AOI] ⚠️ ensureAIEngine失敗 mapId=' + mapId + ' 錯誤=' + e.message + '（玩家仍會加入）');
+      }
     }
     const entity = zone.addPlayer(wsId, playerData);
     console.log('[GameWorld] 🎮 玩家已加入zone: ' + entity.id + '，加入後zone內玩家數=' + zone.players.size);
