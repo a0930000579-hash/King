@@ -741,7 +741,7 @@ function createWsServer(httpServer) {
       if (account) {
         // v4.2.1：同一帳號新連線踢掉舊連線，避免重複實體
         for (const [oldWsId, oldClient] of clients) {
-          if (oldWsId !== wsId && oldClient.account === account && oldClient.authenticated) {
+          if (oldWsId !== client.wsId && oldClient.account === account && oldClient.authenticated) {
             _wsLog('[AUTH] 🔄 同一帳號重複連線，踢掉舊連線 wsId=' + oldWsId + ' account=' + account);
             console.log('[WS-Auth] 🔄 同一帳號重複連線，踢掉舊連線 wsId=' + oldWsId + ' account=' + account);
             try { oldClient.socket.close(1000, 'duplicate login'); } catch(e) {}

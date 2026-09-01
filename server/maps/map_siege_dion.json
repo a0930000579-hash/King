@@ -4,8 +4,11 @@
   "type": "castle_siege",
   "width": 2048,
   "height": 2048,
-  "background": "/assets/map/siege.jpg",
-  "spawn": { "x": 1024, "y": 1024 },
+  "background": "/assets/maps/siege.jpg",
+  "spawn": {
+    "x": 1024,
+    "y": 1024
+  },
   "safeZone": null,
   "levelMin": 15,
   "levelMax": 99,

@@ -4,8 +4,11 @@
   "type": "battle",
   "width": 2496,
   "height": 1664,
-  "background": "/assets/map/deaddesert.jpg",
-  "spawn": { "x": 2300, "y": 832 },
+  "background": "/assets/maps/deaddesert.jpg",
+  "spawn": {
+    "x": 2300,
+    "y": 832
+  },
   "safeZone": null,
   "levelMin": 65,
   "levelMax": 80,
@@ -13,22 +16,99 @@
   "teleports": [
     {
       "id": "tp_to_cave_village",
-      "x": 2400, "y": 832, "radius": 100,
+      "x": 2400,
+      "y": 832,
+      "radius": 100,
       "targetMap": "cave_village",
-      "targetX": 300, "targetY": 400
+      "targetX": 300,
+      "targetY": 400
     }
   ],
   "monsterSpawns": [
-    { "monsterId": "stone_golem", "x": 2000, "y": 600, "count": 6, "radius": 250, "name": "龍穴守衛", "level": 68 },
-    { "monsterId": "demon", "x": 1700, "y": 1000, "count": 6, "radius": 250, "name": "龍族僕從", "level": 72 },
-    { "monsterId": "cerberus", "x": 1400, "y": 700, "count": 5, "radius": 300, "name": "火炎地獄犬", "level": 70 },
-    { "monsterId": "lich", "x": 1100, "y": 900, "count": 4, "radius": 200, "name": "龍語巫妖", "level": 75 },
-    { "monsterId": "ogre", "x": 800, "y": 600, "count": 5, "radius": 250, "name": "巨龍奴隸", "level": 66 },
-    { "monsterId": "bone_dragon", "x": 900, "y": 1100, "count": 2, "radius": 200, "name": "骨龙", "level": 72 },
-    { "monsterId": "griffin", "x": 1300, "y": 1300, "count": 3, "radius": 200, "name": "狮鹫", "level": 70 },
-    { "monsterId": "armored_bear", "x": 1600, "y": 1300, "count": 3, "radius": 200, "name": "装甲熊", "level": 75 }
+    {
+      "monsterId": "stone_golem",
+      "x": 2000,
+      "y": 600,
+      "count": 6,
+      "radius": 250,
+      "name": "龍穴守衛",
+      "level": 68
+    },
+    {
+      "monsterId": "demon",
+      "x": 1700,
+      "y": 1000,
+      "count": 6,
+      "radius": 250,
+      "name": "龍族僕從",
+      "level": 72
+    },
+    {
+      "monsterId": "cerberus",
+      "x": 1400,
+      "y": 700,
+      "count": 5,
+      "radius": 300,
+      "name": "火炎地獄犬",
+      "level": 70
+    },
+    {
+      "monsterId": "lich",
+      "x": 1100,
+      "y": 900,
+      "count": 4,
+      "radius": 200,
+      "name": "龍語巫妖",
+      "level": 75
+    },
+    {
+      "monsterId": "ogre",
+      "x": 800,
+      "y": 600,
+      "count": 5,
+      "radius": 250,
+      "name": "巨龍奴隸",
+      "level": 66
+    },
+    {
+      "monsterId": "bone_dragon",
+      "x": 900,
+      "y": 1100,
+      "count": 2,
+      "radius": 200,
+      "name": "骨龙",
+      "level": 72
+    },
+    {
+      "monsterId": "griffin",
+      "x": 1300,
+      "y": 1300,
+      "count": 3,
+      "radius": 200,
+      "name": "狮鹫",
+      "level": 70
+    },
+    {
+      "monsterId": "armored_bear",
+      "x": 1600,
+      "y": 1300,
+      "count": 3,
+      "radius": 200,
+      "name": "装甲熊",
+      "level": 75
+    }
   ],
-  "boss": { "monsterId": "dragon", "x": 600, "y": 750, "name": "遠古巨龍", "level": 80, "hpMult": 28, "atkMult": 5, "respawn": 7200, "tier": "world" },
+  "boss": {
+    "monsterId": "dragon",
+    "x": 600,
+    "y": 750,
+    "name": "遠古巨龍",
+    "level": 80,
+    "hpMult": 28,
+    "atkMult": 5,
+    "respawn": 7200,
+    "tier": "world"
+  },
   "npcs": [],
   "bgm": "/assets/audio/bgm_boss.mp3"
 }

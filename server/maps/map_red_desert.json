@@ -4,8 +4,11 @@
   "type": "battle",
   "width": 2496,
   "height": 1664,
-  "background": "/assets/map/deaddesert.jpg",
-  "spawn": { "x": 300, "y": 832 },
+  "background": "/assets/maps/deaddesert.jpg",
+  "spawn": {
+    "x": 300,
+    "y": 832
+  },
   "safeZone": null,
   "levelMin": 30,
   "levelMax": 50,
@@ -13,25 +16,127 @@
   "teleports": [
     {
       "id": "tp_to_desert_village",
-      "x": 100, "y": 832, "radius": 100,
+      "x": 100,
+      "y": 832,
+      "radius": 100,
       "targetMap": "desert_village",
-      "targetX": 2300, "targetY": 832
+      "targetX": 2300,
+      "targetY": 832
     }
   ],
   "monsterSpawns": [
-    { "monsterId": "orc", "x": 600, "y": 600, "count": 8, "radius": 300, "name": "兽人戰士", "level": 35 },
-    { "monsterId": "scorpion", "x": 900, "y": 1000, "count": 7, "radius": 250, "name": "沙漠蝎", "level": 32 },
-    { "monsterId": "stone_golem", "x": 1300, "y": 700, "count": 6, "radius": 300, "name": "砂岩魔像", "level": 38 },
-    { "monsterId": "ogre", "x": 1600, "y": 900, "count": 5, "radius": 250, "name": "沙漠食人魔", "level": 40 },
-    { "monsterId": "lizardman", "x": 1900, "y": 500, "count": 6, "radius": 300, "name": "沙漠蜥蜴人", "level": 36 },
-    { "monsterId": "stone_golem", "x": 2100, "y": 1100, "count": 4, "radius": 200, "name": "巨型石魔像", "level": 45 },
-    { "monsterId": "monster_scorpion", "x": 1700, "y": 1300, "count": 5, "radius": 250, "name": "毒蝎", "level": 38 },
-    { "monsterId": "monster_hellhound", "x": 2000, "y": 800, "count": 4, "radius": 200, "name": "地獄犬", "level": 45 },
-    { "monsterId": "monster_direwolf", "x": 1100, "y": 1300, "count": 5, "radius": 250, "name": "沙漠巨狼", "level": 32 },
-    { "monsterId": "spider_queen", "x": 1500, "y": 400, "count": 3, "radius": 150, "name": "蛛后", "level": 42, "behavior": "passive" },
-    { "monsterId": "lava_golem", "x": 2200, "y": 600, "count": 3, "radius": 150, "name": "熔岩魔像", "level": 48 }
+    {
+      "monsterId": "orc",
+      "x": 600,
+      "y": 600,
+      "count": 8,
+      "radius": 300,
+      "name": "兽人戰士",
+      "level": 35
+    },
+    {
+      "monsterId": "scorpion",
+      "x": 900,
+      "y": 1000,
+      "count": 7,
+      "radius": 250,
+      "name": "沙漠蝎",
+      "level": 32
+    },
+    {
+      "monsterId": "stone_golem",
+      "x": 1300,
+      "y": 700,
+      "count": 6,
+      "radius": 300,
+      "name": "砂岩魔像",
+      "level": 38
+    },
+    {
+      "monsterId": "ogre",
+      "x": 1600,
+      "y": 900,
+      "count": 5,
+      "radius": 250,
+      "name": "沙漠食人魔",
+      "level": 40
+    },
+    {
+      "monsterId": "lizardman",
+      "x": 1900,
+      "y": 500,
+      "count": 6,
+      "radius": 300,
+      "name": "沙漠蜥蜴人",
+      "level": 36
+    },
+    {
+      "monsterId": "stone_golem",
+      "x": 2100,
+      "y": 1100,
+      "count": 4,
+      "radius": 200,
+      "name": "巨型石魔像",
+      "level": 45
+    },
+    {
+      "monsterId": "monster_scorpion",
+      "x": 1700,
+      "y": 1300,
+      "count": 5,
+      "radius": 250,
+      "name": "毒蝎",
+      "level": 38
+    },
+    {
+      "monsterId": "monster_hellhound",
+      "x": 2000,
+      "y": 800,
+      "count": 4,
+      "radius": 200,
+      "name": "地獄犬",
+      "level": 45
+    },
+    {
+      "monsterId": "monster_direwolf",
+      "x": 1100,
+      "y": 1300,
+      "count": 5,
+      "radius": 250,
+      "name": "沙漠巨狼",
+      "level": 32
+    },
+    {
+      "monsterId": "spider_queen",
+      "x": 1500,
+      "y": 400,
+      "count": 3,
+      "radius": 150,
+      "name": "蛛后",
+      "level": 42,
+      "behavior": "passive"
+    },
+    {
+      "monsterId": "lava_golem",
+      "x": 2200,
+      "y": 600,
+      "count": 3,
+      "radius": 150,
+      "name": "熔岩魔像",
+      "level": 48
+    }
   ],
-  "boss": { "monsterId": "stone_golem", "x": 2000, "y": 750, "name": "沙漠守護者", "level": 55, "hpMult": 15, "atkMult": 3.5, "respawn": 3600, "tier": "advanced" },
+  "boss": {
+    "monsterId": "stone_golem",
+    "x": 2000,
+    "y": 750,
+    "name": "沙漠守護者",
+    "level": 55,
+    "hpMult": 15,
+    "atkMult": 3.5,
+    "respawn": 3600,
+    "tier": "advanced"
+  },
   "npcs": [],
   "bgm": "/assets/audio/bgm_desert.mp3"
 }

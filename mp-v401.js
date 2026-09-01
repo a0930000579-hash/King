@@ -20,6 +20,7 @@
 
   // ========== v3.1.6：WS 診斷日誌（遊戲中可見） ==========
   const _wsDiagLog = [];
+  const _aoiMessageLog = []; // v4.2.2：記錄最近的AOI消息，方便手機端排查
   function _wsDiag(msg) {
     const ts = new Date().toLocaleTimeString('zh-TW', {hour12: false}) + '.' + String(Date.now() % 1000).padStart(3, '0');
     const entry = ts + ' ' + msg;
@@ -770,6 +771,8 @@
       case 'aoi_enter':
         // v4.1.5：正確處理aoi_enter，把新玩家加入remotePlayers
         try {
+          _aoiMessageLog.unshift('[aoi_enter] entities=' + (msg.entities?.length || 0) + ' ' + JSON.stringify(msg.entities?.slice(0,3) || []).substring(0,150));
+          if (_aoiMessageLog.length > 10) _aoiMessageLog.pop();
           if (msg.entities && Array.isArray(msg.entities)) {
             const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0)));
             playerEntities.forEach(p => {
@@ -804,6 +807,8 @@
       case 'aoi_update':
         // v4.1.2：正確處理aoi_update，更新remotePlayers和在線人數
         try {
+          _aoiMessageLog.unshift('[aoi_update] entities=' + (msg.entities?.length || 0) + ' ' + JSON.stringify(msg.entities?.slice(0,3) || []).substring(0,150));
+          if (_aoiMessageLog.length > 10) _aoiMessageLog.pop();
           if (msg.entities && Array.isArray(msg.entities)) {
             console.log('[GAME-WS] aoi_update entities數=' + msg.entities.length + ' 內容=' + JSON.stringify(msg.entities).substring(0,200));
             const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0)));
@@ -1421,6 +1426,9 @@
         '當前地圖: ' + (currentMapId || '無'),
         '我的PlayerID: ' + (myPlayerId || '無'),
         '遠端玩家數: ' + (remotePlayers ? remotePlayers.size : 0),
+        '',
+        '===== 最近AOI消息（最新10筆）=====',
+        _aoiMessageLog.length > 0 ? _aoiMessageLog.join('\n') : '(尚無AOI消息)',
         '',
         '===== WS 連線日誌（最新25筆）=====',
         logText,
