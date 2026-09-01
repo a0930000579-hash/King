@@ -956,8 +956,8 @@ async function handleApi(req, res, pathname, query) {
        status: 'online',
        server: 'monarch-blade',
       version: '4.0.1',
-      build: '4.0.1-2609020700',
-      buildId: '4.0.1-2609020700',
+      build: '4.0.1-2609020800',
+      buildId: '4.0.1-2609020800',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1487,11 +1487,10 @@ async function handleApi(req, res, pathname, query) {
     }
 
     const token = genToken(account);
-    // v4.0.1：生成短sessionId用於WebSocket認證（避免大幀被proxy截斷）
+    // v4.0.1：生成短wsSessionId用於WebSocket認證（避免大幀被proxy截斷）
     const wsSessionId = 'ws' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
     if (!global._wsSessions) global._wsSessions = new Map();
     global._wsSessions.set(wsSessionId, { account: account, createdAt: Date.now() });
-    // 10分鐘過期
     setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(wsSessionId); }, 10 * 60 * 1000);
     console.log('[Auth] 登入成功:', account, 'wsSessionId:', wsSessionId);
     return sendJson(res, 200, {

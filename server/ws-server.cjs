@@ -663,14 +663,14 @@ function createWsServer(httpServer) {
 
   function handleAuth(client, msg) {
     try {
-      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasWsSessionId=' + !!msg.wsSessionId + ' hasSessionId=' + !!msg.sessionId + ' hasToken=' + !!msg.token);
+      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasWsSessionId=' + !!msg.wsSessionId + ' hasSessionId=' + !!msg.sessionId);
       let account = null;
       // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
       if (msg.wsSessionId && global._wsSessions) {
         const sess = global._wsSessions.get(msg.wsSessionId);
         if (sess) {
           account = sess.account;
-          global._wsSessions.delete(msg.wsSessionId); // 一次性使用
+          global._wsSessions.delete(msg.wsSessionId);
           _wsLog(' wsSessionId驗證成功 account=' + account);
           console.log('[WS-Auth] wsSessionId驗證成功 account=' + account + ' wsId=' + client.wsId);
         } else {
@@ -678,19 +678,24 @@ function createWsServer(httpServer) {
           console.log('[WS-Auth] wsSessionId無效或已過期 wsId=' + client.wsId);
         }
       }
-      // 後備1：舊版sessionId
+      // v3.5.0：後備使用sessionId（HTTP POST認證後返回的短ID）
       if (!account && msg.sessionId && global._wsSessions) {
         const sess = global._wsSessions.get(msg.sessionId);
         if (sess) {
           account = sess.account;
+          msg.name = sess.name || msg.name;
+          msg.classId = sess.classId || msg.classId;
+          msg.level = sess.level || msg.level;
           global._wsSessions.delete(msg.sessionId);
           _wsLog(' sessionId驗證成功 account=' + account);
+        } else {
+          _wsLog(' sessionId無效或已過期');
         }
       }
-      // 後備2：直接token驗證（相容舊版，但token大會被proxy截斷）
+      // 後備：直接token驗證（相容舊版）
       if (!account && msg.token) {
         const token = msg.token || '';
-        _wsLog(' token長度=' + token.length + ' (大幀可能被proxy截斷)');
+        _wsLog(' token長度=' + token.length);
         account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
         _wsLog(' verifyToken 結果=' + (account || 'null'));
       }
