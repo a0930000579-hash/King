@@ -515,7 +515,8 @@
         transformId: opts?.transformId || undefined,
       };
       if (useWebSocket && ws && wsConnected) {
-        wsSend({ type: 'move', ...body });
+        // v4.0.7：簡化move消息，伺服器端已有mapId/playerId，只需發x/y/dir
+        wsSend({ type: 'move', x, y, dir: dir || 0 });
       } else {
         // LP 模式：fire and forget，非阻塞
         apiPost('/api/mp/update', body).catch(() => {});
@@ -608,7 +609,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.6] tryWebSocket 開始');
+     _wsDiag('[v4.0.7] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -773,14 +774,38 @@
            }
            return;
          } else if (msg.type === 'join_map_ok') {
-           // v4.0.4：收到join_map_ok後才正式啟用WebSocket模式
+           // v4.0.7：收到join_map_ok後正式啟用WS模式，並處理entities和在線人數
            console.log('[GAME-WS] 📩 收到 join_map_ok, entities數=' + (msg.entities||[]).length + ' self=' + JSON.stringify(msg.self||{}).substring(0,100));
            if (!wsConnected) {
              useWebSocket = true;
              wsConnected = true;
              _updateWsBadge('online', 'WS在線');
-             _wsDiag('[v4.0.6] 收到join_map_ok，WS模式正式啟用');
+             _wsDiag('[v4.0.7] 收到join_map_ok，WS模式正式啟用');
              console.log('[GAME-WS] 收到 join_map_ok，WebSocket 模式正式啟用');
+           }
+           // v4.0.7：處理entities（其他玩家和AI），更新在線人數
+           try {
+             if (msg.entities && Array.isArray(msg.entities)) {
+               const playerEntities = msg.entities.filter(e => e && e.type === 'player' && e.id !== (myPlayerId || (account+':0')));
+               console.log('[GAME-WS] entities中玩家數=' + playerEntities.length + ' 總實體數=' + msg.entities.length);
+               if (typeof window.handleAOIEnter === 'function') {
+                 window.handleAOIEnter(msg.entities);
+               }
+               // v4.0.7：更新在線人數（玩家數+1自己）
+               if (typeof _setOnlineCount === 'function') {
+                 _setOnlineCount(playerEntities.length + 1);
+               }
+               _wsDiag('[v4.0.7] join_map_ok處理完成，在線人數=' + (playerEntities.length + 1));
+             } else {
+               // 沒有entities，至少顯示自己在線
+               if (typeof _setOnlineCount === 'function') {
+                 _setOnlineCount(1);
+               }
+               _wsDiag('[v4.0.7] join_map_ok無entities，在線人數=1(自己)');
+             }
+           } catch(e) {
+             console.error('[GAME-WS] 處理join_map_ok entities出錯:', e);
+             _wsDiag('[v4.0.7] join_map_ok entities處理出錯: ' + e.message);
            }
            return;
          } else if (msg.type === 'auth_fail') {
