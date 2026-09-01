@@ -749,8 +749,9 @@ function createWsServer(httpServer) {
 
   function handleJoinMap(client, msg) {
     if (!client.authenticated) return;
-    const serverId = msg.serverId || 'zeus';
-    const mapId = msg.mapId || 'village_01';
+    // v4.0.5：支援縮短的欄位名稱（s→serverId, m→mapId, p→playerId, n→name, c→classId, l→level）
+    const serverId = msg.serverId || msg.s || 'monarch-blade';
+    const mapId = msg.mapId || msg.m || 'village';
 
     // 離開舊地圖
     if (client.mapId && client.serverId) {
@@ -759,7 +760,11 @@ function createWsServer(httpServer) {
 
     client.serverId = serverId;
     client.mapId = mapId;
-    client.playerId = msg.playerId || (client.account + ':' + (msg.charIdx || 0));
+    client.playerId = msg.playerId || msg.p || (client.account + ':' + (msg.charIdx || 0));
+    // v4.0.5：如果join_map帶有玩家資訊，更新client的name/classId/level
+    if (msg.n || msg.name) client.name = msg.n || msg.name;
+    if (msg.c || msg.classId) client.classId = msg.c || msg.classId;
+    if (msg.l || msg.level) client.level = msg.l || msg.level;
 
     // v3.0.0：透過 game-world 加入，取得 AOI 快照
     const aiCount = msg.aiCount != null ? msg.aiCount : 8;
@@ -771,10 +776,10 @@ function createWsServer(httpServer) {
       level: client.level,
       x: msg.x || 400,
       y: msg.y || 400,
-      hp: msg.hp,
-      maxHp: msg.maxHp,
-      mp: msg.mp,
-      maxMp: msg.maxMp,
+      hp: msg.hp || 100,
+      maxHp: msg.maxHp || 100,
+      mp: msg.mp || 50,
+      maxMp: msg.maxMp || 50,
       nation: msg.nation || '',
     }, { aiCount, initLevel });
 

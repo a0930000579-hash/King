@@ -548,8 +548,9 @@
     if (!ws || ws.readyState !== 1) return false;
     try {
       const raw = JSON.stringify(msg);
-      if (raw.length < 50) {
-        _wsDiag('wsSend 小訊息直接發送 len=' + raw.length + ' type=' + (msg.type||msg.t||'?'));
+      // v4.0.5：分片閾值提高到126，<126位元組的消息直接發送小幀，不需要分片
+      if (raw.length < 126) {
+        _wsDiag('wsSend 小幀直接發送 len=' + raw.length + ' type=' + (msg.type||msg.t||'?'));
         ws.send(raw);
         return true;
       }
@@ -607,7 +608,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.4] tryWebSocket 開始');
+     _wsDiag('[v4.0.5] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -755,25 +756,17 @@
              const joinServerId = currentServerId || 'monarch-blade';
              if (!currentMapId) currentMapId = joinMapId;
              if (!myPlayerId) myPlayerId = joinPlayerId;
-             _wsDiag('[v4.0.4] auth_ok後發送join_map mapId=' + joinMapId + ' playerId=' + joinPlayerId);
-             console.log('[GAME-WS] auth_ok 後發送 join_map, mapId=' + joinMapId + ', playerId=' + joinPlayerId);
-             wsSend({
-               type: 'join_map',
-               serverId: joinServerId,
-               mapId: joinMapId,
-               playerId: joinPlayerId,
-               name: (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player',
-               classId: (typeof GS !== 'undefined' && GS?.player?.classId) ? GS.player.classId : 'warrior',
-               level: (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1,
-               charIdx: currentCharIdx || 0,
-               x: (typeof GS !== 'undefined' && GS?.player?.x) ? GS.player.x : 400,
-               y: (typeof GS !== 'undefined' && GS?.player?.y) ? GS.player.y : 400,
-               hp: (typeof GS !== 'undefined' && GS?.player?.hp) ? GS.player.hp : 100,
-               maxHp: (typeof GS !== 'undefined' && GS?.player?.hpMax) ? GS.player.hpMax : 100,
-               mp: (typeof GS !== 'undefined' && GS?.player?.mp) ? GS.player.mp : 50,
-               maxMp: (typeof GS !== 'undefined' && GS?.player?.mpMax) ? GS.player.mpMax : 50,
-               nation: (typeof GS !== 'undefined' && GS?.player?.nation) ? GS.player.nation : '',
-             });
+             // v4.0.5：縮小join_map消息到<126位元組，只發送必要欄位，不需要分片
+             const px = (typeof GS !== 'undefined' && GS?.player?.x != null) ? GS.player.x : 400;
+             const py = (typeof GS !== 'undefined' && GS?.player?.y != null) ? GS.player.y : 400;
+             const pname = (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player';
+             const pclass = (typeof GS !== 'undefined' && GS?.player?.classId) ? GS.player.classId : 'warrior';
+             const plevel = (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1;
+             const joinMsg = { type: 'join_map', s: joinServerId, m: joinMapId, p: joinPlayerId, n: pname, c: pclass, l: plevel, x: px, y: py };
+             const joinLen = JSON.stringify(joinMsg).length;
+             _wsDiag('[v4.0.5] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
+             console.log('[GAME-WS] auth_ok 後發送 join_map, len=' + joinLen + ', mapId=' + joinMapId);
+             wsSend(joinMsg);
              resolve(msg);
            }
            return;
