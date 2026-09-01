@@ -699,6 +699,21 @@ function createWsServer(httpServer) {
         account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
         _wsLog(' verifyToken 結果=' + (account || 'null'));
       }
+      // v4.0.2：短token+帳號認證（整個auth消息<126位元組，不會被proxy截斷）
+      if (!account && msg.shortToken && msg.account) {
+        try {
+          const fullToken = global._wsAccountTokens ? global._wsAccountTokens.get(msg.account) : null;
+          if (fullToken && fullToken.substring(0, 30) === msg.shortToken) {
+            account = msg.account;
+            _wsLog(' shortToken驗證成功 account=' + account);
+            console.log('[WS-Auth] shortToken驗證成功 account=' + account + ' wsId=' + client.wsId);
+          } else {
+            _wsLog(' shortToken比對失敗 fullToken存在=' + !!fullToken);
+          }
+        } catch(e) {
+          _wsLog(' shortToken認證異常: ' + e.message);
+        }
+      }
       if (account) {
         client.account = account;
         client.authenticated = true;

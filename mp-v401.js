@@ -607,7 +607,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.1] tryWebSocket 開始');
+     _wsDiag('[v4.0.2] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -661,46 +661,30 @@
 
        ws.onopen = () => {
          _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
-         try {
-           _updateWsBadge('connecting', 'WS驗證中');
-         } catch(e) { _wsDiag('[v4.0.1] _updateWsBadge錯誤(忽略): ' + e.message); }
-         // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
+         try { _updateWsBadge('connecting', 'WS驗證中'); } catch(e) { _wsDiag('[v4.0.2] badge錯誤: ' + e.message); }
          try {
            let wsSessionId = '';
-           try { wsSessionId = localStorage.getItem('mmo_ws_session_id') || ''; } catch(e) { _wsDiag('[v4.0.1] localStorage讀取錯誤: ' + e.message); }
-           _wsDiag('[v4.0.1] wsSessionId=' + (wsSessionId ? '有(' + wsSessionId.length + '字)' : '無'));
+           try { wsSessionId = localStorage.getItem('mmo_ws_session_id') || ''; } catch(e) {}
+           _wsDiag('[v4.0.2] wsSessionId=' + (wsSessionId ? '有' : '無'));
            if (wsSessionId) {
-             const authMsg = {
-               type: 'auth',
-               wsSessionId: wsSessionId,
-               name: (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player',
-             };
+             const authMsg = { type: 'auth', wsSessionId: wsSessionId, name: 'Player' };
              const msgLen = JSON.stringify(authMsg).length;
-             _wsDiag('[v4.0.1] 使用wsSessionId認證，訊息長度=' + msgLen + '位元組' + (msgLen < 126 ? ' (小幀，安全)' : ' (大幀，可能被截斷)'));
-             const sent = wsSend(authMsg);
-             _wsDiag('[v4.0.1] auth發送: ' + (sent ? '成功' : '失敗'));
+             _wsDiag('[v4.0.2] wsSessionId認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險'));
+             wsSend(authMsg);
              try { localStorage.removeItem('mmo_ws_session_id'); } catch(e) {}
            } else {
-             _wsDiag('[v4.0.1] 無wsSessionId，使用token認證（大幀，可能被截斷）');
-             const authMsg = {
-               type: 'auth',
-               token: authToken,
-               name: (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player',
-               classId: (typeof GS !== 'undefined' && GS?.player?.classId) ? GS.player.classId : 'warrior',
-               level: (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1,
-             };
-             const sent = wsSend(authMsg);
-             _wsDiag('[v4.0.1] token auth發送: ' + (sent ? '成功' : '失敗') + ' 訊息長度=' + JSON.stringify(authMsg).length);
+             const account = (typeof localStorage !== 'undefined') ? (localStorage.getItem('mmo_account') || '') : '';
+             const shortToken = authToken ? authToken.substring(0, 30) : '';
+             const authMsg = { type: 'auth', shortToken: shortToken, account: account, name: 'Player' };
+             const msgLen = JSON.stringify(authMsg).length;
+             _wsDiag('[v4.0.2] 短token認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險') + ' account=' + account);
+             wsSend(authMsg);
            }
          } catch(e) {
-           _wsDiag('[v4.0.1] auth發送異常: ' + e.message + ' stack=' + e.stack?.substring(0, 200));
-           // 後備：直接發送最簡單的auth消息
-           try {
-             const fallbackMsg = { type: 'auth', token: authToken, name: 'Player' };
-             wsSend(fallbackMsg);
-             _wsDiag('[v4.0.1] 後備auth發送完成 len=' + JSON.stringify(fallbackMsg).length);
-           } catch(e2) { _wsDiag('[v4.0.1] 後備auth也失敗: ' + e2.message); }
+           _wsDiag('[v4.0.2] auth發送異常: ' + e.message);
+           try { wsSend({ type: 'auth', token: authToken, name: 'Player' }); } catch(e2) {}
          }
+
        };
 
        ws.onerror = (event) => {

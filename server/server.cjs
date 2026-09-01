@@ -955,9 +955,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '4.0.1',
-      build: '4.0.1-2609020800',
-      buildId: '4.0.1-2609020800',
+      version: '4.0.2',
+      build: '4.0.2-2609020900',
+      buildId: '4.0.2-2609020900',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1493,6 +1493,9 @@ async function handleApi(req, res, pathname, query) {
     global._wsSessions.set(wsSessionId, { account: account, createdAt: Date.now() });
     setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(wsSessionId); }, 10 * 60 * 1000);
     console.log('[Auth] 登入成功:', account, 'wsSessionId:', wsSessionId);
+    // v4.0.2：把token存入全域快取，供shortToken認證時比對
+    if (!global._wsAccountTokens) global._wsAccountTokens = new Map();
+    global._wsAccountTokens.set(account, token);
     return sendJson(res, 200, {
       ok: true,
       token,
