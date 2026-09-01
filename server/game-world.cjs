@@ -333,11 +333,20 @@ class Zone {
 
   // 廣播某玩家進入 AOI 給附近已存在的玩家
   broadcastEnter(enteringEntity) {
-    if (!global._wsSendToClient) return;
+    if (!global._wsSendToClient) {
+      console.log('[GameWorld-AOI] ❌ _wsSendToClient未定義，無法發送aoi_enter');
+      return;
+    }
     const serialized = this._serializeEntity(enteringEntity);
+    console.log('[GameWorld-AOI] 📡 broadcastEnter: 新玩家 ' + enteringEntity.id + ' 進入地圖 ' + this.mapId + '，當前在線玩家數=' + this.players.size);
+    let sentCount = 0;
     for (const [wsId, player] of this.players) {
-      if (wsId === enteringEntity.wsId) continue;
+      if (wsId === enteringEntity.wsId) {
+        console.log('[GameWorld-AOI]   - 跳過自己 wsId=' + wsId);
+        continue;
+      }
       const dist = Math.hypot(player.x - enteringEntity.x, player.y - enteringEntity.y);
+      console.log('[GameWorld-AOI]   - 玩家 ' + player.id + ' wsId=' + wsId + ' 距離=' + Math.round(dist) + ' AOI_RADIUS=' + AOI_RADIUS);
       if (dist <= AOI_RADIUS) {
         player.seenEntities.add(enteringEntity.id);
         global._wsSendToClient(wsId, {
@@ -346,8 +355,13 @@ class Zone {
           entities: [serialized],
           time: Date.now(),
         });
+        sentCount++;
+        console.log('[GameWorld-AOI]   ✅ 已發送aoi_enter給 wsId=' + wsId + ' 玩家=' + player.id);
+      } else {
+        console.log('[GameWorld-AOI]   - 距離超過AOI範圍，不發送');
       }
     }
+    console.log('[GameWorld-AOI] 📡 broadcastEnter完成，共發送給 ' + sentCount + ' 個玩家');
   }
 
   _serializeEntity(e) {
@@ -412,7 +426,9 @@ class GameWorld {
 
   // 玩家加入指定 zone
   playerJoin(mapId, wsId, playerData, aiConfig) {
+    console.log('[GameWorld] 🎮 playerJoin被呼叫: mapId=' + mapId + ' wsId=' + wsId + ' account=' + (playerData?.account || 'unknown'));
     const zone = this.getZone(mapId);
+    console.log('[GameWorld] 🎮 取得zone: ' + mapId + '，zone內玩家數=' + zone.players.size);
     if (aiConfig && aiConfig.aiCount != null) {
       zone.ensureAIEngine(
         parseInt(aiConfig.aiCount) || 8,
@@ -420,9 +436,12 @@ class GameWorld {
       );
     }
     const entity = zone.addPlayer(wsId, playerData);
+    console.log('[GameWorld] 🎮 玩家已加入zone: ' + entity.id + '，加入後zone內玩家數=' + zone.players.size);
     // 廣播給附近已存在的玩家
     zone.broadcastEnter(entity);
-    return zone.getInitialSnapshot(wsId);
+    const snapshot = zone.getInitialSnapshot(wsId);
+    console.log('[GameWorld] 🎮 初始快照: entities數=' + snapshot.entities.length + ' self=' + JSON.stringify(snapshot.self).substring(0, 100));
+    return snapshot;
   }
 
   // 玩家離開指定 zone
