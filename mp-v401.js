@@ -607,7 +607,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.2] tryWebSocket 開始');
+     _wsDiag('[v4.0.3] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -753,27 +753,31 @@
              _updateWsBadge('online', 'WS在線');
              resolve(msg);
            }
-           // 若已經在地圖中，重新 join
-           if (currentMapId && myPlayerId) {
-             wsSend({
-               type: 'join_map',
-               serverId: currentServerId,
-               mapId: currentMapId,
-               playerId: myPlayerId,
-               name: GS?.player?.name || 'Player',
-               classId: GS?.player?.classId || 'warrior',
-               level: GS?.player?.level || 1,
-               charIdx: currentCharIdx,
-               x: GS?.player?.x,
-               y: GS?.player?.y,
-               hp: GS?.player?.hp,
-               maxHp: GS?.player?.hpMax,
-               mp: GS?.player?.mp,
-               maxMp: GS?.player?.mpMax,
-               nation: GS?.player?.nation || '',
-             });
-             console.log('[GAME-WS] auth_ok 後自動 join_map, mapId=' + currentMapId + ', playerId=' + myPlayerId);
-           }
+           // v4.0.3：auth_ok後主動發送join_map，若currentMapId/myPlayerId為空則從GS讀取
+           const joinMapId = currentMapId || (typeof GS !== 'undefined' && GS?.player?.mapId) || 'village';
+           const joinPlayerId = myPlayerId || (typeof GS !== 'undefined' && GS?.player?.id) || (account + ':0');
+           const joinServerId = currentServerId || 'monarch-blade';
+           if (!currentMapId) currentMapId = joinMapId;
+           if (!myPlayerId) myPlayerId = joinPlayerId;
+           _wsDiag('[v4.0.3] auth_ok後發送join_map mapId=' + joinMapId + ' playerId=' + joinPlayerId);
+           wsSend({
+             type: 'join_map',
+             serverId: joinServerId,
+             mapId: joinMapId,
+             playerId: joinPlayerId,
+             name: (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player',
+             classId: (typeof GS !== 'undefined' && GS?.player?.classId) ? GS.player.classId : 'warrior',
+             level: (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1,
+             charIdx: currentCharIdx || 0,
+             x: (typeof GS !== 'undefined' && GS?.player?.x) ? GS.player.x : 400,
+             y: (typeof GS !== 'undefined' && GS?.player?.y) ? GS.player.y : 400,
+             hp: (typeof GS !== 'undefined' && GS?.player?.hp) ? GS.player.hp : 100,
+             maxHp: (typeof GS !== 'undefined' && GS?.player?.hpMax) ? GS.player.hpMax : 100,
+             mp: (typeof GS !== 'undefined' && GS?.player?.mp) ? GS.player.mp : 50,
+             maxMp: (typeof GS !== 'undefined' && GS?.player?.mpMax) ? GS.player.mpMax : 50,
+             nation: (typeof GS !== 'undefined' && GS?.player?.nation) ? GS.player.nation : '',
+           });
+           console.log('[GAME-WS] auth_ok 後自動 join_map, mapId=' + joinMapId + ', playerId=' + joinPlayerId);
            return;
          } else if (msg.type === 'auth_fail') {
            console.error('[GAME-WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
