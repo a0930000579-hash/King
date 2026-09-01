@@ -661,31 +661,45 @@
 
        ws.onopen = () => {
          _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
-         _updateWsBadge('connecting', 'WS驗證中');
+         try {
+           _updateWsBadge('connecting', 'WS驗證中');
+         } catch(e) { _wsDiag('[v4.0.1] _updateWsBadge錯誤(忽略): ' + e.message); }
          // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
-         const wsSessionId = localStorage.getItem('mmo_ws_session_id') || '';
-         if (wsSessionId) {
-           const authMsg = {
-             type: 'auth',
-             wsSessionId: wsSessionId,
-             name: GS?.player?.name || 'Player',
-           };
-           const msgLen = JSON.stringify(authMsg).length;
-           _wsDiag('[v4.0.1] 使用wsSessionId認證，訊息長度=' + msgLen + '位元組' + (msgLen < 126 ? ' (小幀，安全)' : ' (大幀，可能被截斷)'));
-           const sent = wsSend(authMsg);
-           _wsDiag('[v4.0.1] auth發送: ' + (sent ? '成功' : '失敗'));
-           localStorage.removeItem('mmo_ws_session_id');
-         } else {
-           _wsDiag('[v4.0.1] 無wsSessionId，使用token認證（大幀，可能被截斷）');
-           const authMsg = {
-             type: 'auth',
-             token: authToken,
-             name: GS?.player?.name || 'Player',
-             classId: GS?.player?.classId || 'warrior',
-             level: GS?.player?.level || 1,
-           };
-           const sent = wsSend(authMsg);
-           _wsDiag('[v4.0.1] token auth發送: ' + (sent ? '成功' : '失敗') + ' 訊息長度=' + JSON.stringify(authMsg).length);
+         try {
+           let wsSessionId = '';
+           try { wsSessionId = localStorage.getItem('mmo_ws_session_id') || ''; } catch(e) { _wsDiag('[v4.0.1] localStorage讀取錯誤: ' + e.message); }
+           _wsDiag('[v4.0.1] wsSessionId=' + (wsSessionId ? '有(' + wsSessionId.length + '字)' : '無'));
+           if (wsSessionId) {
+             const authMsg = {
+               type: 'auth',
+               wsSessionId: wsSessionId,
+               name: (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player',
+             };
+             const msgLen = JSON.stringify(authMsg).length;
+             _wsDiag('[v4.0.1] 使用wsSessionId認證，訊息長度=' + msgLen + '位元組' + (msgLen < 126 ? ' (小幀，安全)' : ' (大幀，可能被截斷)'));
+             const sent = wsSend(authMsg);
+             _wsDiag('[v4.0.1] auth發送: ' + (sent ? '成功' : '失敗'));
+             try { localStorage.removeItem('mmo_ws_session_id'); } catch(e) {}
+           } else {
+             _wsDiag('[v4.0.1] 無wsSessionId，使用token認證（大幀，可能被截斷）');
+             const authMsg = {
+               type: 'auth',
+               token: authToken,
+               name: (typeof GS !== 'undefined' && GS?.player?.name) ? GS.player.name : 'Player',
+               classId: (typeof GS !== 'undefined' && GS?.player?.classId) ? GS.player.classId : 'warrior',
+               level: (typeof GS !== 'undefined' && GS?.player?.level) ? GS.player.level : 1,
+             };
+             const sent = wsSend(authMsg);
+             _wsDiag('[v4.0.1] token auth發送: ' + (sent ? '成功' : '失敗') + ' 訊息長度=' + JSON.stringify(authMsg).length);
+           }
+         } catch(e) {
+           _wsDiag('[v4.0.1] auth發送異常: ' + e.message + ' stack=' + e.stack?.substring(0, 200));
+           // 後備：直接發送最簡單的auth消息
+           try {
+             const fallbackMsg = { type: 'auth', token: authToken, name: 'Player' };
+             wsSend(fallbackMsg);
+             _wsDiag('[v4.0.1] 後備auth發送完成 len=' + JSON.stringify(fallbackMsg).length);
+           } catch(e2) { _wsDiag('[v4.0.1] 後備auth也失敗: ' + e2.message); }
          }
        };
 
