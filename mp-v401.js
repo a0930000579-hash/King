@@ -555,6 +555,7 @@
          if (msg.type === 'auth_ok') {
            if (!resolved) {
              resolved = true;
+             try {
              console.log('[GAME-WS] ✅ auth_ok - 驗證通過, clientId=', msg.id, 'account=', msg.account);
              clearTimeout(timeout);
              wsReconnectDelay = 1000;
@@ -562,7 +563,8 @@
              // v4.0.4：先發送join_map，收到join_map_ok後再設置wsConnected=true
              // 避免遊戲循環在join_map之前就開始發送move消息
              const joinMapId = currentMapId || (typeof GS !== 'undefined' && GS?.player?.mapId) || 'village';
-             const joinPlayerId = myPlayerId || (typeof GS !== 'undefined' && GS?.player?.id) || (account + ':0');
+             const _acct = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? AuthSystem.getAccount() : ((typeof GS !== 'undefined' && GS?.player?.id) || 'unknown');
+             const joinPlayerId = myPlayerId || (typeof GS !== 'undefined' && GS?.player?.id) || (_acct + ':0');
              const joinServerId = currentServerId || 'monarch-blade';
              if (!currentMapId) currentMapId = joinMapId;
              if (!myPlayerId) myPlayerId = joinPlayerId;
@@ -583,6 +585,11 @@
                _wsDiag('[v4.0.8] join_map發送異常: ' + e.message);
              }
              resolve(msg);
+             } catch(e) {
+               console.error('[GAME-WS] ❌ auth_ok處理異常:', e);
+               _wsDiag('[v4.1.0] auth_ok處理異常: ' + e.message);
+               reject(e);
+             }
            }
            return;
          } else if (msg.type === 'join_map_ok') {
@@ -598,7 +605,8 @@
            // v4.0.7：處理entities（其他玩家和AI），更新在線人數
            try {
              if (msg.entities && Array.isArray(msg.entities)) {
-               const playerEntities = msg.entities.filter(e => e && e.type === 'player' && e.id !== (myPlayerId || (account+':0')));
+               const _acct2 = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? AuthSystem.getAccount() : ((typeof GS !== 'undefined' && GS?.player?.id) || 'unknown');
+               const playerEntities = msg.entities.filter(e => e && e.type === 'player' && e.id !== (myPlayerId || (_acct2+':0')));
                console.log('[GAME-WS] entities中玩家數=' + playerEntities.length + ' 總實體數=' + msg.entities.length);
                if (typeof window.handleAOIEnter === 'function') {
                  window.handleAOIEnter(msg.entities);
