@@ -396,19 +396,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.6] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.2.7] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.6] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.2.7] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.6] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.2.7] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -1298,12 +1298,13 @@
   }
 
   function refreshRemotePlayerVisual(p) {
-    if (!p.el) return;
-    if (p.el.parentNode) {
-      p.el.remove();
-      p.el = null;
-    }
-    buildRemotePlayerDOM(p);
+    if (!p.el) { buildRemotePlayerDOM(p); return; }
+    // v4.2.6：只更新名字/等級/國家，不要每次都remove重建
+    const nameEl = p.el.querySelector('.unit-name span');
+    if (nameEl && p.name) nameEl.textContent = p.name;
+    const lvEl = p.el.querySelector('.unit-level-tag');
+    if (lvEl) lvEl.textContent = 'Lv.' + (p.level || 1);
+    // 位置由updateRemotePlayers每幀更新
   }
 
   // ========== 每幀內插 ==========
@@ -1430,6 +1431,21 @@
         '當前地圖: ' + (currentMapId || '無'),
         '我的PlayerID: ' + (myPlayerId || '無'),
         '遠端玩家數: ' + (remotePlayers ? remotePlayers.size : 0),
+        (function() {
+          try {
+            var _wl = document.getElementById('world-layer');
+            var _wc = _wl ? _wl.children.length : -1;
+            var _re = _wl ? _wl.querySelectorAll('.world-unit.remote-player').length : -1;
+            var _info = 'world-layer子元素: ' + _wc + ', 遠端玩家DOM: ' + _re;
+            if (remotePlayers && remotePlayers.size > 0) {
+              for (var _rp of remotePlayers.values()) {
+                var _ei = _rp.el ? ('el=YES parent=' + (_rp.el.parentNode ? 'Y' : 'N') + ' disp=' + _rp.el.style.display + ' vis=' + _rp.el.style.visibility + ' left=' + _rp.el.style.left + ' top=' + _rp.el.style.top + ' z=' + _rp.el.style.zIndex) : 'el=NULL';
+                _info += '\n  [' + _rp.id + '] ' + (_rp.name||'?') + ' pos=(' + Math.round(_rp.x) + ',' + Math.round(_rp.y) + ') ' + _ei;
+              }
+            }
+            return _info;
+          } catch(e) { return 'DOM調試錯誤: ' + e.message; }
+        })(),
         '',
         '===== 最近AOI消息（最新10筆）=====',
         _aoiMessageLog.length > 0 ? _aoiMessageLog.join('\n') : '(尚無AOI消息)',
