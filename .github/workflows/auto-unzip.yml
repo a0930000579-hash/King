@@ -1,0 +1,40 @@
+name: Auto Unzip on Upload
+
+on:
+  push:
+    paths:
+      - '**.zip'  # 只有當有 .zip 檔案被上傳/更新時，才會觸發這個流程
+
+jobs:
+  unzip-and-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. 複製儲存庫檔案到工作區
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: true  # 確保後續有權限 push 回去
+
+    # 2. 自動尋找專案中的 zip 檔並強制解壓覆蓋
+    # 這段腳本會自動找出所有 zip 檔並解壓，不論檔名是什麼
+    - name: Find and unzip all zip files
+      run: |
+        find . -name "*.zip" -exec unzip -o {} \;
+
+    # 3. 設定 Git 身分並將解壓後的檔案推回 GitHub
+    - name: Commit and Push changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@://github.com"
+        
+        # 暫存所有變更
+        git add .
+        
+        # 檢查是否有檔案被覆蓋或更新，有的話才提交，避免 workflow 報錯
+        if ! git diff-index --quiet HEAD; then
+          git commit -m "🤖 自動解壓縮並覆蓋檔案 [skip ci]"
+          git push
+        else
+          echo "沒有偵測到任何檔案變更。"
+        fi
