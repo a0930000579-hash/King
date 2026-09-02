@@ -757,7 +757,8 @@ function createWsServer(httpServer) {
 
   function handleAuth(client, msg) {
     try {
-      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasWsSessionId=' + !!msg.wsSessionId + ' hasSessionId=' + !!msg.sessionId);
+      _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasWsSessionId=' + !!msg.wsSessionId + ' hasSessionId=' + !!msg.sessionId + ' hasToken=' + !!msg.token + ' hasShortToken=' + !!msg.shortToken + ' hasAccount=' + !!msg.account);
+      console.log('[WS-Auth] 收到auth: wsId=' + client.wsId + ' tokenLen=' + (msg.token||'').length + ' shortToken=' + (msg.shortToken||'').substring(0,10) + ' account=' + (msg.account||'空') + ' name=' + (msg.name||''));
       let account = null;
       // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
       if (msg.wsSessionId && global._wsSessions) {
@@ -796,16 +797,22 @@ function createWsServer(httpServer) {
       // v4.0.2：短token+帳號認證（整個auth消息<126位元組，不會被proxy截斷）
       if (!account && msg.shortToken && msg.account) {
         try {
-          const fullToken = global._wsAccountTokens ? global._wsAccountTokens.get(msg.account) : null;
-          if (fullToken && fullToken.substring(0, 30) === msg.shortToken) {
+          const hasCache = !!global._wsAccountTokens;
+          const fullToken = hasCache ? global._wsAccountTokens.get(msg.account) : null;
+          const match = fullToken && fullToken.substring(0, 30) === msg.shortToken;
+          _wsLog(' shortToken驗證: hasCache=' + hasCache + ' fullToken存在=' + !!fullToken + ' 比對=' + match);
+          console.log('[WS-Auth] shortToken驗證: account=' + msg.account + ' hasCache=' + hasCache + ' fullToken存在=' + !!fullToken + ' 比對=' + match);
+          if (match) {
             account = msg.account;
             _wsLog(' shortToken驗證成功 account=' + account);
             console.log('[WS-Auth] shortToken驗證成功 account=' + account + ' wsId=' + client.wsId);
-          } else {
-            _wsLog(' shortToken比對失敗 fullToken存在=' + !!fullToken);
+          } else if (!hasCache) {
+            _wsLog(' ⚠️ global._wsAccountTokens 不存在！伺服器端可能未更新到v4.4.3');
+            console.log('[WS-Auth] ⚠️ global._wsAccountTokens 不存在！伺服器端可能未更新到v4.4.3');
           }
         } catch(e) {
           _wsLog(' shortToken認證異常: ' + e.message);
+          console.log('[WS-Auth] shortToken認證異常:', e.message);
         }
       }
       if (account) {
