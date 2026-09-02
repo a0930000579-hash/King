@@ -398,19 +398,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.3.1] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.3.3] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.3.1] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.3.3] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.3.1] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.3.3] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -812,23 +812,6 @@
           const _allIds = (msg.entities || []).map(e => e.id || '?').join(',');
           _aoiMessageLog.unshift('[aoi_update] entities=' + (msg.entities?.length || 0) + ' ids=[' + _allIds + ']');
           if (_aoiMessageLog.length > 10) _aoiMessageLog.pop();
-          
-          // v4.3.1：直接創建測試方塊，不經過任何中間函數
-          try {
-            var _testDiv = document.getElementById('mp_test_block');
-            if (!_testDiv) {
-              _testDiv = document.createElement('div');
-              _testDiv.id = 'mp_test_block';
-              _testDiv.style.cssText = 'position:fixed !important; left:20px !important; top:100px !important; width:60px !important; height:60px !important; background:red !important; border:3px solid yellow !important; z-index:999999 !important; display:block !important; font-size:10px !important; color:white !important; text-align:center !important; line-height:60px !important;';
-              _testDiv.textContent = '測試';
-              document.body.appendChild(_testDiv);
-              _addDebugLog('[MP-TEST] 測試方塊已創建並添加到body');
-            }
-            // 更新測試方塊顯示實體數
-            _testDiv.textContent = '實體:' + (msg.entities?.length || 0);
-          } catch(_e) {
-            _addDebugLog('[MP-TEST] 測試方塊創建失敗: ' + _e.message);
-          }
           
           if (msg.entities && Array.isArray(msg.entities)) {
             console.log('[GAME-WS] aoi_update entities數=' + msg.entities.length + ' 內容=' + JSON.stringify(msg.entities).substring(0,200));
@@ -1242,32 +1225,107 @@
     if (typeof document === 'undefined') { _addDebugLog('[MP-DEBUG] document undefined'); return; }
     var worldLayer = document.getElementById('world-layer');
     if (!worldLayer) { _addDebugLog('[MP-DEBUG] world-layer NOT FOUND'); return; }
-    _addDebugLog('[MP-DEBUG] world-layer found, children=' + worldLayer.children.length);
     
     try {
-      // 最簡單的彩色div，不依賴任何game.js函數
       var elDiv = document.createElement('div');
-      elDiv.id = 'mp_remote_' + p.id.replace(/:/g, '_');
-      elDiv.className = 'mp-remote-player-simple';
-      elDiv.style.cssText = 'position:absolute !important; width:48px !important; height:64px !important; background:linear-gradient(180deg,#ff6b6b,#ee5a24) !important; border:2px solid #fff !important; border-radius:8px !important; z-index:99999 !important; display:block !important; visibility:visible !important; opacity:1 !important; box-shadow:0 0 10px #ff6b6b !important; pointer-events:none !important;';
+      elDiv.className = 'world-unit remote-player mp-player idle';
+      elDiv.dataset.id = 'mp_' + p.id;
+      elDiv.dataset.remoteId = p.id;
+      elDiv.dataset.mpId = p.id;
+      
+      // 國家敵我判定
+      var myNation = (typeof window.GS !== 'undefined') ? (GS.nation || null) : null;
+      var isEnemy = p.nation && myNation && p.nation !== myNation;
+      if (isEnemy) elDiv.classList.add('enemy-ai');
+      
+      // 獲取精靈圖
+      var s = null;
+      if (typeof window.SPRITE !== 'undefined') {
+        if (p.transformId) {
+          var key = String(p.transformId).replace(/^tf_/, '').replace(/^t_/, '');
+          s = SPRITE[key] || SPRITE['t_' + key] || SPRITE[p.classId] || SPRITE.warrior;
+        } else {
+          s = SPRITE[p.classId] || SPRITE.warrior;
+        }
+      }
+      _addDebugLog('[MP-DEBUG] sprite=' + (s ? (s.useImg ? 'IMG' : 'EMOJI') : 'NULL') + ' classId=' + p.classId);
+      
+      var isImg = !!(s && s.useImg);
+      var glow = (s && s.glow) || '#ffe090';
+      var filter = 'drop-shadow(0 0 4px ' + glow + ') drop-shadow(0 2px 3px rgba(0,0,0,0.8))';
+      var nameColor = isEnemy ? '#ff8080' : '#80d0ff';
+      var hpColor = isEnemy ? '#ff5050' : '#50c8ff';
+      
+      // 國旗
+      var flagImg = '';
+      if (typeof window.NATIONS !== 'undefined' && typeof window.safeFlagImg === 'function' && p.nation) {
+        var n = NATIONS.find(function(nn) { return nn.id === p.nation; });
+        if (n) flagImg = safeFlagImg(p.nation, 12);
+      }
       
       // 名字標籤
-      var nameDiv = document.createElement('div');
-      nameDiv.style.cssText = 'position:absolute; top:-18px; left:50%; transform:translateX(-50%); color:#fff; font-size:11px; font-weight:bold; text-shadow:1px 1px 2px #000; white-space:nowrap;';
-      nameDiv.textContent = p.name || 'Player';
-      elDiv.appendChild(nameDiv);
+      var nameEl = document.createElement('div');
+      nameEl.className = 'unit-info';
+      nameEl.innerHTML = '<div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:' + hpColor + '"></div></div>' +
+        '<div class="unit-name" style="color:' + nameColor + ';font-size:10px;display:flex;align-items:center;justify-content:center;gap:2px">' + flagImg + '<span>' + (p.name || 'Player') + '</span></div>' +
+        '<div class="unit-level-tag" style="display:none">Lv.' + (p.level || 1) + '</div>';
+      elDiv.appendChild(nameEl);
+      
+      // 精靈圖包裹層
+      var wrap = document.createElement('div');
+      wrap.className = 'unit-sprite-wrap';
+      wrap.style.width = '64px';
+      wrap.style.height = '80px';
+      wrap.style.background = 'radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%)';
+      
+      if (isImg) {
+        var imgIdle = document.createElement('img');
+        imgIdle.className = 'unit-sprite-img sprite-frame-idle';
+        imgIdle.src = s.idle;
+        imgIdle.style.filter = filter;
+        imgIdle.alt = '';
+        imgIdle.loading = 'lazy';
+        imgIdle.onerror = function() { if (!this.dataset.err) { this.dataset.err='1'; this.classList.add('frame-error'); } };
+        wrap.appendChild(imgIdle);
+        var tomb = document.createElement('div');
+        tomb.className = 'unit-sprite-tomb';
+        tomb.textContent = '墓';
+        tomb.style.display = 'none';
+        wrap.appendChild(tomb);
+      } else {
+        var emoji = document.createElement('div');
+        emoji.className = 'unit-sprite-emoji';
+        emoji.textContent = (s && s.idle) || '⚔';
+        emoji.style.color = (s && s.color) || '#c0a060';
+        emoji.style.fontSize = '52px';
+        emoji.style.filter = filter;
+        wrap.appendChild(emoji);
+      }
+      elDiv.appendChild(wrap);
+      
+      // 陰影
+      var shadow = document.createElement('div');
+      shadow.className = 'unit-shadow';
+      elDiv.appendChild(shadow);
       
       // 位置
       var px = Math.round(p.x || 0);
       var py = Math.round(p.y || 0);
-      elDiv.style.left = (px - 24) + 'px';
-      elDiv.style.top = (py - 64) + 'px';
+      elDiv.style.left = (px - 32) + 'px';
+      elDiv.style.top = (py - 80) + 'px';
+      elDiv.style.zIndex = Math.floor(20 + py / 8);
+      elDiv.style.position = 'absolute';
+      elDiv.style.display = 'block';
+      elDiv.style.visibility = 'visible';
+      elDiv.style.opacity = '1';
+      
+      if (p.dir === -1) elDiv.classList.add('face-left');
       
       worldLayer.appendChild(elDiv);
       p.el = elDiv;
-      _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM SUCCESS id=' + p.id + ' pos=(' + px + ',' + py + ') parent=' + (elDiv.parentNode ? 'YES' : 'NO'));
+      _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM SUCCESS id=' + p.id + ' pos=(' + px + ',' + py + ') parent=' + (elDiv.parentNode ? 'YES' : 'NO') + ' isImg=' + isImg);
     } catch(e) {
-      _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM ERROR: ' + e.message + ' stack=' + (e.stack||'').substring(0,200));
+      _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM ERROR: ' + e.message + ' stack=' + (e.stack||'').substring(0,300));
     }
   }
 
@@ -1313,10 +1371,10 @@
         }
       }
 
-      // 簡單div的位置更新
-      p.el.style.left = (Math.round(p.x) - 24) + 'px';
-      p.el.style.top = (Math.round(p.y) - 64) + 'px';
-      p.el.style.zIndex = '99999';
+      // v4.3.2：正常精靈圖尺寸64x80的位置更新
+      p.el.style.left = (Math.round(p.x) - 32) + 'px';
+      p.el.style.top = (Math.round(p.y) - 80) + 'px';
+      p.el.style.zIndex = Math.floor(20 + p.y / 8);
       p.el.style.display = 'block';
       p.el.style.visibility = 'visible';
       p.el.style.opacity = '1';
