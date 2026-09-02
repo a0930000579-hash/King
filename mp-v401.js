@@ -20,7 +20,9 @@
 
   // ========== v3.1.6：WS 診斷日誌（遊戲中可見） ==========
   const _wsDiagLog = [];
-  const _aoiMessageLog = []; // v4.2.2：記錄最近的AOI消息，方便手機端排查
+  const _aoiMessageLog = [];
+  const _debugLog = [];
+  function _addDebugLog(msg) { _debugLog.unshift(msg); if (_debugLog.length > 20) _debugLog.pop(); console.log(msg); } // v4.2.2：記錄最近的AOI消息，方便手機端排查
   function _wsDiag(msg) {
     const ts = new Date().toLocaleTimeString('zh-TW', {hour12: false}) + '.' + String(Date.now() % 1000).padStart(3, '0');
     const entry = ts + ' ' + msg;
@@ -396,19 +398,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.7] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.2.8] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.7] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.2.8] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.7] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.2.8] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -1142,6 +1144,7 @@
   }
 
   function addOrUpdateRemotePlayer(ent) {
+    _addDebugLog('[MP-DEBUG addOrUpdateRemotePlayer id=' + ent.id + ' name=' + (ent.name||'?') + ' x=' + ent.x + ' y=' + ent.y);
     if (ent.id === myPlayerId) return;
     let p = remotePlayers.get(ent.id);
     const wPos = serverToWorld(ent.x || 0, ent.y || 0);
@@ -1216,10 +1219,11 @@
   }
 
   function buildRemotePlayerDOM(p) {
-    if (typeof document === 'undefined') return;
+    if (typeof document === 'undefined') { _addDebugLog('[MP-DEBUG document undefined'); return; }
     const worldLayer = document.getElementById('world-layer');
-    if (!worldLayer) return;
-
+    if (!worldLayer) { _addDebugLog('[MP-DEBUG world-layer not found'); return; }
+    _addDebugLog('[MP-DEBUG buildRemotePlayerDOM start id=' + p.id + ' name=' + p.name + ' x=' + p.x + ' y=' + p.y);
+    try {
     const elDiv = document.createElement('div');
     elDiv.className = 'world-unit remote-player mp-player idle';
     elDiv.dataset.id = 'mp_' + p.id;
@@ -1295,6 +1299,10 @@
     elDiv.style.visibility = 'visible';
     elDiv.style.opacity = '1';
     if (p.dir === -1) elDiv.classList.add('face-left');
+    _addDebugLog('[MP-DEBUG buildRemotePlayerDOM SUCCESS id=' + p.id + ' el.parentNode=' + (elDiv.parentNode ? 'YES' : 'NO'));
+    } catch(e) {
+      _addDebugLog('[MP-DEBUG buildRemotePlayerDOM ERROR id=' + p.id + ' error=' + e.message + ' stack=' + e.stack);
+    }
   }
 
   function refreshRemotePlayerVisual(p) {
@@ -1452,6 +1460,9 @@
         '',
         '===== WS 連線日誌（最新25筆）=====',
         logText,
+        '',
+        '===== 除錯日誌（最新20筆）=====',
+        _debugLog.length > 0 ? _debugLog.join('\n') : '(尚無除錯日誌)',
       ].join('\n');
       alert(info);
     } catch(e) {
