@@ -1,70 +1,40 @@
-name: ZIP Merge Deploy
+name: Auto Unzip on Upload
+
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
-permissions:
-  contents: write
-concurrency:
-  group: king-merge
-  cancel-in-progress: false
+    paths:
+      - '**.zip'  # 只有當有 .zip 檔案被上傳/更新時，才會觸發這個流程
+
 jobs:
-  merge:
+  unzip-and-commit:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    # 1. 複製儲存庫檔案到工作區
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: true  # 確保後續有權限 push 回去
 
-      - name: Merge-extract uploaded ZIPs (never delete other files)
-        shell: bash
-        run: |
-          set -u
-          zips=()
-          while IFS= read -r f; do zips+=("$f"); done < <(find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*')
-          echo "Found ${#zips[@]} NEW zip(s) in this push."
-          if [ "${#zips[@]}" -eq 0 ]; then
-            echo "No new ZIP. Keep current files."
-            exit 0
-          fi
-          # Extract onto EXISTING files (merge/overwrite, nothing is deleted)
-          for z in "${zips[@]}"; do
-            echo "=============================="
-            echo "Merge-extract: $z"
-            echo "=============================="
-            unzip -o "$z" -d . || { echo "unzip failed on $z"; exit 1; }
-          done
-          # Lift a single wrapper folder only if index.html ends up nested
-          if [ ! -f index.html ]; then
-            inner=$(find . -mindepth 2 -type f -name index.html ! -path './.git/*' ! -path './.github/*' | head -n 1 || true)
-            if [ -n "$inner" ]; then
-              d=$(dirname "$inner")
-              echo "Lifting nested folder: $d"
-              shopt -s dotglob nullglob
-              mv "$d"/* . 2>/dev/null || true
-            fi
-          fi
-          # Remove only the zip(s) just consumed; all extracted files stay
-          find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*' -delete || true
-          echo "=== asset count so far ==="
-          find assets -type f 2>/dev/null | wc -l
+    # 2. 自動尋找專案中的 zip 檔並強制解壓覆蓋
+    # 這段腳本會自動找出所有 zip 檔並解壓，不論檔名是什麼
+    - name: Find and unzip all zip files
+      run: |
+        find . -name "*.zip" -exec unzip -o {} \;
 
-      - name: Commit and push
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Never modify workflows (token cannot push .github)
-          git checkout -- .github 2>/dev/null || true
-          # Force-add so a stray .gitignore cannot skip assets
-          git add -f -A
-          git reset -q -- .github 2>/dev/null || true
-          if git diff --cached --quiet; then
-            echo "No changes."
-          else
-            git commit -m "Merge-extract uploaded ZIP [skip ci]"
-            git push
-            echo "Merged and pushed."
-          fi
+    # 3. 設定 Git 身分並將解壓後的檔案推回 GitHub
+    - name: Commit and Push changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@://github.com"
+        
+        # 暫存所有變更
+        git add .
+        
+        # 檢查是否有檔案被覆蓋或更新，有的話才提交，避免 workflow 報錯
+        if ! git diff-index --quiet HEAD; then
+          git commit -m "🤖 自動解壓縮並覆蓋檔案 [skip ci]"
+          git push
+        else
+          echo "沒有偵測到任何檔案變更。"
+        fi
