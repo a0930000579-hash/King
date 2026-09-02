@@ -396,19 +396,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.4] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.2.5] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.4] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.2.5] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.4] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.2.5] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -1286,12 +1286,13 @@
     if (typeof window.initUnitAnimState === 'function') {
       try { initUnitAnimState('mp_' + p.id); } catch (e) { /* ignore */ }
     }
-    if (typeof window.positionUnit === 'function') {
-      try { positionUnit(elDiv, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
-    } else {
-      elDiv.style.left = (p.x - w / 2) + 'px';
-      elDiv.style.bottom = p.y + 'px';
-    }
+    // v4.2.4：遠端玩家直接定位，不使用positionUnit（避免視口剔除隱藏）
+    elDiv.style.left = (p.x - w / 2) + 'px';
+    elDiv.style.top = (p.y - h) + 'px';
+    elDiv.style.zIndex = Math.floor(100 + p.y / 8);
+    elDiv.style.display = 'block';
+    elDiv.style.visibility = 'visible';
+    elDiv.style.opacity = '1';
     if (p.dir === -1) elDiv.classList.add('face-left');
   }
 
@@ -1339,12 +1340,14 @@
         }
       }
 
-      if (typeof window.positionUnit === 'function') {
-        try { positionUnit(p.el, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
-      } else {
-        p.el.style.left = (p.x - 32) + 'px';
-        p.el.style.bottom = p.y + 'px';
-      }
+      // v4.2.4：遠端玩家直接更新位置，不使用positionUnit
+      p.el.style.left = (p.x - 32) + 'px';
+      p.el.style.top = (p.y - 80) + 'px';
+      p.el.style.zIndex = Math.floor(100 + p.y / 8);
+      p.el.classList.remove('offscreen');
+      p.el.style.display = 'block';
+      p.el.style.visibility = 'visible';
+      p.el.style.opacity = '1';
 
       if (typeof window.applyUnitAnimFrame === 'function') {
         try {
