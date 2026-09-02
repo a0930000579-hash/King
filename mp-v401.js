@@ -396,19 +396,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.5] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.2.6] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.5] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.2.6] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.5] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.2.6] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -807,7 +807,8 @@
       case 'aoi_update':
         // v4.1.2：正確處理aoi_update，更新remotePlayers和在線人數
         try {
-          _aoiMessageLog.unshift('[aoi_update] entities=' + (msg.entities?.length || 0) + ' ' + JSON.stringify(msg.entities?.slice(0,3) || []).substring(0,150));
+          const _allIds = (msg.entities || []).map(e => e.id || '?').join(',');
+          _aoiMessageLog.unshift('[aoi_update] entities=' + (msg.entities?.length || 0) + ' ids=[' + _allIds + ']');
           if (_aoiMessageLog.length > 10) _aoiMessageLog.pop();
           if (msg.entities && Array.isArray(msg.entities)) {
             console.log('[GAME-WS] aoi_update entities數=' + msg.entities.length + ' 內容=' + JSON.stringify(msg.entities).substring(0,200));

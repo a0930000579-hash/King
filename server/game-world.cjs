@@ -163,8 +163,32 @@ class Zone {
     };
   }
 
+  // ===== 隨機出生點：基於spawn點在±100範圍內生成10個隨機點 =====
+  _getRandomSpawn(playerData) {
+    const baseX = playerData.x != null ? playerData.x : (this.config.spawn?.x || 400);
+    const baseY = playerData.y != null ? playerData.y : (this.config.spawn?.y || 400);
+    // 如果玩家有指定位置，直接使用
+    if (playerData.x != null && playerData.y != null) {
+      return { x: playerData.x, y: playerData.y };
+    }
+    // 生成10個隨機點，隨機選擇一個
+    const spawnPoints = [];
+    for (let i = 0; i < 10; i++) {
+      const offsetX = (Math.random() - 0.5) * 200; // ±100
+      const offsetY = (Math.random() - 0.5) * 200; // ±100
+      spawnPoints.push({
+        x: Math.max(50, Math.min(this.width - 50, Math.round(baseX + offsetX))),
+        y: Math.max(50, Math.min(this.height - 50, Math.round(baseY + offsetY))),
+      });
+    }
+    const chosen = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+    console.log(`[Zone-Spawn] ${this.mapId}: 隨機出生點選擇 (${chosen.x}, ${chosen.y})，基點 (${baseX}, ${baseY})`);
+    return chosen;
+  }
+
   // ===== 玩家加入 =====
   addPlayer(wsId, playerData) {
+    const spawnPos = this._getRandomSpawn(playerData);
     const entity = {
       id: playerData.id || ('p:' + wsId),  // v4.2.0：優先使用客戶端playerId，保持兩端一致
       kind: 'player',
@@ -173,8 +197,8 @@ class Zone {
       name: playerData.name || 'Player',
       classId: playerData.classId || 'warrior',
       level: playerData.level || 1,
-      x: playerData.x != null ? playerData.x : (this.config.spawn?.x || 400),
-      y: playerData.y != null ? playerData.y : (this.config.spawn?.y || 400),
+      x: spawnPos.x,
+      y: spawnPos.y,
       hp: playerData.hp || 100,
       maxHp: playerData.maxHp || 100,
       mp: playerData.mp || 50,
@@ -509,13 +533,32 @@ class GameWorld {
     fromZone.removePlayer(wsId);
 
     // 2. 準備加入目標 zone 的玩家資料
+    // v4.2.5：隨機出生點（10個隨機點）
+    let _targetSpawnX, _targetSpawnY;
+    if (targetX != null && targetY != null) {
+      _targetSpawnX = targetX;
+      _targetSpawnY = targetY;
+    } else {
+      const _baseX = targetConfig.spawn?.x || 400;
+      const _baseY = targetConfig.spawn?.y || 400;
+      const _spawns = [];
+      for (let i = 0; i < 10; i++) {
+        _spawns.push({
+          x: Math.max(50, Math.min(targetConfig.width - 50, Math.round(_baseX + (Math.random() - 0.5) * 200))),
+          y: Math.max(50, Math.min(targetConfig.height - 50, Math.round(_baseY + (Math.random() - 0.5) * 200))),
+        });
+      }
+      const _chosen = _spawns[Math.floor(Math.random() * _spawns.length)];
+      _targetSpawnX = _chosen.x;
+      _targetSpawnY = _chosen.y;
+    }
     const playerData = {
       account: player.account,
       name: player.name,
       classId: player.classId,
       level: player.level,
-      x: targetX != null ? targetX : (targetConfig.spawn?.x || 400),
-      y: targetY != null ? targetY : (targetConfig.spawn?.y || 400),
+      x: _targetSpawnX,
+      y: _targetSpawnY,
       hp: player.hp,
       maxHp: player.maxHp,
       mp: player.mp,
