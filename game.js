@@ -26907,6 +26907,26 @@ window.addEventListener('load', function() {
       } catch(e) {
         console.warn('[存檔] 角色槽載入失敗:', e);
       }
+      
+      // v4.4.2：確保GS.player存在，避免_initCore跳過導致黑屏
+      if (!GS.player || typeof GS.player !== 'object') {
+        console.warn('[Auth] GS.player為空，創建預設玩家對象');
+        GS.player = {
+          name: '玩家', classId: 'warrior', level: 1, exp: 0, expMax: 100,
+          x: 1200, y: 900, targetX: 1200, targetY: 900,
+          hp: 200, hpMax: 200, mp: 100, mpMax: 100,
+          state: 'idle', facing: 'right', attackCooldown: 0,
+          skillCooldowns: [0,0,0,0,0,0,0,0], hitTimer: 0,
+          transformId: null, buffs: {}, created: true,
+        };
+      }
+      if (!GS.player.classId) {
+        console.warn('[Auth] GS.player無classId，設置預設warrior');
+        GS.player.classId = 'warrior';
+      }
+      if (!GS.currentMap) GS.currentMap = 'village';
+      
+      console.log('[Auth] onAuthReady完成，準備init: player=', GS.player.name, '/', GS.player.classId, 'map=', GS.currentMap);
       init();
     };
   } else {
