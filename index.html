@@ -938,7 +938,7 @@
   <script src="portrait-generator.js?v=4.4.0"></script>
   <script src="game.js?v=4.4.0"></script>
   <script>
-    // 骨架屏淡出：DOM 就緒後立即隱藏，避免玩家看到空白或容器骨架
+    // 骨架屏淡出 + 初始化登入系統
     (function() {
       function hideSplash() {
         var s = document.getElementById('splash-screen');
@@ -946,13 +946,25 @@
         s.classList.add('fade-out');
         setTimeout(function() { s.style.display = 'none'; }, 700);
       }
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', hideSplash);
-      } else {
+      function initApp() {
+        // v4.4.1：確保先顯示官方首頁（登入/註冊），不會直接進入遊戲
+        if (window.AuthSystem && typeof window.AuthSystem.init === 'function') {
+          try { window.AuthSystem.init(); } catch(e) { console.error('AuthSystem init error:', e); }
+        }
         hideSplash();
       }
-      // 最遲 2 秒強制淡出（防止極端情況卡著）
-      setTimeout(hideSplash, 2000);
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initApp);
+      } else {
+        initApp();
+      }
+      // 最遲 2 秒強制初始化（防止極端情況卡著）
+      setTimeout(function() {
+        if (!window.__appInited) {
+          window.__appInited = true;
+          initApp();
+        }
+      }, 2000);
     })();
   </script>
 </body>
