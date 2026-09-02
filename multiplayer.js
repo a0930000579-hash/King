@@ -638,24 +638,28 @@
            }
          } catch(e) {}
          const shortToken = authToken ? authToken.substring(0, 30) : '';
+         // v4.4.5：極簡auth消息 — 只發送shortToken和account，約85位元組，絕對不會被DO proxy截斷
+         // name/classId/level留到join_map時再發送
          const authMsg = {
            type: 'auth',
            shortToken: shortToken,
            account: authAccount,
-           name: GS?.player?.name || 'Player',
-           classId: GS?.player?.classId || 'warrior',
-           level: GS?.player?.level || 1,
          };
-         // 計算消息大小，確保<126位元組
          const msgSize = JSON.stringify(authMsg).length;
-         console.log('[GAME-WS] 已發送 auth (shortToken模式), shortToken長度=', shortToken.length, 'account=', authAccount, '消息大小=', msgSize, '位元組');
+         const authJson = JSON.stringify(authMsg);
+         console.log('[GAME-WS] 已發送 auth (極簡模式), shortToken長度=', shortToken.length, 'account=', authAccount, '消息大小=', msgSize, '位元組');
+         console.log('[GAME-WS] auth消息內容:', authJson);
          _wsDebugLog('📤 發送auth shortToken=' + shortToken.substring(0, 10) + '... account=' + authAccount + ' 大小=' + msgSize + 'B');
-         if (msgSize > 120) {
-           console.warn('[GAME-WS] ⚠️ auth消息超過120位元組，可能被proxy截斷！');
-           _wsDebugLog('⚠️ auth消息超過120位元組，可能被proxy截斷！');
+         _wsDebugLog('📤 auth內容=' + authJson);
+         if (msgSize > 100) {
+           console.warn('[GAME-WS] ⚠️ auth消息超過100位元組！');
+           _wsDebugLog('⚠️ auth消息超過100位元組！');
          }
          if (!authAccount) {
            _wsDebugLog('❌ authAccount為空，shortToken驗證一定會失敗！');
+         }
+         if (!shortToken) {
+           _wsDebugLog('❌ shortToken為空，authToken可能不存在！');
          }
          wsSend(authMsg);
        };
