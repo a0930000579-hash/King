@@ -232,12 +232,16 @@ class Zone {
   // ===== 玩家移動請求 =====
   handleMove(wsId, x, y) {
     const player = this.players.get(wsId);
-    if (!player) return;
+    if (!player) return null;
     x = Math.max(0, Math.min(this.width, x));
     y = Math.max(0, Math.min(this.height, y));
-    player.moveTarget = { x, y };
+    // v4.3.6：直接設置位置（技術文檔第一階段：先不用插值，確保基本同步）
+    player.x = x;
+    player.y = y;
+    player.moveTarget = null;
     player.state = 'walk';
     player.lastMoveTime = Date.now();
+    return player;
   }
 
   // ===== 傳送點偵測：回傳需要傳送的玩家列表 =====
@@ -513,8 +517,25 @@ class GameWorld {
   // 玩家移動
   playerMove(mapId, wsId, x, y) {
     const zone = this.zones.get(mapId);
-    if (!zone) return;
-    zone.handleMove(wsId, x, y);
+    if (!zone) return null;
+    return zone.handleMove(wsId, x, y);
+  }
+  
+  // v4.3.7：根據wsId獲取玩家
+  getPlayerByWsId(mapId, wsId) {
+    const zone = this.zones.get(mapId);
+    if (!zone) return null;
+    return zone.players.get(wsId) || null;
+  }
+  
+  // v4.3.7：根據playerId獲取玩家
+  getPlayerById(mapId, playerId) {
+    const zone = this.zones.get(mapId);
+    if (!zone) return null;
+    for (const p of zone.players.values()) {
+      if (p.id === playerId) return p;
+    }
+    return null;
   }
 
   // 地圖切換（從 fromMap 移到 toMap）
@@ -690,8 +711,20 @@ function playerLeave(serverId, mapId, wsId) {
 // 玩家移動
 function playerMove(serverId, mapId, wsId, x, y) {
   const gw = gameWorlds.get(serverId);
-  if (!gw) return;
-  gw.playerMove(mapId, wsId, x, y);
+  if (!gw) return null;
+  return gw.playerMove(mapId, wsId, x, y);
+}
+
+function getPlayerByWsId(serverId, mapId, wsId) {
+  const gw = gameWorlds.get(serverId);
+  if (!gw) return null;
+  return gw.getPlayerByWsId(mapId, wsId);
+}
+
+function getPlayerById(serverId, mapId, playerId) {
+  const gw = gameWorlds.get(serverId);
+  if (!gw) return null;
+  return gw.getPlayerById(mapId, playerId);
 }
 
 // 玩家主動切換地圖（由 WS message 觸發，例如回城卷軸）
@@ -757,6 +790,8 @@ module.exports = {
   playerLeave,
   playerMove,
   playerChangeMap,
+  getPlayerByWsId,
+  getPlayerById,
   startTick,
   getStats,
   AOI_RADIUS,

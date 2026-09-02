@@ -666,13 +666,83 @@ function createWsServer(httpServer) {
       case 'ping':
         sendJson(client.socket, { type: 'pong', time: Date.now() });
         break;
-      // v2.7.5：玩家攻擊伺服器 AI（伺服器權威扣血）
+      // v4.3.7：完整戰鬥同步 — PvE + PvP + 攻擊動畫 + 傷害廣播
       case 'attack':
         if (client.authenticated && client.mapId && client.serverId) {
-          const targetId = msg.targetId;
+          const targetId = String(msg.targetId || '');
+          const skillId = msg.skillId || 0;
           const dmg = Math.max(0, parseInt(msg.damage) || 0);
-          if (targetId && dmg > 0) {
-            damageAI(client.serverId, client.mapId, targetId, dmg, client.playerId || client.account);
+          const attacker = gameWorld.getPlayerByWsId(client.serverId, client.mapId, client.wsId);
+          
+          // 廣播攻擊動畫給同地圖所有玩家
+          if (attacker) {
+            broadcastToMap(client.serverId, client.mapId, {
+              type: 'player_attack',
+              attackerId: attacker.id,
+              attackerName: attacker.name,
+              targetId: targetId,
+              skillId: skillId,
+              x: attacker.x,
+              y: attacker.y,
+              time: Date.now(),
+            });
+          }
+          
+          // PvE：玩家打AI
+          if (targetId.startsWith('ai:') && dmg > 0) {
+            const result = damageAI(client.serverId, client.mapId, targetId, dmg, client.playerId || client.account);
+            if (result) {
+              broadcastToMap(client.serverId, client.mapId, {
+                type: 'ai_damaged',
+                aiId: targetId,
+                damage: dmg,
+                attackerId: attacker ? attacker.id : client.playerId,
+                hp: result.hp,
+                maxHp: result.maxHp,
+                dead: result.dead || false,
+                time: Date.now(),
+              });
+            }
+          }
+          // PvP：玩家打玩家
+          else if (targetId && !targetId.startsWith('ai:')) {
+            const targetPlayer = gameWorld.getPlayerById(client.serverId, client.mapId, targetId);
+            if (targetPlayer && attacker && targetPlayer.id !== attacker.id) {
+              const atk = (attacker.level || 1) * 10 + 5;
+              const def = (targetPlayer.level || 1) * 5;
+              const finalDmg = Math.max(1, Math.floor(atk - def * 0.5 + (Math.random() * 10 - 5)));
+              targetPlayer.hp = Math.max(0, targetPlayer.hp - finalDmg);
+              const isDead = targetPlayer.hp <= 0;
+              if (isDead) targetPlayer.state = 'dead';
+              
+              broadcastToMap(client.serverId, client.mapId, {
+                type: 'player_damaged',
+                targetId: targetPlayer.id,
+                targetName: targetPlayer.name,
+                attackerId: attacker.id,
+                attackerName: attacker.name,
+                damage: finalDmg,
+                hp: targetPlayer.hp,
+                maxHp: targetPlayer.maxHp,
+                dead: isDead,
+                time: Date.now(),
+              });
+              
+              if (isDead) {
+                setTimeout(() => {
+                  targetPlayer.hp = targetPlayer.maxHp;
+                  targetPlayer.state = 'idle';
+                  broadcastToMap(client.serverId, client.mapId, {
+                    type: 'player_respawn',
+                    playerId: targetPlayer.id,
+                    hp: targetPlayer.hp,
+                    x: targetPlayer.x,
+                    y: targetPlayer.y,
+                    time: Date.now(),
+                  });
+                }, 5000);
+              }
+            }
           }
         }
         break;
@@ -923,7 +993,24 @@ function createWsServer(httpServer) {
     const x = parseFloat(msg.x);
     const y = parseFloat(msg.y);
     if (isNaN(x) || isNaN(y)) return;
-    gameWorld.playerMove(client.serverId, client.mapId, client.wsId, x, y);
+    const player = gameWorld.playerMove(client.serverId, client.mapId, client.wsId, x, y);
+    if (!player) return;
+    // v4.3.6：即時廣播player_move給同地圖所有玩家（技術文檔第一階段：先不用AOI，全部人直接廣播）
+    const payload = {
+      type: 'player_move',
+      playerId: player.id,
+      name: player.name,
+      x: player.x,
+      y: player.y,
+      dir: msg.dir || player.dir || 0,
+      hp: player.hp,
+      maxHp: player.maxHp,
+      level: player.level,
+      classId: player.classId,
+      nation: player.nation,
+      time: Date.now(),
+    };
+    broadcastToMap(client.serverId, client.mapId, payload);
   }
 
   function handleChat(client, msg) {
