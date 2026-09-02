@@ -18,16 +18,6 @@
   let onMonsterKilled = null;
   let onGainReward = null;
 
-  // ========== v3.1.6：WS 診斷日誌（遊戲中可見） ==========
-  const _wsDiagLog = [];
-  function _wsDiag(msg) {
-    const ts = new Date().toLocaleTimeString('zh-TW', {hour12: false}) + '.' + String(Date.now() % 1000).padStart(3, '0');
-    const entry = ts + ' ' + msg;
-    _wsDiagLog.push(entry);
-    if (_wsDiagLog.length > 60) _wsDiagLog.shift();
-    console.log('[WS-DIAG]', entry);
-  }
-
   let serverUrl = '';
   let authToken = '';
   let myPlayerId = null;
@@ -59,6 +49,8 @@
   }
 
   const remotePlayers = new Map();
+  // v4.4.0：伺服器端AI（Server Authoritative）
+  const serverAIs = new Map();
   let pollAbortController = null;
   let pollRunning = false;
   let reconnectDelay = 1000;
@@ -206,7 +198,7 @@
              startPollLoop();
            }
            // 若已有玩家資料，自動 join
-           if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
+           if (typeof GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
              return MultiplayerClient.joinWorld().then(result => {
                if (!result) {
                  console.warn('[Multi] joinWorld 失敗，退回離線模式');
@@ -227,7 +219,7 @@
            _updateWsBadge('connecting', 'WS連線中');
            _startWsWithRetry();
            startPollLoop();
-           if (typeof window.GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
+           if (typeof GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
              return MultiplayerClient.joinWorld().catch(() => null);
            }
            return null;
@@ -538,36 +530,13 @@
   };
 
   // ========== v2.7.2：WebSocket 連線（優先通道，失敗降級 long-poll） ==========
-  // v3.2.0：大訊息自動分片發送（每個chunk <126位元組，避免DO proxy截斷大幀）
-  function _wsChunkId() {
-    return 'c' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  }
-  // v3.2.1：大訊息自動分片（chunkSize=50，確保每個chunk <100位元組）
-  function wsSend(msg) {
-    if (!ws || ws.readyState !== 1) return false;
-    try {
-      const raw = JSON.stringify(msg);
-      if (raw.length < 50) {
-        _wsDiag('wsSend 小訊息直接發送 len=' + raw.length + ' type=' + (msg.type||msg.t||'?'));
-        ws.send(raw);
-        return true;
-      }
-      const cid = _wsChunkId();
-      const chunkSize = 30;
-      const total = Math.ceil(raw.length / chunkSize);
-      _wsDiag('wsSend 大訊息分片 len=' + raw.length + ' -> ' + total + ' chunks, cid=' + cid);
-      for (let i = 0; i < total; i++) {
-        const part = raw.substring(i * chunkSize, (i + 1) * chunkSize);
-        const chunkMsg = JSON.stringify({ t: '__c', c: cid, i: i, n: total, d: part });
-        _wsDiag('  發送 chunk ' + (i+1) + '/' + total + ' chunkLen=' + chunkMsg.length);
-        ws.send(chunkMsg);
-      }
-      return true;
-    } catch(e) {
-      _wsDiag('wsSend 錯誤: ' + e.message);
-      return false;
-    }
-  }
+   function wsSend(msg) {
+     if (!ws || ws.readyState !== 1) return false;
+     try {
+       ws.send(JSON.stringify(msg));
+       return true;
+     } catch(e) { return false; }
+   }
 
    // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
    function _startWsWithRetry() {
@@ -606,7 +575,6 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -639,7 +607,6 @@
        _wsFailureReason = '';
        try {
          ws = new WebSocket(wsUrl);
-         _wsDiag('WebSocket 物件已建立, readyState=' + ws.readyState + ' URL=' + wsUrl);
          console.log('[GAME-WS] WebSocket 物件已建立, readyState=', ws.readyState, '(0=CONNECTING)');
        } catch(e) {
          _wsFailureReason = '建立失敗: ' + (e.message || String(e));
@@ -652,31 +619,25 @@
       let resolved = false;
       const timeout = setTimeout(() => {
         if (!resolved) {
-          _wsDiag('⏰ 逾時! 5秒內未收到auth_ok/auth_fail。ws.readyState=' + (ws ? ws.readyState : '無ws'));
           resolved = true;
           reject(new Error('WebSocket 連線逾時'));
         }
-      }, 8000);
+      }, 5000);
 
        ws.onopen = () => {
-         _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
-         _wsDiag('發送 auth: token長度=' + (authToken ? authToken.length : 0) + ' token前10=' + (authToken ? authToken.substring(0,10) : '空'));
          console.log('[GAME-WS] ✅ onopen - upgrade 成功, readyState=', ws.readyState, '(1=OPEN)。發送 auth...');
          _updateWsBadge('connecting', 'WS驗證中');
-         const authMsg = {
+         wsSend({
            type: 'auth',
            token: authToken,
            name: GS?.player?.name || 'Player',
            classId: GS?.player?.classId || 'warrior',
            level: GS?.player?.level || 1,
-         };
-         const sent = wsSend(authMsg);
-         _wsDiag('auth 發送結果: ' + (sent ? '成功' : '失敗(ws未就緒)') + ' 訊息長度=' + JSON.stringify(authMsg).length);
+         });
          console.log('[GAME-WS] 已發送 auth, token 長度=', authToken ? authToken.length : 0);
        };
 
        ws.onerror = (event) => {
-         _wsDiag('❌ onerror 觸發: type=' + event.type);
          console.error('[GAME-WS] ❌ onerror 觸發');
          console.error('[GAME-WS]   event.type=', event.type);
          console.error('[GAME-WS]   event.target.url=', event.target?.url || 'n/a');
@@ -691,7 +652,6 @@
       };
 
        ws.onclose = (event) => {
-         _wsDiag('⚠️ onclose: code=' + event.code + ' reason=' + (event.reason || '空') + ' wasClean=' + event.wasClean);
          console.warn('[GAME-WS] ⚠️ onclose 觸發');
          console.warn('[GAME-WS]   code=', event.code);
          console.warn('[GAME-WS]   reason=', event.reason || '(空)');
@@ -725,9 +685,8 @@
 
       ws.onmessage = (ev) => {
         let msg;
-        try { msg = JSON.parse(ev.data); } catch(e) { _wsDiag('❌ onmessage JSON解析失敗: ' + e.message); return; }
-        if (!msg || !msg.type) { _wsDiag('❌ onmessage 無type欄位'); return; }
-        _wsDiag('📥 收到訊息: type=' + msg.type + ' 長度=' + (ev.data ? ev.data.length : 0));
+        try { msg = JSON.parse(ev.data); } catch(e) { return; }
+        if (!msg || !msg.type) return;
 
          if (msg.type === 'auth_ok') {
            if (!resolved) {
@@ -1156,8 +1115,6 @@
     for (const id of remotePlayers.keys()) {
       if (!seen.has(id)) removeRemotePlayer(id);
     }
-    // v3.1.4：更新在線人數顯示（包含自己）
-    try { _setOnlineCount(players.length + 1); } catch(e) {}
   }
 
   // v2.8.0：取得附近玩家數（給 UI 顯示「附近玩家:N」）
@@ -1261,7 +1218,7 @@
 
   // ========== 渲染（使用現有 SPRITE 圖資、8幀動畫） ==========
   function getSpriteForRemote(p) {
-    if (typeof window.SPRITE === 'undefined') return null;
+    if (typeof SPRITE === 'undefined') return null;
     if (p.transformId) {
       const key = String(p.transformId).replace(/^tf_/, '').replace(/^t_/, '');
       if (SPRITE[key]) return SPRITE[key];
@@ -1269,6 +1226,82 @@
     }
     if (SPRITE[p.classId]) return SPRITE[p.classId];
     return SPRITE.warrior || null;
+  }
+
+  // v4.4.0：伺服器端AI渲染
+  function addOrUpdateServerAI(aiData) {
+    try {
+      const aiId = aiData.id;
+      let ai = serverAIs.get(aiId);
+      if (!ai) {
+        ai = {
+          id: aiId,
+          name: aiData.name || 'Monster',
+          level: aiData.level || 1,
+          x: aiData.x || 0,
+          y: aiData.y || 0,
+          hp: aiData.hp || 100,
+          maxHp: aiData.maxHp || 100,
+          nation: aiData.nation || '',
+          state: aiData.state || 'idle',
+          classId: aiData.classId || 'enemy',
+          el: null,
+          _hpFill: null,
+        };
+        buildServerAIDOM(ai);
+        serverAIs.set(aiId, ai);
+      }
+      ai.x = aiData.x != null ? aiData.x : ai.x;
+      ai.y = aiData.y != null ? aiData.y : ai.y;
+      ai.hp = aiData.hp != null ? aiData.hp : ai.hp;
+      ai.maxHp = aiData.maxHp != null ? aiData.maxHp : ai.maxHp;
+      ai.name = aiData.name || ai.name;
+      ai.level = aiData.level || ai.level;
+      ai.state = aiData.state || ai.state;
+      if (ai._hpFill && ai.maxHp) {
+        ai._hpFill.style.width = Math.max(0, (ai.hp / ai.maxHp) * 100) + '%';
+      }
+    } catch(e) { console.error('[ServerAI] addOrUpdate error:', e); }
+  }
+  
+  function buildServerAIDOM(ai) {
+    if (typeof document === 'undefined') return;
+    const worldLayer = document.getElementById('world-layer');
+    if (!worldLayer) return;
+    try {
+      const elDiv = document.createElement('div');
+      elDiv.className = 'world-unit ai-player mp-server-ai idle';
+      elDiv.dataset.id = 'mp_ai_' + ai.id.replace(/:/g, '_');
+      elDiv.dataset.remoteId = ai.id;
+      
+      const s = (typeof SPRITE !== 'undefined') ? (SPRITE[ai.classId] || SPRITE.enemy || SPRITE.warrior || null) : null;
+      const isImg = !!(s && s.useImg);
+      const glow = s?.glow || '#ff6060';
+      const filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
+      const w = 50, h = 56;
+      
+      elDiv.innerHTML = `
+        <div class="unit-info">
+          <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:#ff5050"></div></div>
+          <div class="unit-name" style="color:#ff8080;font-size:9px">${escapeHtml(ai.name)} Lv.${ai.level}</div>
+        </div>
+        <div class="unit-sprite-wrap" style="width:${w}px;height:${h}px;">
+          ${isImg ? `<img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${filter}" alt="" loading="lazy"/>` : `<div class="unit-sprite-emoji" style="font-size:36px;">👹</div>`}
+        </div>
+        <div class="unit-shadow"></div>
+      `;
+      
+      worldLayer.appendChild(elDiv);
+      ai.el = elDiv;
+      ai._hpFill = elDiv.querySelector('.unit-hp-fill');
+      
+      if (typeof positionUnit === 'function') {
+        try { positionUnit(elDiv, ai.x, ai.y, 'enemy'); } catch(e) {}
+      } else {
+        elDiv.style.left = (ai.x - w/2) + 'px';
+        elDiv.style.bottom = ai.y + 'px';
+      }
+    } catch(e) { console.error('[ServerAI] buildDOM error:', e); }
   }
 
   function buildRemotePlayerDOM(p) {
@@ -1288,7 +1321,7 @@
     const filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
 
     // 國家敵我判定
-    const myNation = (typeof window.GS !== 'undefined') ? (GS.nation || null) : null;
+    const myNation = (typeof GS !== 'undefined') ? (GS.nation || null) : null;
     const isEnemy = p.nation && myNation && p.nation !== myNation;
     if (isEnemy) elDiv.classList.add('enemy-ai');
 
@@ -1297,7 +1330,7 @@
 
     // 國旗
     let flagImg = '';
-    if (typeof window.NATIONS !== 'undefined' && typeof window.safeFlagImg === 'function' && p.nation) {
+    if (typeof NATIONS !== 'undefined' && typeof safeFlagImg === 'function' && p.nation) {
       const n = NATIONS.find(nn => nn.id === p.nation);
       if (n) flagImg = safeFlagImg(p.nation, 12);
     }
@@ -1306,7 +1339,7 @@
     const coverMode = s?.coverMode ? 'sprite-cover-mode' : '';
     const multiFrame = s?.multiFrame ? 'sprite-multi-frame' : '';
 
-    const onErrorStr = (typeof window.handleImgError === 'function')
+    const onErrorStr = (typeof handleImgError === 'function')
       ? 'handleImgError(this)'
       : '';
 
@@ -1340,10 +1373,10 @@
     worldLayer.appendChild(elDiv);
     p.el = elDiv;
 
-    if (typeof window.initUnitAnimState === 'function') {
+    if (typeof initUnitAnimState === 'function') {
       try { initUnitAnimState('mp_' + p.id); } catch (e) { /* ignore */ }
     }
-    if (typeof window.positionUnit === 'function') {
+    if (typeof positionUnit === 'function') {
       try { positionUnit(elDiv, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
     } else {
       elDiv.style.left = (p.x - w / 2) + 'px';
@@ -1363,7 +1396,7 @@
 
   // ========== 每幀內插 ==========
   function updateRemotePlayers(dt) {
-    if (remotePlayers.size === 0) return;
+    if (remotePlayers.size === 0 && serverAIs.size === 0) return;
     const lerpFactor = 1 - Math.pow(0.001, dt);
 
     for (const p of remotePlayers.values()) {
@@ -1396,102 +1429,66 @@
         }
       }
 
-      if (typeof window.positionUnit === 'function') {
+      if (typeof positionUnit === 'function') {
         try { positionUnit(p.el, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
       } else {
         p.el.style.left = (p.x - 32) + 'px';
         p.el.style.bottom = p.y + 'px';
       }
 
-      if (typeof window.applyUnitAnimFrame === 'function') {
+      if (typeof applyUnitAnimFrame === 'function') {
         try {
           const state = p._wasWalking ? 'walking' : 'idle';
           applyUnitAnimFrame(p.el, 'mp_' + p.id, state);
         } catch (e) { /* ignore */ }
       }
     }
-  }
-
-  // v3.1.4：遊戲畫面左上角 網路狀態標籤（增大字體、顯示在線人數、點擊查看診斷）
-  let _wsBadgeEl = null;
-  let _wsBadgeState = 'offline';
-  let _wsBadgeLabel = '離線';
-  let _wsOnlineCount = 0;
-  let _wsTransport = '?';
-  function _ensureWsBadge() {
-    if (_wsBadgeEl) return;
-    try {
-      const badge = document.createElement('div');
-      badge.id = 'ws-status-badge';
-      badge.style.cssText = 'position:fixed;top:8px;left:8px;z-index:999999;padding:5px 10px;font-size:13px;font-weight:600;font-family:monospace;border-radius:6px;cursor:pointer;opacity:0.92;box-shadow:0 2px 8px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.15);user-select:none;';
-      badge.textContent = '網路:離線 0人';
-      badge.style.background = '#333';
-      badge.style.color = '#aaa';
-      badge.title = '點擊查看網路診斷';
-      badge.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _showNetworkDiagnostics();
-      });
-      document.body.appendChild(badge);
-      _wsBadgeEl = badge;
-    } catch(e) {}
-  }
-  function _updateWsBadge(state, label) {
-    _ensureWsBadge();
-    if (!_wsBadgeEl) return;
-    _wsBadgeState = state;
-    _wsBadgeLabel = label || state;
-    const transport = useWebSocket ? 'WS' : (pollRunning ? 'LP' : '?');
-    _wsTransport = transport;
-    const count = _wsOnlineCount;
-    const stateLabel = {
-      online: '在線', connecting: '連線中', error: '錯誤',
-      offline: '離線', reconnecting: '重連中',
-    }[state] || state;
-    _wsBadgeEl.textContent = transport + ':' + stateLabel + ' ' + count + '人';
-    const colors = {
-      online:    { bg: '#1a4d2e', color: '#4ecdc4' },
-      connecting:{ bg: '#3d3d1a', color: '#ffd93d' },
-      error:     { bg: '#4d1a1a', color: '#ff6b6b' },
-      offline:   { bg: '#333',    color: '#aaa' },
-      reconnecting: { bg: '#3d3d1a', color: '#ffd93d' },
-    };
-    const c = colors[state] || colors.offline;
-    _wsBadgeEl.style.background = c.bg;
-    _wsBadgeEl.style.color = c.color;
-  }
-  function _setOnlineCount(n) {
-    _wsOnlineCount = n || 0;
-    _updateWsBadge(_wsBadgeState, _wsBadgeLabel);
-  }
-  function _showNetworkDiagnostics() {
-    try {
-      const logText = _wsDiagLog.length > 0 ? _wsDiagLog.slice(-25).join('\n') : '(尚無日誌)';
-      const info = [
-        '===== 網路診斷 =====',
-        '狀態: ' + _wsBadgeLabel,
-        '傳輸: ' + _wsTransport,
-        '在線人數: ' + _wsOnlineCount,
-        'WS已連線: ' + (wsConnected ? '是' : '否'),
-        'WS使用中: ' + (useWebSocket ? '是' : '否'),
-        'Long-Poll使用中: ' + (pollRunning ? '是' : '否'),
-        '伺服器URL: ' + (serverUrl || '未設定'),
-        'Token長度: ' + (authToken ? authToken.length : 0),
-        'Token前15: ' + (authToken ? authToken.substring(0,15) : '空'),
-        'Token格式: ' + (authToken ? (authToken.split('.').length + '段, 各段長度=' + authToken.split('.').map(s=>s.length).join(',')) : '空'),
-        'WS失敗原因: ' + (_wsFailureReason || '無'),
-        '當前地圖: ' + (currentMapId || '無'),
-        '我的PlayerID: ' + (myPlayerId || '無'),
-        '遠端玩家數: ' + (remotePlayers ? remotePlayers.size : 0),
-        '',
-        '===== WS 連線日誌（最新25筆）=====',
-        logText,
-      ].join('\n');
-      alert(info);
-    } catch(e) {
-      alert('網路診斷錯誤: ' + e.message);
+    
+    // v4.4.0：更新伺服器AI位置
+    for (const ai of serverAIs.values()) {
+      if (!ai.el) continue;
+      if (typeof positionUnit === 'function') {
+        try { positionUnit(ai.el, ai.x, ai.y, 'enemy'); } catch(e) {}
+      } else {
+        ai.el.style.left = (ai.x - 25) + 'px';
+        ai.el.style.bottom = ai.y + 'px';
+      }
+      if (ai._hpFill && ai.maxHp) {
+        ai._hpFill.style.width = Math.max(0, (ai.hp / ai.maxHp) * 100) + '%';
+      }
     }
   }
+
+   // v3.1.2：遊戲畫面左上角 WS 狀態標籤（肉眼可見，不只在 console）
+   let _wsBadgeEl = null;
+   function _ensureWsBadge() {
+     if (_wsBadgeEl) return;
+     try {
+       const badge = document.createElement('div');
+       badge.id = 'ws-status-badge';
+       badge.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99999;padding:2px 6px;font-size:10px;font-family:monospace;border-radius:3px;pointer-events:none;opacity:0.85;';
+       badge.textContent = 'WS離線';
+       badge.style.background = '#333';
+       badge.style.color = '#aaa';
+       document.body.appendChild(badge);
+       _wsBadgeEl = badge;
+     } catch(e) {}
+   }
+   function _updateWsBadge(state, label) {
+     _ensureWsBadge();
+     if (!_wsBadgeEl) return;
+     _wsBadgeEl.textContent = label || 'WS';
+     const colors = {
+       online:    { bg: '#1a4d2e', color: '#4ecdc4' },
+       connecting:{ bg: '#3d3d1a', color: '#ffd93d' },
+       error:     { bg: '#4d1a1a', color: '#ff6b6b' },
+       offline:   { bg: '#333',    color: '#aaa' },
+       reconnecting: { bg: '#3d3d1a', color: '#ffd93d' },
+     };
+     const c = colors[state] || colors.offline;
+     _wsBadgeEl.style.background = c.bg;
+     _wsBadgeEl.style.color = c.color;
+   }
 
    // ========== 暴露到全域 ==========
   window.MultiplayerClient = MultiplayerClient;

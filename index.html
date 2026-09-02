@@ -7,7 +7,7 @@
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="creative-medium" content="interactive-prototype" />
-  <title>君主之刃 v3.1.3</title>
+  <title>君主之刃 v3.1.2</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1a0f05" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -15,15 +15,15 @@
   <meta name="apple-mobile-web-app-title" content="君主之刃" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="apple-touch-icon" href="assets/11_ui/apple-touch-icon.jpg" />
-  <link rel="stylesheet" href="styles.css?v=3.3.0" />
-  <link rel="stylesheet" href="auth.css?v=3.3.0" />
+  <link rel="stylesheet" href="styles.css?v=4.4.0" />
+  <link rel="stylesheet" href="auth.css?v=4.4.0" />
   <!-- v2.5.6：移除外部字體CDN，使用系統字型確保離線可用 -->
   <!-- v2.5.9：紫變7隻+紅變7隻真8幀落地，補齊attack_3幀、eightFrame標誌 -->
-  <script src="lang.js?v=3.3.0"></script>
+  <script src="lang.js?v=4.4.0"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
-  <script src="mp-v401.js?v=4.3.11" defer></script>
-  <script src="bug-report.js?v=3.3.0" defer></script>
-  <script src="auth.js?v=3.3.0" defer></script>
+  <script src="multiplayer.js?v=4.4.0" defer></script>
+  <script src="bug-report.js?v=4.4.0" defer></script>
+  <script src="auth.js?v=4.4.0" defer></script>
   <style>
     /* ========== 首屏骨架（JS 載入前就顯示，杜絕空白） ========== */
     .splash-screen {
@@ -188,126 +188,6 @@
       100% { transform: translateX(-100%); }
     }
   </style>
-<style>
-/* v4.2.3：world-unit基礎樣式（確保遠端玩家可見） */
-.world-unit {
-  position: absolute !important;
-  width: 64px;
-  height: 80px;
-  pointer-events: none;
-  transform: translateZ(0);
-}
-.world-unit.remote-player,
-.world-unit.mp-player {
-  z-index: 20 !important;
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-}
-.world-unit.remote-player .unit-info,
-.world-unit.mp-player .unit-info {
-  position: absolute;
-  top: -20px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
-  white-space: nowrap;
-  z-index: 21;
-}
-.world-unit.remote-player .unit-sprite-wrap,
-.world-unit.mp-player .unit-sprite-wrap {
-  position: relative;
-  width: 64px;
-  height: 80px;
-}
-.world-unit.remote-player .unit-sprite-img,
-.world-unit.mp-player .unit-sprite-img {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 64px;
-  max-height: 80px;
-  object-fit: contain;
-}
-/* v4.2.4：確保遠端玩家不會被offscreen隱藏 */
-.world-unit.remote-player.offscreen,
-.world-unit.mp-player.offscreen {
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-}
-/* v4.2.9：簡單遠端玩家樣式 */
-.mp-remote-player-simple {
-  position: absolute !important;
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  z-index: 99999 !important;
-  pointer-events: none !important;
-}
-
-/* v4.2.0：卡牌圓角處理 */
-.char-card, .char-card-empty, .nation-card, .item-slot, .skill-slot,
-.inventory-item, .equipment-slot, .quest-card, .shop-item {
-  border-radius: 12px !important;
-  overflow: hidden;
-}
-.char-card-portrait, .char-card-portrait-inner {
-  border-radius: 50% !important;
-}
-.char-card-portrait-ring {
-  border-radius: 50% !important;
-}
-/* 所有面板/彈窗圓角 */
-.modal, .panel, .dialog, .popup, .tooltip, .dropdown {
-  border-radius: 10px !important;
-}
-/* 按鈕圓角 */
-button, .btn, .char-card-enter, .char-card-delete {
-  border-radius: 8px !important;
-}
-/* 輸入框圓角 */
-input, select, textarea {
-  border-radius: 6px !important;
-}
-
-/* v4.2.0：精靈圖去背（CSS方式，不改圖）
-   白底圖用 multiply，黑底圖用 screen，自動偵測 */
-.unit-sprite-img, .sprite-frame-idle, .sprite-frame-walk, .sprite-frame-attack,
-.char-card-class-icon img, .skill-icon img, .item-icon img, .avatar-img {
-  mix-blend-mode: multiply; /* 去除白底 */
-  background: transparent !important;
-}
-/* 黑底圖覆蓋為screen */
-.sprite-dark-bg {
-  mix-blend-mode: screen !important;
-}
-/* 確保精靈圖容器透明 */
-.unit-sprite-wrap, .sprite-unit, .char-card-portrait-inner {
-  background: transparent !important;
-}
-.mp-remote-player.mp-attacking {
-  transform: scale(1.2) !important;
-  filter: brightness(1.5) drop-shadow(0 0 8px #ff0);
-}
-.mp-remote-player .mp-attack-effect {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 60px;
-  height: 60px;
-  margin: -30px 0 0 -30px;
-  border: 3px solid #ff0;
-  border-radius: 50%;
-  opacity: 0;
-  animation: mpAttackPulse 0.4s ease-out;
-}
-@keyframes mpAttackPulse {
-  0% { transform: scale(0.5); opacity: 1; }
-  100% { transform: scale(1.5); opacity: 0; }
-}
-</style>
 </head>
 <body>
   <!-- 首屏骨架：JS 載入前就顯示君主之刃介面，杜絕空白或容器骨架 -->
@@ -316,7 +196,7 @@ input, select, textarea {
     <div class="splash-title">君主之刃</div>
     <div class="splash-subtitle">LINEAGE OF SWORDS</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">v4.3.11</div>
+    <div class="splash-version">v4.4.0 v2.5.9</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->
@@ -638,7 +518,7 @@ input, select, textarea {
         </button>
       </div>
       <div class="side-menu-footer">
-        <div class="export-tip">君主之刃 v3.1.3</div>
+        <div class="export-tip">君主之刃 v3.1.2</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -1051,12 +931,12 @@ input, select, textarea {
     </div>
   </div>
 
-  <script src="audio.js?v=3.3.0"></script>
-  <script src="audio-manager.js?v=3.3.0"></script>
-  <script src="iso-map.js?v=3.3.0"></script>
-  <script src="equip-icons.js?v=3.3.0"></script>
-  <script src="portrait-generator.js?v=3.3.0"></script>
-  <script src="game.js?v=3.3.0"></script>
+  <script src="audio.js?v=4.4.0"></script>
+  <script src="audio-manager.js?v=4.4.0"></script>
+  <script src="iso-map.js?v=4.4.0"></script>
+  <script src="equip-icons.js?v=4.4.0"></script>
+  <script src="portrait-generator.js?v=4.4.0"></script>
+  <script src="game.js?v=4.4.0"></script>
   <script>
     // 骨架屏淡出：DOM 就緒後立即隱藏，避免玩家看到空白或容器骨架
     (function() {
