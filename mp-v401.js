@@ -62,6 +62,8 @@
   }
 
   const remotePlayers = new Map();
+  // v4.3.9：伺服器端AI（Server Authoritative，客戶端只渲染）
+  const serverAIs = new Map();
   // v4.1.0：WS ONLY — 已移除所有 Long-Poll 相關變量
   let lastUpdateTime = 0;
   const UPDATE_THROTTLE = 100; // v2.7.5：50ms → 100ms（10Hz），降低廣播頻寬
@@ -355,7 +357,7 @@
   }
   // v3.2.1：大訊息自動分片（chunkSize=50，確保每個chunk <100位元組）
   function wsSend(msg) {
-    _wsDiag('[v4.3.7] wsSend called type=' + (msg.type||msg.t||'?'));
+    _wsDiag('[v4.3.11] wsSend called type=' + (msg.type||msg.t||'?'));
     if (!ws || ws.readyState !== 1) return false;
     try {
       const raw = JSON.stringify(msg);
@@ -398,19 +400,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.3.7] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.3.11] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.3.7] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.3.11] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.3.7] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.3.11] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -462,7 +464,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.3.7] tryWebSocket 開始');
+     _wsDiag('[v4.3.11] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -516,15 +518,15 @@
 
        ws.onopen = () => {
          _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
-         try { _updateWsBadge('connecting', 'WS驗證中'); } catch(e) { _wsDiag('[v4.3.7] badge錯誤: ' + e.message); }
+         try { _updateWsBadge('connecting', 'WS驗證中'); } catch(e) { _wsDiag('[v4.3.11] badge錯誤: ' + e.message); }
          try {
            let wsSessionId = '';
            try { wsSessionId = localStorage.getItem('mmo_ws_session_id') || ''; } catch(e) {}
-           _wsDiag('[v4.3.7] wsSessionId=' + (wsSessionId ? '有' : '無'));
+           _wsDiag('[v4.3.11] wsSessionId=' + (wsSessionId ? '有' : '無'));
            if (wsSessionId) {
              const authMsg = { type: 'auth', wsSessionId: wsSessionId, name: 'Player' };
              const msgLen = JSON.stringify(authMsg).length;
-             _wsDiag('[v4.3.7] wsSessionId認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險'));
+             _wsDiag('[v4.3.11] wsSessionId認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險'));
              wsSend(authMsg);
              try { localStorage.removeItem('mmo_ws_session_id'); } catch(e) {}
            } else {
@@ -532,11 +534,11 @@
              const shortToken = authToken ? authToken.substring(0, 30) : '';
              const authMsg = { type: 'auth', shortToken: shortToken, account: account, name: 'Player' };
              const msgLen = JSON.stringify(authMsg).length;
-             _wsDiag('[v4.3.7] 短token認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險') + ' account=' + account);
+             _wsDiag('[v4.3.11] 短token認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險') + ' account=' + account);
              wsSend(authMsg);
            }
          } catch(e) {
-           _wsDiag('[v4.3.7] auth發送異常: ' + e.message);
+           _wsDiag('[v4.3.11] auth發送異常: ' + e.message);
            try { wsSend({ type: 'auth', token: authToken, name: 'Player' }); } catch(e2) {}
          }
 
@@ -625,20 +627,20 @@
              const py = (typeof GS !== 'undefined' && GS?.player?.y != null) ? GS.player.y : 400;
              const joinMsg = { type: 'join_map', s: joinServerId, m: joinMapId, p: joinPlayerId, x: px, y: py };
              const joinLen = JSON.stringify(joinMsg).length;
-             _wsDiag('[v4.3.7] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
+             _wsDiag('[v4.3.11] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
              console.log('[GAME-WS] auth_ok 後發送 join_map, len=' + joinLen + ', mapId=' + joinMapId + ', msg=' + JSON.stringify(joinMsg));
              try {
                const joinSent = wsSend(joinMsg);
                console.log('[GAME-WS] join_map 發送結果: ' + (joinSent ? '成功' : '失敗'));
-               _wsDiag('[v4.3.7] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
+               _wsDiag('[v4.3.11] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
              } catch(e) {
                console.error('[GAME-WS] join_map 發送異常:', e);
-               _wsDiag('[v4.3.7] join_map發送異常: ' + e.message);
+               _wsDiag('[v4.3.11] join_map發送異常: ' + e.message);
              }
              resolve(msg);
              } catch(e) {
                console.error('[GAME-WS] ❌ auth_ok處理異常:', e);
-               _wsDiag('[v4.3.7] auth_ok處理異常: ' + e.message);
+               _wsDiag('[v4.3.11] auth_ok處理異常: ' + e.message);
                reject(e);
              }
            }
@@ -650,7 +652,7 @@
              useWebSocket = true;
              wsConnected = true;
              _updateWsBadge('online', 'WS在線');
-             _wsDiag('[v4.3.7] 收到join_map_ok，WS模式正式啟用');
+             _wsDiag('[v4.3.11] 收到join_map_ok，WS模式正式啟用');
              console.log('[GAME-WS] 收到 join_map_ok，WebSocket 模式正式啟用');
              // v4.1.3：連線成功後啟動閒置檢測
              if (typeof _resetIdleTimer === 'function') _resetIdleTimer();
@@ -684,17 +686,17 @@
                if (typeof _setOnlineCount === 'function') {
                  _setOnlineCount(playerEntities.length + 1);
                }
-               _wsDiag('[v4.3.7] join_map_ok處理完成，在線人數=' + (playerEntities.length + 1));
+               _wsDiag('[v4.3.11] join_map_ok處理完成，在線人數=' + (playerEntities.length + 1));
              } else {
                // 沒有entities，至少顯示自己在線
                if (typeof _setOnlineCount === 'function') {
                  _setOnlineCount(1);
                }
-               _wsDiag('[v4.3.7] join_map_ok無entities，在線人數=1(自己)');
+               _wsDiag('[v4.3.11] join_map_ok無entities，在線人數=1(自己)');
              }
            } catch(e) {
              console.error('[GAME-WS] 處理join_map_ok entities出錯:', e);
-             _wsDiag('[v4.3.7] join_map_ok entities處理出錯: ' + e.message);
+             _wsDiag('[v4.3.11] join_map_ok entities處理出錯: ' + e.message);
            }
            return;
          } else if (msg.type === 'auth_fail') {
@@ -901,7 +903,20 @@
           if (msg.entities && Array.isArray(msg.entities)) {
             console.log('[GAME-WS] aoi_update entities數=' + msg.entities.length + ' 內容=' + JSON.stringify(msg.entities).substring(0,200));
             const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0 && !String(e.id).startsWith('ai:'))));
-            console.log('[GAME-WS] aoi_update 過濾後玩家數=' + playerEntities.length + ' myPlayerId=' + myPlayerId);
+            const aiEntities = msg.entities.filter(e => e && e.id && String(e.id).startsWith('ai:'));
+            console.log('[GAME-WS] aoi_update 玩家數=' + playerEntities.length + ' AI數=' + aiEntities.length + ' myPlayerId=' + myPlayerId);
+            // v4.3.9：渲染伺服器端AI
+            aiEntities.forEach(ai => {
+              addOrUpdateServerAI(ai);
+            });
+            // 移除不在AOI範圍內的AI
+            const visibleAiIds = new Set(aiEntities.map(a => a.id));
+            for (const [aiId, ai] of serverAIs) {
+              if (!visibleAiIds.has(aiId)) {
+                if (ai.el && ai.el.parentNode) ai.el.parentNode.removeChild(ai.el);
+                serverAIs.delete(aiId);
+              }
+            }
             // 更新remotePlayers
             playerEntities.forEach(p => {
               const pid = p.playerId || p.id;
@@ -1305,46 +1320,182 @@
     return SPRITE.warrior || null;
   }
 
+  // v4.3.9：伺服器端AI渲染
+  function addOrUpdateServerAI(aiData) {
+    try {
+      var aiId = aiData.id;
+      var ai = serverAIs.get(aiId);
+      if (!ai) {
+        ai = {
+          id: aiId,
+          name: aiData.name || 'Monster',
+          level: aiData.level || 1,
+          x: aiData.x || 0,
+          y: aiData.y || 0,
+          hp: aiData.hp || 100,
+          maxHp: aiData.maxHp || 100,
+          nation: aiData.nation || '',
+          state: aiData.state || 'idle',
+          el: null,
+          _hpFill: null,
+        };
+        buildServerAIDOM(ai);
+        serverAIs.set(aiId, ai);
+        _addDebugLog('[MP-AI] 新增伺服器AI id=' + aiId + ' name=' + ai.name);
+      }
+      ai.x = aiData.x != null ? aiData.x : ai.x;
+      ai.y = aiData.y != null ? aiData.y : ai.y;
+      ai.hp = aiData.hp != null ? aiData.hp : ai.hp;
+      ai.maxHp = aiData.maxHp != null ? aiData.maxHp : ai.maxHp;
+      ai.name = aiData.name || ai.name;
+      ai.level = aiData.level || ai.level;
+      ai.state = aiData.state || ai.state;
+      if (ai._hpFill && ai.maxHp) {
+        ai._hpFill.style.width = Math.max(0, (ai.hp / ai.maxHp) * 100) + '%';
+      }
+    } catch(e) { _addDebugLog('[MP-AI] addOrUpdate ERROR: ' + e.message); }
+  }
+  
+  function buildServerAIDOM(ai) {
+    try {
+      var elDiv = document.createElement('div');
+      elDiv.id = 'mp_ai_' + ai.id.replace(/:/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+      elDiv.className = 'mp-server-ai';
+      elDiv.style.cssText = 'position:fixed !important; width:50px !important; height:56px !important; z-index:99998 !important; display:block !important; visibility:visible !important; opacity:1 !important; pointer-events:none !important;';
+      
+      // 名字
+      var nameEl = document.createElement('div');
+      nameEl.style.cssText = 'position:absolute;top:-16px;left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap;z-index:2;';
+      nameEl.innerHTML = '<div style="width:46px;height:3px;background:#333;border-radius:2px;margin:0 auto;"><div class="ai-hp-fill" style="width:100%;height:100%;background:#ff4444;border-radius:2px;"></div></div><div style="color:#ff6666;font-size:9px;font-weight:bold;text-shadow:1px 1px 2px #000;">' + ai.name + ' Lv.' + ai.level + '</div>';
+      elDiv.appendChild(nameEl);
+      ai._hpFill = nameEl.querySelector('.ai-hp-fill');
+      
+      // 精靈圖包裹
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative;width:50px;height:56px;';
+      
+      // 嘗試使用SPRITE精靈圖（AI/怪物）
+      var aiSprite = null;
+      try {
+        if (typeof SPRITE !== 'undefined') {
+          aiSprite = SPRITE[ai.classId] || SPRITE.enemy || SPRITE.warrior || null;
+        }
+      } catch(e) {}
+      
+      if (aiSprite && aiSprite.useImg && aiSprite.idle) {
+        var img = document.createElement('img');
+        img.src = aiSprite.idle;
+        img.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);max-width:50px;max-height:56px;object-fit:contain;filter:drop-shadow(0 0 3px #ff6060) drop-shadow(0 2px 3px rgba(0,0,0,0.8));';
+        img.alt = '';
+        img.loading = 'lazy';
+        img.onerror = function() {
+          // v4.3.11：先嘗試把.jpg換成.png
+          if (this.src && this.src.indexOf('.jpg') !== -1 && !this.dataset.pngTried) {
+            this.dataset.pngTried = '1';
+            this.src = this.src.replace(/\.jpg(\?|$)/, '.png$1');
+            return;
+          }
+          this.style.display = 'none';
+          var emoji = document.createElement('div');
+          emoji.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-size:32px;';
+          emoji.textContent = '👹';
+          wrap.appendChild(emoji);
+        };
+        wrap.appendChild(img);
+      } else {
+        var emoji = document.createElement('div');
+        emoji.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-size:32px;';
+        emoji.textContent = '👹';
+        wrap.appendChild(emoji);
+      }
+      
+      // 陰影
+      var shadow = document.createElement('div');
+      shadow.style.cssText = 'position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:24px;height:6px;background:rgba(0,0,0,0.4);border-radius:50%;';
+      wrap.appendChild(shadow);
+      
+      elDiv.appendChild(wrap);
+      document.body.appendChild(elDiv);
+      ai.el = elDiv;
+    } catch(e) { _addDebugLog('[MP-AI] buildDOM ERROR: ' + e.message); }
+  }
+
   function buildRemotePlayerDOM(p) {
     _addDebugLog('[MP-RENDER] buildRemotePlayerDOM id=' + p.id + ' name=' + (p.name||'?'));
     if (typeof document === 'undefined') return;
     try {
       var elDiv = document.createElement('div');
       elDiv.id = 'mp_fixed_' + p.id.replace(/:/g, '_');
-      elDiv.className = 'mp-fixed-remote-player';
-      elDiv.style.cssText = 'position:fixed !important; width:48px !important; height:64px !important; z-index:99999 !important; display:block !important; visibility:visible !important; opacity:1 !important; pointer-events:none !important; transition:transform 0.1s;';
-    elDiv.classList.add('mp-remote-player');
+      elDiv.className = 'mp-fixed-remote-player mp-remote-player';
+      elDiv.style.cssText = 'position:fixed !important; width:64px !important; height:80px !important; z-index:99999 !important; display:block !important; visibility:visible !important; opacity:1 !important; pointer-events:none !important; transition:transform 0.1s;';
       
-      // 背景色：根據國家區分
-      var bgColor = '#4a90d9'; // 藍色=自己人
-      var myNation = (typeof window.GS !== 'undefined') ? (GS.nation || null) : null;
-      if (p.nation && myNation && p.nation !== myNation) bgColor = '#d94a4a'; // 紅色=敵人
-      
-      // 角色方塊
-      var body = document.createElement('div');
-      body.style.cssText = 'width:100%;height:100%;background:linear-gradient(180deg,' + bgColor + ',' + bgColor + 'dd);border:2px solid #fff;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
-      body.textContent = '⚔';
-      body.style.fontSize = '24px';
-      body.style.color = '#fff';
-      elDiv.appendChild(body);
+      // 國家判斷
+      var myNation = null;
+      try { if (typeof GS !== 'undefined') myNation = GS.nation || null; } catch(e) {}
+      var isEnemy = p.nation && myNation && p.nation !== myNation;
       
       // 名字標籤
-      var nameDiv = document.createElement('div');
-      nameDiv.style.cssText = 'position:absolute;top:-16px;left:50%;transform:translateX(-50%);color:#fff;font-size:11px;font-weight:bold;text-shadow:1px 1px 2px #000;white-space:nowrap;';
-      nameDiv.textContent = p.name || 'Player';
-      elDiv.appendChild(nameDiv);
+      var nameEl = document.createElement('div');
+      nameEl.className = 'unit-info';
+      nameEl.style.cssText = 'position:absolute;top:-20px;left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap;z-index:2;';
+      nameEl.innerHTML = '<div class="unit-hp-bar" style="width:60px;height:4px;background:#333;border-radius:2px;margin:0 auto;"><div class="unit-hp-fill" style="width:100%;height:100%;background:' + (isEnemy ? '#ff5050' : '#50c8ff') + ';border-radius:2px;"></div></div><div class="unit-name" style="color:' + (isEnemy ? '#ff8080' : '#80d0ff') + ';font-size:10px;text-shadow:1px 1px 2px #000;">' + (p.name || 'Player') + '</div>';
+      elDiv.appendChild(nameEl);
+      p._hpFill = nameEl.querySelector('.unit-hp-fill');
       
-      // 血條
-      var hpBar = document.createElement('div');
-      hpBar.style.cssText = 'position:absolute;bottom:-6px;left:0;width:100%;height:4px;background:#333;border-radius:2px;';
-      var hpFill = document.createElement('div');
-      hpFill.style.cssText = 'width:100%;height:100%;background:#4ade80;border-radius:2px;';
-      hpBar.appendChild(hpFill);
-      elDiv.appendChild(hpBar);
+      // 精靈圖包裹
+      var wrap = document.createElement('div');
+      wrap.className = 'unit-sprite-wrap';
+      wrap.style.cssText = 'position:relative;width:64px;height:80px;';
       
+      // 嘗試使用SPRITE精靈圖
+      var spriteData = null;
+      try {
+        if (typeof SPRITE !== 'undefined') {
+          spriteData = SPRITE[p.classId] || SPRITE.warrior || SPRITE[p.transformId] || null;
+        }
+      } catch(e) {}
+      
+      if (spriteData && spriteData.useImg && spriteData.idle) {
+        var img = document.createElement('img');
+        img.className = 'unit-sprite-img sprite-frame-idle';
+        img.src = spriteData.idle;
+        img.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);max-width:64px;max-height:80px;object-fit:contain;filter:drop-shadow(0 0 4px #ffe090) drop-shadow(0 2px 3px rgba(0,0,0,0.8));';
+        img.alt = '';
+        img.loading = 'lazy';
+        img.onerror = function() {
+          // v4.3.11：先嘗試把.jpg換成.png（assetUrl預設返回.jpg，但精靈圖可能是.png）
+          if (this.src && this.src.indexOf('.jpg') !== -1 && !this.dataset.pngTried) {
+            this.dataset.pngTried = '1';
+            this.src = this.src.replace(/\.jpg(\?|$)/, '.png$1');
+            _addDebugLog('[MP-RENDER] jpg失敗，嘗試png: ' + this.src);
+            return;
+          }
+          this.style.display = 'none';
+          var emoji = document.createElement('div');
+          emoji.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-size:40px;';
+          emoji.textContent = '⚔';
+          wrap.appendChild(emoji);
+          _addDebugLog('[MP-RENDER] 精靈圖加載失敗，使用emoji備用');
+        };
+        wrap.appendChild(img);
+        _addDebugLog('[MP-RENDER] 使用精靈圖: ' + spriteData.idle);
+      } else {
+        var emoji = document.createElement('div');
+        emoji.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-size:40px;';
+        emoji.textContent = isEnemy ? '⚔' : '🛡';
+        wrap.appendChild(emoji);
+        _addDebugLog('[MP-RENDER] SPRITE不可用，使用emoji備用');
+      }
+      
+      // 陰影
+      var shadow = document.createElement('div');
+      shadow.className = 'unit-shadow';
+      shadow.style.cssText = 'position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);width:32px;height:8px;background:rgba(0,0,0,0.4);border-radius:50%;';
+      wrap.appendChild(shadow);
+      
+      elDiv.appendChild(wrap);
       document.body.appendChild(elDiv);
       p.el = elDiv;
-      p._hpFill = hpFill;
       _addDebugLog('[MP-RENDER] buildRemotePlayerDOM SUCCESS id=' + p.id + ' parent=body');
     } catch(e) {
       _addDebugLog('[MP-RENDER] buildRemotePlayerDOM ERROR: ' + e.message);
@@ -1360,11 +1511,13 @@
 
   // ========== 每幀內插 ==========
   function updateRemotePlayers(dt) {
-    if (remotePlayers.size === 0) return;
-    var camX = (typeof window.CAMERA !== 'undefined') ? CAMERA.x : 0;
-    var camY = (typeof window.CAMERA !== 'undefined') ? CAMERA.y : 0;
-    var vw = (typeof window.worldW !== 'undefined') ? worldW : window.innerWidth;
-    var vh = (typeof window.worldH !== 'undefined') ? worldH : window.innerHeight;
+    if (remotePlayers.size === 0 && serverAIs.size === 0) return;
+    // v4.3.8：CAMERA和GS是const聲明的全局變量，不能用window.CAMERA訪問
+    var camX = 0, camY = 0;
+    try { if (typeof CAMERA !== 'undefined') { camX = CAMERA.x; camY = CAMERA.y; } } catch(e) {}
+    var vw = window.innerWidth, vh = window.innerHeight;
+    try { if (typeof worldW !== 'undefined') vw = worldW; } catch(e) {}
+    try { if (typeof worldH !== 'undefined') vh = worldH; } catch(e) {}
     
     for (var p of remotePlayers.values()) {
       if (!p.el) continue;
@@ -1387,19 +1540,31 @@
       var screenY = (p.y - camY) + vh / 2;
       
       // 更新position:fixed的位置
-      p.el.style.left = Math.round(screenX - 24) + 'px';
-      p.el.style.top = Math.round(screenY - 64) + 'px';
+      p.el.style.left = Math.round(screenX - 32) + 'px';
+      p.el.style.top = Math.round(screenY - 80) + 'px';
       
-      // 視口剔除：屏幕外則隱藏
-      var margin = 100;
-      var offscreen = screenX < -margin || screenX > vw + margin || screenY < -margin || screenY > vh + margin;
-      p.el.style.display = offscreen ? 'none' : 'block';
+      // v4.3.8：暫時禁用視口剔除，確保遠端玩家一定顯示
+      p.el.style.display = 'block';
+      p.el.style.visibility = 'visible';
+      p.el.style.opacity = '1';
       
       // 更新血條
       if (p._hpFill && p.maxHp) {
         var hpPct = Math.max(0, Math.min(100, (p.hp / p.maxHp) * 100));
         p._hpFill.style.width = hpPct + '%';
       }
+    }
+    
+    // v4.3.9：更新伺服器AI位置
+    for (var ai of serverAIs.values()) {
+      if (!ai.el) continue;
+      var aiScreenX = (ai.x - camX) + vw / 2;
+      var aiScreenY = (ai.y - camY) + vh / 2;
+      ai.el.style.left = Math.round(aiScreenX - 25) + 'px';
+      ai.el.style.top = Math.round(aiScreenY - 56) + 'px';
+      ai.el.style.display = 'block';
+      ai.el.style.visibility = 'visible';
+      ai.el.style.opacity = '1';
     }
   }
   
@@ -1408,10 +1573,11 @@
   // v4.3.7：顯示傷害數字
   function _showDamageNumber(worldX, worldY, damage, isSelf) {
     try {
-      var camX = (typeof window.CAMERA !== 'undefined') ? CAMERA.x : 0;
-      var camY = (typeof window.CAMERA !== 'undefined') ? CAMERA.y : 0;
-      var vw = (typeof window.worldW !== 'undefined') ? worldW : window.innerWidth;
-      var vh = (typeof window.worldH !== 'undefined') ? worldH : window.innerHeight;
+      var camX = 0, camY = 0;
+      try { if (typeof CAMERA !== 'undefined') { camX = CAMERA.x; camY = CAMERA.y; } } catch(e) {}
+      var vw = window.innerWidth, vh = window.innerHeight;
+      try { if (typeof worldW !== 'undefined') vw = worldW; } catch(e) {}
+      try { if (typeof worldH !== 'undefined') vh = worldH; } catch(e) {}
       var screenX = (worldX - camX) + vw / 2;
       var screenY = (worldY - camY) + vh / 2;
       
@@ -1520,11 +1686,13 @@
             var _wl = document.getElementById('world-layer');
             var _wc = _wl ? _wl.children.length : -1;
             var _re = _wl ? _wl.querySelectorAll('.world-unit.remote-player').length : -1;
-            var _camX = (typeof window.CAMERA !== 'undefined') ? CAMERA.x : '?';
-            var _camY = (typeof window.CAMERA !== 'undefined') ? CAMERA.y : '?';
-            var _myX = (typeof window.GS !== 'undefined' && GS.player) ? GS.player.x : '?';
-            var _myY = (typeof window.GS !== 'undefined' && GS.player) ? GS.player.y : '?';
-            var _info = 'world-layer子元素: ' + _wc + ', 遠端玩家DOM: ' + _re + ' 相機=(' + _camX + ',' + _camY + ') 我=(' + _myX + ',' + _myY + ')';
+            var _camX = '?', _camY = '?';
+            try { if (typeof CAMERA !== 'undefined') { _camX = CAMERA.x; _camY = CAMERA.y; } } catch(e) {}
+            var _myX = '?', _myY = '?';
+            try { if (typeof GS !== 'undefined' && GS.player) { _myX = GS.player.x; _myY = GS.player.y; } } catch(e) {}
+            var _spriteOk = '?';
+            try { _spriteOk = (typeof SPRITE !== 'undefined') ? ('OK warrior=' + (SPRITE.warrior ? SPRITE.warrior.idle : 'null')) : 'undefined'; } catch(e) { _spriteOk = 'err:' + e.message; }
+            var _info = 'world-layer子元素: ' + _wc + ', 遠端玩家DOM: ' + _re + ' 相機=(' + _camX + ',' + _camY + ') 我=(' + _myX + ',' + _myY + ') SPRITE=' + _spriteOk;
             if (remotePlayers && remotePlayers.size > 0) {
               for (var _rp of remotePlayers.values()) {
                 var _ei = 'el=NULL';

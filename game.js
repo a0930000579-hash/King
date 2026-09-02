@@ -12687,7 +12687,9 @@ function loadMap(mapId) {
   renderNPCs(map);
 
   // 戰鬥地圖生成怪物 + AI 玩家
-  if (map.type === 'battle') {
+  // v4.3.9：Server Authoritative — 在線模式下不生成本地怪物/AI，全部由伺服器生成
+  const isOnline = !!(window.MultiplayerClient && MultiplayerClient.connected);
+  if (map.type === 'battle' && !isOnline) {
     console.log('[loadMap] 開始生成怪物...');
     const t0 = performance.now();
     spawnMonsters();
@@ -12695,6 +12697,8 @@ function loadMap(mapId) {
     const t1 = performance.now();
     spawnAIPlayers();
     console.log(`[loadMap] AI生成完成，耗時 ${(performance.now() - t1).toFixed(0)}ms，共 ${GS.aiPlayers.length} 個`);
+  } else if (isOnline) {
+    console.log('[loadMap] 在線模式，跳過本地怪物/AI生成，使用伺服器端數據');
   }
 
   // ===== 多人連線：進入新地圖（同步世界尺寸） =====
