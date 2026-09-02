@@ -1,1 +1,11 @@
-name: Auto Unzip on Uploadon:push:workflow_dispatch:permissions:contents: writejobs:unzip-and-commit:runs-on: ubuntu-lateststeps:- name: Checkout repositoryuses: actions/checkout@v4with:persist-credentials: true- name: Unzip root filerun: |unzip -o "*.zip"
+name: Auto Unzip on Upload
+
+on: push: paths: - '**.zip' workflow_dispatch:
+
+permissions: contents: write
+
+jobs: unzip-and-commit: runs-on: ubuntu-latest
+
+steps: - name: Checkout repository uses: actions/checkout@v4 with: persist-credentials: true
+
+- name: Find and unzip all zip files run: | find . -name "*.zip" -exec sh -c 'for f; do unzip -o "\(f" && rm -f "\)f"; done' _ {} +
