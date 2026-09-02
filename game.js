@@ -3771,7 +3771,7 @@ function useConsumable(itemId) {
     p.hp = Math.min(getTotalHpMax(), p.hp + healAmt);
     showDamage(p.x, p.y - 55, healAmt, 'heal');
     addLog('heal', `使用【${item.name}】：恢復 ${healAmt} 生命`);
-    if (window.AudioSystem) AudioSystem.sfxPotion();
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxPotion();
   }
   if (item.effect?.mp) {
     const mpAmt = Math.floor(item.effect.mp);
@@ -5706,7 +5706,7 @@ function isClassRestrictionMatched(restriction, playerClass) {
 // 變身抽卡（消耗鑽石）
 function doTransformGacha(mode) {
   // mode: 'single' | 'ten' | 'big' | 'goldSingle'
-  if (window.AudioSystem) AudioSystem.sfxGacha();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxGacha();
   let actualCount, cost, guaranteedMin;
   const isGold = mode === 'goldSingle';
   if (isGold) {
@@ -7213,7 +7213,7 @@ function _initCore() {
       updateSlotDisplay();
     } catch(e) { console.warn('[Init] 有角色時更新UI失敗:', e); }
     // 初始化音訊
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       try { AudioSystem.init(); AudioSystem.ensureRunning(); AudioSystem.startMusic(GS.currentMap); } catch(e) {}
     }
   }
@@ -8996,7 +8996,7 @@ function onPlayerDead() {
   if (p.state === 'dead') return; // 避免重复触发
   p.state = 'dead';
   addLog('system', '你倒下了...');
-  if (window.AudioSystem) AudioSystem.sfxDeath();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxDeath();
   if (GS.autoMode) {
     GS.autoMode = false;
     const autoLabel = $('auto-label');
@@ -9425,7 +9425,7 @@ function updateAIPlayers(dt) {
             usedSkill = true;
             // 技能特效文字
             const hpBar = ai.el?.querySelector('.unit-hp-fill');
-            if (window.AudioSystem) AudioSystem.sfxHit && AudioSystem.sfxHit();
+            if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxHit && AudioSystem.sfxHit();
           }
         }
         const defVal = Number(m.def) || 0;
@@ -12339,7 +12339,7 @@ function confirmCC2CharCreate() {
     addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/公會/城堡。');
     
     // 初始化音訊系統
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       try {
         AudioSystem.init();
         AudioSystem.ensureRunning();
@@ -13078,7 +13078,7 @@ function loadMap(mapId) {
   GS.currentMap = mapId;
 
   // 切换背景音乐
-  if (window.AudioSystem) AudioSystem.changeMapMusic(mapId);
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.changeMapMusic(mapId);
 
   // 根据地圖尺寸设置世界座標系（攻城地圖2048×2048與背景圖1:1對應）
   CAMERA.worldWidth = map.w || WORLD_W || 2496;
@@ -13207,7 +13207,7 @@ function handleMapChange(msg) {
         if (el.minimapTitle) el.minimapTitle.textContent = msg.mapConfig.name;
       }
       // BGM 切換
-      if (msg.mapConfig.bgm && window.AudioSystem) {
+      if (msg.mapConfig.bgm && typeof AudioSystem !== 'undefined' && AudioSystem) {
         AudioSystem.changeMapMusic(targetMap);
       }
     }
@@ -13700,7 +13700,7 @@ function spawnMapBoss(map, slot = 'boss') {
     rage: { cd: 0, maxCd: 45, name: '狂暴', type: 'rage', duration: 15, atkMult: 1.8, spdMult: 1.5 },
   };
   m.bossSkillState = { warning: null, warningTimer: 0, rageUntil: 0 };
-  if (window.AudioSystem) AudioSystem.sfxBossAppear();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxBossAppear();
   const elDiv = worldLayer.querySelector(`[data-id="${m.uid}"]`);
   if (elDiv) {
     elDiv.classList.add('boss-unit');
@@ -14969,7 +14969,7 @@ function doPlayerNormalAttack(target, isAITarget) {
     // 暴擊特效強化
     if (isCrit) enhancedCritEffect(target.x, target.y);
     // 命中音效
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       AudioSystem.ensureRunning();
       AudioSystem.sfxNormalAttack(p.classId);
       if (isCrit) AudioSystem.sfxCrit();
@@ -15005,7 +15005,7 @@ function doPlayerNormalAttack(target, isAITarget) {
     // 暴擊特效強化
     if (isCrit) enhancedCritEffect(target.x, target.y);
     // 命中音效（普攻音效在傷害實際發生時播放）
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       AudioSystem.ensureRunning();
       AudioSystem.sfxNormalAttack(p.classId);
       if (isCrit) AudioSystem.sfxCrit();
@@ -15216,7 +15216,7 @@ function castSkill(idx) {
     addBuff(skill.id, { name: skill.desc });
     p.skillCooldowns[idx] = skill.cd;
     addLog('skill-buff', `你施放了【${skill.name}】對【自身】增加【${skill.desc || '強化效果'}】`);
-    if (window.AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
     return;
   }
 
@@ -15231,7 +15231,7 @@ function castSkill(idx) {
     p.skillCooldowns[idx] = skill.cd;
     addLog('skill-buff', `你施放了【${skill.name}】對【自身】增加【血量 +${healAmt}】`);
     updateUI();
-    if (window.AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
     return;
   }
 
@@ -15263,7 +15263,7 @@ function castSkill(idx) {
   p.state = 'attacking';
   p.facing = target.x >= p.x ? 'right' : 'left';
   const unit = worldLayer.querySelector('.world-unit.hero');
-  if (window.AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
 
   playAttackAnim(unit, () => {
     p.state = 'idle';
@@ -15387,7 +15387,7 @@ function dealSkillDamage(target, baseDmg, effectType, skill, isAoe) {
   showDamage(target.x, target.y - 50, dmg, isCrit ? 'crit' : 'normal');
 
   // 命中音效（技能音效在傷害實際發生時播放，而非施法開始時）
-  if (window.AudioSystem && skill) {
+  if (typeof AudioSystem !== 'undefined' && AudioSystem && skill) {
     AudioSystem.ensureRunning();
     AudioSystem.sfxSkill(skill.id, p.classId);
   }
@@ -15404,7 +15404,7 @@ function dealSkillDamage(target, baseDmg, effectType, skill, isAoe) {
     enhancedCritEffect(target.x, target.y);
     spawnScreenFlash('rgba(255,60,40,0.4)', 0.2);
     shakeScreen(0.8, 0.2);
-    if (window.AudioSystem) AudioSystem.sfxCrit();
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxCrit();
   } else {
     spawnEffect(effectType, target.x, target.y - 28);
     spawnElementBurst(target.x, target.y - 28, effectType, 10);
@@ -15954,7 +15954,7 @@ function onMonsterDead(m) {
     if (mEl) triggerDeathFade(mEl, m.x, m.y);
     else spawnSoulDissolve(m.x, m.y);
   }
-  if (window.AudioSystem) AudioSystem.sfxKillMonster();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxKillMonster();
   // 攻城战建筑/守卫死亡特殊处理：无經驗、无金幣、推进攻城战阶段
   if (m.isSiegeStructure || m.isSiegeDefender) {
     GS.targetMonsterUid = null;
@@ -16006,7 +16006,7 @@ function onMonsterDead(m) {
   }
   GS.resources.gold += gold;
   addLog('loot', `擊敗 ${m.name}，獲得 ${exp} 經驗，${gold} 金幣`);
-  if (window.AudioSystem) AudioSystem.sfxCoin();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxCoin();
 
   // 裝備/宝物掉落
   const drops = rollDrops(m);
@@ -16027,7 +16027,7 @@ function onMonsterDead(m) {
     GS.player.def += Math.floor(cls.baseStats.def * 0.05);
     GS.player.hp = GS.player.hpMax;
     addLog('system', `賀 升級！達到 Lv.${GS.player.level}`);
-    if (window.AudioSystem) AudioSystem.sfxLevelUp();
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxLevelUp();
     // 刷新變身解锁状态（等級提升可能解锁新變身）
 
   }
@@ -18134,7 +18134,7 @@ function announceGachaResults(results, label) {
 
 function doGacha(pool, count, mode) {
   // mode: 'single' | 'ten' | 'big' (30+5) | 'goldSingle' (金幣單抽)
-  if (window.AudioSystem) AudioSystem.sfxGacha();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxGacha();
   let cost, actualCount, guaranteedMin, currency = 'gem';
   const isGold = mode === 'goldSingle';
   if (isGold) {
@@ -18356,7 +18356,7 @@ function showGachaResults(results, poolType) {
     card.addEventListener('click', () => {
       if (!card.classList.contains('flipped')) {
         card.classList.add('flipped');
-        if (window.AudioSystem) AudioSystem.sfxFlip && AudioSystem.sfxFlip();
+        if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxFlip && AudioSystem.sfxFlip();
         checkAllFlipped();
       }
     });
@@ -19637,7 +19637,7 @@ function activateTransform(tfId) {
   GS.player.transformId = tfId;
   GS.transformEndTime = Date.now() + 4 * 60 * 60 * 1000; // 4小時
   addLog('system', `啟動變身【${tf.name}】，持續 4 小時`);
-  if (window.AudioSystem) AudioSystem.sfxTransform();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxTransform();
   // 添加變身buff
   addTransformBuff();
   // 刷新角色外觀
@@ -19701,7 +19701,7 @@ function useTransformTicket(tfId) {
   if (ticket.count <= 0) {
     GS.inventory = GS.inventory.filter(i => i.uid !== ticket.uid);
   }
-  if (window.AudioSystem) AudioSystem.sfxTransform();
+  if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxTransform();
   addTransformBuff();
   updatePlayerSprite();
   triggerTransformBurst(tf.rarity);
@@ -25082,7 +25082,7 @@ function handleSiegeUnitDeath(m) {
     castleSiegePhase = 'tower';
     addLog('siege', '城 城門已被擊破！守護塔和守衛出現了！');
     // 播放城門破壞音效
-    if (window.AudioSystem && AudioSystem.playSfx) AudioSystem.playSfx('gatebreak');
+    if (typeof AudioSystem !== 'undefined' && AudioSystem && AudioSystem.playSfx) AudioSystem.playSfx('gatebreak');
     // 大爆炸/破碎特效
     if (typeof spawnEffect === 'function') {
       spawnEffect('fire', m.x, m.y, { isCrit: true, scale: 2 });
@@ -26098,7 +26098,7 @@ function bindEvents() {
       b.classList.toggle('active', b.dataset.pvpMode === GS.autoPvpMode);
     });
     // 同步音频状态
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       const ac = AudioSystem.getConfig();
       const sfxTog = $('sfx-toggle');
       if (sfxTog) sfxTog.checked = ac.sfxEnabled;
@@ -26135,7 +26135,7 @@ function bindEvents() {
     if (apToggle) apToggle.checked = !!GS.autoPotionEnabled;
     const amToggle = $('auto-mp-toggle');
     if (amToggle) amToggle.checked = !!GS.autoMpEnabled;
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       const ac = AudioSystem.getConfig();
       const sfxTog = $('sfx-toggle');
       if (sfxTog) sfxTog.checked = ac.sfxEnabled;
@@ -26262,13 +26262,13 @@ function bindEvents() {
   // 音效開關
   const sfxToggle = $('sfx-toggle');
   if (sfxToggle) sfxToggle.addEventListener('change', () => {
-    if (window.AudioSystem) AudioSystem.setSfxEnabled(sfxToggle.checked);
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.setSfxEnabled(sfxToggle.checked);
     addLog('system', sfxToggle.checked ? '音效已開啟' : '音效已關閉');
   });
   // 音樂開關
   const musicToggle = $('music-toggle');
   if (musicToggle) musicToggle.addEventListener('change', () => {
-    if (window.AudioSystem) AudioSystem.setMusicEnabled(musicToggle.checked);
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.setMusicEnabled(musicToggle.checked);
     addLog('system', musicToggle.checked ? '背景音樂已開啟' : '背景音樂已關閉');
   });
   // 離線模式開關
@@ -26292,7 +26292,7 @@ function bindEvents() {
   if (sfxVolumeSlider) sfxVolumeSlider.addEventListener('input', () => {
     const val = parseInt(sfxVolumeSlider.value, 10);
     if (sfxVolumeValue) sfxVolumeValue.textContent = val;
-    if (window.AudioSystem) AudioSystem.setSfxVolume(val / 100);
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.setSfxVolume(val / 100);
   });
   // 音樂音量滑桿
   const musicVolumeSlider = $('music-volume');
@@ -26300,12 +26300,12 @@ function bindEvents() {
   if (musicVolumeSlider) musicVolumeSlider.addEventListener('input', () => {
     const val = parseInt(musicVolumeSlider.value, 10);
     if (musicVolumeValue) musicVolumeValue.textContent = val;
-    if (window.AudioSystem) AudioSystem.setMusicVolume(val / 100);
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.setMusicVolume(val / 100);
   });
   // 音效測試按鈕
   const sfxTestBtn = $('sfx-test-btn');
   if (sfxTestBtn) sfxTestBtn.addEventListener('click', () => {
-    if (window.AudioSystem) {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       AudioSystem.ensureRunning();
       AudioSystem.sfxTest();
     }
@@ -26686,7 +26686,7 @@ function switchTarget() {
 
 // 全局按鈕點擊音效（事件委託）
 document.addEventListener('click', (e) => {
-  if (!window.AudioSystem) return;
+  if (!typeof AudioSystem !== 'undefined' && AudioSystem) return;
   // 首次交互时初始化音频系统
   AudioSystem.ensureRunning();
 }, true);
@@ -27377,7 +27377,7 @@ function handleServerAIAttack(data) {
       try { damagePlayer(damage, '伺服器 AI'); } catch(e) {}
     }
     // 受擊震動/閃屏
-    if (window.AudioSystem && typeof AudioSystem.sfxHit === 'function') {
+    if (typeof AudioSystem !== 'undefined' && AudioSystem && typeof AudioSystem.sfxHit === 'function') {
       try { AudioSystem.sfxHit(); } catch(e) {}
     }
   }
