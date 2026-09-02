@@ -396,19 +396,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.3] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.2.4] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.3] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.2.4] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.3] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.2.4] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }

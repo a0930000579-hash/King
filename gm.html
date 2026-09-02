@@ -1573,9 +1573,12 @@ async function loadDashboard() {
     document.getElementById('assetCount').textContent = health.assetCount || '--';
     // 同步模式：優先 long-poll（v2.5.0 預設），其次 Socket.IO
     const syncEl = document.getElementById('syncMode');
-    if (health.longPoll) {
-      syncEl.textContent = '長輪詢（已啟用）';
+    if (health.webSocket && health.webSocket !== 'disabled') {
+      syncEl.textContent = 'WebSocket（已啟用）';
       syncEl.style.color = '#60c080';
+    } else if (health.longPoll) {
+      syncEl.textContent = '長輪詢（已啟用）';
+      syncEl.style.color = '#e0a060';
     } else if (health.socketIo) {
       syncEl.textContent = 'Socket.IO（已啟用）';
       syncEl.style.color = '#60c080';
