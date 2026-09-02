@@ -4,11 +4,8 @@
   "type": "battle",
   "width": 2496,
   "height": 1664,
-  "background": "/assets/maps/swamp.jpg",
-  "spawn": {
-    "x": 300,
-    "y": 832
-  },
+  "background": "/assets/map/swamp.jpg",
+  "spawn": { "x": 300, "y": 832 },
   "safeZone": null,
   "levelMin": 1,
   "levelMax": 5,
@@ -16,63 +13,18 @@
   "teleports": [
     {
       "id": "tp_to_village",
-      "x": 100,
-      "y": 832,
-      "radius": 100,
+      "x": 100, "y": 832, "radius": 100,
       "targetMap": "village",
-      "targetX": 2300,
-      "targetY": 832
+      "targetX": 2300, "targetY": 832
     }
   ],
   "monsterSpawns": [
-    {
-      "monsterId": "goblin",
-      "x": 800,
-      "y": 600,
-      "count": 10,
-      "radius": 300,
-      "name": "哥布林",
-      "level": 3
-    },
-    {
-      "monsterId": "goblin",
-      "x": 1200,
-      "y": 1000,
-      "count": 8,
-      "radius": 250,
-      "name": "哥布林弓手",
-      "level": 5
-    },
-    {
-      "monsterId": "skeleton",
-      "x": 1600,
-      "y": 700,
-      "count": 8,
-      "radius": 300,
-      "name": "小骷髏兵",
-      "level": 4
-    },
-    {
-      "monsterId": "orc",
-      "x": 2000,
-      "y": 900,
-      "count": 5,
-      "radius": 200,
-      "name": "哥布林巡邏兵",
-      "level": 6
-    }
+    { "monsterId": "goblin", "x": 800, "y": 600, "count": 10, "radius": 300, "name": "哥布林", "level": 3 },
+    { "monsterId": "goblin", "x": 1200, "y": 1000, "count": 8, "radius": 250, "name": "哥布林弓手", "level": 5 },
+    { "monsterId": "skeleton", "x": 1600, "y": 700, "count": 8, "radius": 300, "name": "小骷髏兵", "level": 4 },
+    { "monsterId": "orc", "x": 2000, "y": 900, "count": 5, "radius": 200, "name": "哥布林巡邏兵", "level": 6 }
   ],
-  "boss": {
-    "monsterId": "orc",
-    "x": 1800,
-    "y": 600,
-    "name": "哥布林王",
-    "level": 10,
-    "hpMult": 8,
-    "atkMult": 2,
-    "respawn": 1800,
-    "tier": "normal"
-  },
+  "boss": { "monsterId": "orc", "x": 1800, "y": 600, "name": "哥布林王", "level": 10, "hpMult": 8, "atkMult": 2, "respawn": 1800, "tier": "normal" },
   "npcs": [],
   "bgm": "/assets/audio/bgm_battle.mp3"
 }

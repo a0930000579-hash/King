@@ -4,98 +4,33 @@
   "type": "safe",
   "width": 2496,
   "height": 1664,
-  "background": "/assets/maps/elf_village.jpg",
-  "spawn": {
-    "x": 1200,
-    "y": 900
-  },
-  "safeZone": {
-    "x": 1200,
-    "y": 832,
-    "radius": 600
-  },
+  "background": "/assets/map/elf_village.jpg",
+  "spawn": { "x": 1200, "y": 900 },
+  "safeZone": { "x": 1200, "y": 832, "radius": 600 },
   "levelMin": 5,
   "levelMax": 15,
   "castle": "oren",
   "teleports": [
     {
       "id": "tp_to_dark_forest",
-      "x": 2400,
-      "y": 832,
-      "radius": 100,
+      "x": 2400, "y": 832, "radius": 100,
       "targetMap": "dark_forest",
-      "targetX": 120,
-      "targetY": 832
+      "targetX": 120, "targetY": 832
     }
   ],
   "monsterSpawns": [],
   "npcs": [
-    {
-      "npcId": "shop",
-      "x": 220,
-      "y": 680,
-      "name": "雜貨商人"
-    },
-    {
-      "npcId": "blacksmith",
-      "x": 1020,
-      "y": 720,
-      "name": "精靈鐵匠"
-    },
-    {
-      "npcId": "warehouse",
-      "x": 360,
-      "y": 860,
-      "name": "倉庫管理員"
-    },
-    {
-      "npcId": "inn",
-      "x": 560,
-      "y": 740,
-      "name": "樹屋旅館"
-    },
-    {
-      "npcId": "bulletin",
-      "x": 720,
-      "y": 680,
-      "name": "佈告欄"
-    },
-    {
-      "npcId": "quest",
-      "x": 860,
-      "y": 800,
-      "name": "精靈長老"
-    },
-    {
-      "npcId": "dungeon_master",
-      "x": 1140,
-      "y": 860,
-      "name": "森林嚮導"
-    },
-    {
-      "npcId": "premium_shop",
-      "x": 940,
-      "y": 900,
-      "name": "高級商人"
-    },
-    {
-      "npcId": "main_quest",
-      "x": 640,
-      "y": 920,
-      "name": "長老議員"
-    },
-    {
-      "npcId": "guard",
-      "x": 180,
-      "y": 620,
-      "name": "精靈哨兵"
-    },
-    {
-      "npcId": "guard",
-      "x": 1100,
-      "y": 640,
-      "name": "精靈哨兵"
-    }
+    { "npcId": "shop",           "x": 220,  "y": 680, "name": "雜貨商人" },
+    { "npcId": "blacksmith",     "x": 1020, "y": 720, "name": "精靈鐵匠" },
+    { "npcId": "warehouse",      "x": 360,  "y": 860, "name": "倉庫管理員" },
+    { "npcId": "inn",            "x": 560,  "y": 740, "name": "樹屋旅館" },
+    { "npcId": "bulletin",       "x": 720,  "y": 680, "name": "佈告欄" },
+    { "npcId": "quest",          "x": 860,  "y": 800, "name": "精靈長老" },
+    { "npcId": "dungeon_master", "x": 1140, "y": 860, "name": "森林嚮導" },
+    { "npcId": "premium_shop",   "x": 940,  "y": 900, "name": "高級商人" },
+    { "npcId": "main_quest",     "x": 640,  "y": 920, "name": "長老議員" },
+    { "npcId": "guard",          "x": 180,  "y": 620, "name": "精靈哨兵" },
+    { "npcId": "guard",          "x": 1100, "y": 640, "name": "精靈哨兵" }
   ],
   "bgm": "/assets/audio/bgm_elf.mp3"
 }

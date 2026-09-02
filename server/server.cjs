@@ -73,8 +73,6 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '..', 'data');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const ASSETS_DIR = path.resolve(ROOT_DIR, 'assets');
-const MAPS_DIR = path.resolve(__dirname, 'maps');
-const PUBLIC_MAPS_DIR = path.resolve(ASSETS_DIR, 'maps');
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2MB
 const GM_ACCOUNT = '19811013';
 const GM_PASSWORD = process.env.GM_PASSWORD || '19811013';
@@ -200,33 +198,6 @@ function buildAssetIndex(dir) {
  }
  cleanManifest();
  regenerateManifestFromDisk();
- // v3.1.3：regenerate 完成後，清理後的 manifest 等同 regenerated（全部磁碟存在）
- //  確保 /api/diag 中的 manifestMissingOnDisk 反映真實情況（=0）
- cleanedManifest = regeneratedManifest;
- cleanedManifestMissing = 0;
- cleanedManifestOriginal = Object.keys(regeneratedManifest || {}).length;
-
- // v3.1.3：把地圖配置複製到公開目錄 assets/maps/，讓客戶端可直接 fetch
- //  與 /api/map/:mapId 形成雙重備份，確保一定能讀到地圖配置
- (function copyMapsToPublic() {
-   try {
-     if (!fs.existsSync(MAPS_DIR)) { console.log('[Maps] MAPS_DIR 不存在，跳過複製'); return; }
-     if (!fs.existsSync(PUBLIC_MAPS_DIR)) fs.mkdirSync(PUBLIC_MAPS_DIR, { recursive: true });
-     const files = fs.readdirSync(MAPS_DIR).filter(f => f.endsWith('.json'));
-     let copied = 0;
-     for (const f of files) {
-       const src = path.join(MAPS_DIR, f);
-       const dst = path.join(PUBLIC_MAPS_DIR, f);
-       try {
-         fs.copyFileSync(src, dst);
-         copied++;
-       } catch(e) { console.warn('[Maps] 複製失敗:', f, e.message); }
-     }
-     console.log('[Maps] 已複製 ' + copied + ' 個地圖配置到 assets/maps/');
-   } catch(e) {
-     console.warn('[Maps] 複製地圖配置失敗:', e.message);
-   }
- })();
  function countFiles(dir) {
   if (!fs.existsSync(dir)) return 0;
   let n = 0;
@@ -955,9 +926,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'monarch-blade',
-      version: '4.2.0',
-      build: '4.1.9-2609012330',
-      buildId: '4.1.9-2609012330',
+      version: '3.1.2',
+      build: '3.1.2-2608311500',
+      buildId: '3.1.2-2608311500',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -977,162 +948,12 @@ async function handleApi(req, res, pathname, query) {
 
   // === 多人連線 API（long-poll，v2.4.0）===
   if (pathname.startsWith('/api/mp/')) {
-    // v3.5.2：公開的HTTP認證端點（使用parseJsonBody，增加詳細日誌）
-    if (req.method === 'POST' && pathname === '/api/mp/auth') {
-      console.log('[AUTH-HTTP] 收到請求, method=' + req.method + ' path=' + pathname);
-      try {
-        const data = await parseJsonBody(req);
-        console.log('[AUTH-HTTP] 解析body成功, token長度=' + (data.token ? data.token.length : 0));
-        const token = data.token || '';
-        const account = global._wsVerifyToken ? global._wsVerifyToken(token) : null;
-        console.log('[AUTH-HTTP] verifyToken結果=' + (account || 'null'));
-        if (!account) {
-          console.log('[AUTH-HTTP] 返回401 token無效');
-          sendJson(res, 401, { error: 'token無效', ok: false });
-          return;
-        }
-        const sessionId = 's' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
-        if (!global._wsSessions) global._wsSessions = new Map();
-        global._wsSessions.set(sessionId, {
-          account: account,
-          name: data.name || 'Player',
-          classId: data.classId || 'warrior',
-          level: data.level || 1,
-          createdAt: Date.now(),
-        });
-        setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(sessionId); }, 10 * 60 * 1000);
-        console.log('[AUTH-HTTP] 成功 account=' + account + ' sessionId=' + sessionId);
-        sendJson(res, 200, { ok: true, sessionId: sessionId });
-        return;
-      } catch(e) {
-        console.log('[AUTH-HTTP] 異常: ' + e.message);
-        sendJson(res, 400, { error: e.message, ok: false });
-        return;
-      }
-    }
     const account = await getAuthAccount(req);
     await handleMpApi(req, res, pathname, query, account);
     return;
   }
 
-   // v3.1.3：地圖配置 API — 讀取 server/maps/map_${mapId}.json
-   //  解決地圖配置放在 server/maps/ 非公開目錄，客戶端 fetch 不到的問題
-   if (req.method === 'GET' && pathname.startsWith('/api/map/')) {
-     const mapId = pathname.substring('/api/map/'.length).replace(/[^a-zA-Z0-9_-]/g, '');
-     if (!mapId) {
-       res.statusCode = 400;
-       res.end(JSON.stringify({ error: 'mapId 為空' }));
-       return;
-     }
-     const mapPath = path.join(MAPS_DIR, 'map_' + mapId + '.json');
-     if (!fs.existsSync(mapPath)) {
-       res.statusCode = 404;
-       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-       res.end(JSON.stringify({ error: '地圖不存在: ' + mapId }));
-       return;
-     }
-     try {
-       const raw = fs.readFileSync(mapPath, 'utf8');
-       res.statusCode = 200;
-       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-       res.setHeader('Cache-Control', 'public, max-age=3600');
-       res.end(raw);
-     } catch(e) {
-       res.statusCode = 500;
-       res.end(JSON.stringify({ error: '讀取地圖失敗: ' + e.message }));
-     }
-     return;
-   }
-
-   // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
-   // GET /api/ws-diag — WS 診斷日誌（v3.1.9，讀取全域緩衝區）
-  if (req.method === 'GET' && pathname === '/api/ws-diag') {
-    try {
-      const logs = global._wsDiagLogs || [];
-      sendJson(res, 200, { ok: true, logs: logs.slice(-50), count: logs.length });
-    } catch(e) {
-      sendJson(res, 500, { error: e.message });
-    }
-    return;
-  }
-
-  // GET /api/nation/members — 國家成員API（伺服器原生，非本地生成）
-  if (req.method === 'GET' && pathname === '/api/nation/members') {
-    try {
-      const nation = params.get('nation') || params.get('n') || '';
-      const gw = require('./game-world.cjs');
-      const members = [];
-      if (gw && gw.gameWorld && gw.gameWorld.worlds) {
-        for (const [serverId, world] of gw.gameWorld.worlds) {
-          for (const [mapId, zone] of world.zones) {
-            for (const [wsId, player] of zone.players) {
-              if (!nation || player.nation === nation) {
-                members.push({
-                  wsId, id: player.id, name: player.name || 'Player',
-                  account: player.account || '', classId: player.classId || 'warrior',
-                  level: player.level || 1, x: player.x || 0, y: player.y || 0,
-                  nation: player.nation || '', mapId, serverId, online: true,
-                });
-              }
-            }
-          }
-        }
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, nation, count: members.length, members }));
-      return;
-    } catch(e) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: e.message }));
-      return;
-    }
-  }
-
-  // GET /api/players — 在線玩家詳細診斷（用於排查多人同屏問題）
-  if (req.method === 'GET' && pathname === '/api/players') {
-    try {
-      const gameWorld = require('./game-world.cjs');
-      const worlds = {};
-      if (gameWorld._getAllWorlds) {
-        const allWorlds = gameWorld._getAllWorlds();
-        for (const [serverId, gw] of allWorlds) {
-          worlds[serverId] = { maps: {} };
-          if (gw.zones) {
-            for (const [mapId, zone] of gw.zones) {
-              const players = [];
-              for (const [wsId, entity] of zone.players) {
-                players.push({
-                  wsId,
-                  entityId: entity.id,
-                  name: entity.name,
-                  account: entity.account,
-                  classId: entity.classId,
-                  level: entity.level,
-                  x: Math.round(entity.x),
-                  y: Math.round(entity.y),
-                  hp: entity.hp,
-                  nation: entity.nation,
-                  seenEntities: Array.from(entity.seenEntities || []),
-                });
-              }
-              worlds[serverId].maps[mapId] = {
-                playerCount: zone.players.size,
-                entityCount: zone.entities.size,
-                players,
-              };
-            }
-          }
-        }
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, worlds, totalWorlds: Object.keys(worlds).length, time: Date.now() }, null, 2));
-    } catch(e) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack }));
-    }
-    return;
-  }
-
+  // 診斷 API：回傳 cwd / 資產路徑 / 檔案數 / manifest 核對 / 樣本檔存在性，方便 DO 上除錯
   if (req.method === 'GET' && pathname === '/api/diag') {
     const sampleRel = '1YPfWK8cKg.png';
     const samplePath = path.join(ASSETS_DIR, sampleRel);
@@ -1564,19 +1385,10 @@ async function handleApi(req, res, pathname, query) {
     }
 
     const token = genToken(account);
-    // v4.0.1：生成短wsSessionId用於WebSocket認證（避免大幀被proxy截斷）
-    const wsSessionId = 'ws' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-    if (!global._wsSessions) global._wsSessions = new Map();
-    global._wsSessions.set(wsSessionId, { account: account, createdAt: Date.now() });
-    setTimeout(() => { if (global._wsSessions) global._wsSessions.delete(wsSessionId); }, 10 * 60 * 1000);
-    console.log('[Auth] 登入成功:', account, 'wsSessionId:', wsSessionId);
-    // v4.0.2：把token存入全域快取，供shortToken認證時比對
-    if (!global._wsAccountTokens) global._wsAccountTokens = new Map();
-    global._wsAccountTokens.set(account, token);
+    console.log('[Auth] 登入成功:', account);
     return sendJson(res, 200, {
       ok: true,
       token,
-      wsSessionId,
       account,
       isGM: !!acc.isGM,
     });
@@ -1689,19 +1501,12 @@ async function handleApi(req, res, pathname, query) {
     if (!unique) return sendJson(res, 409, { error: '此名稱已被使用' });
     const charCount = await db.getCharacterCount(accName, serverId);
     if (charCount >= 3) return sendJson(res, 409, { error: '角色數已達上限（3 個）' });
-    // v4.2.0：優先使用客戶端指定的槽位（用戶點擊的那個），否則找第一個空槽位
+    // v2.5.8：找到第一個空槽位作為新角色索引（刪除後可能有中間空槽）
     const charList = await db.listCharacters(accName, serverId);
     let slotIdx = 0;
-    const requestedSlot = body.slotIdx != null ? parseInt(body.slotIdx) : (body.charIdx != null ? parseInt(body.charIdx) : -1);
-    if (requestedSlot >= 0 && requestedSlot < 3 && !charList[requestedSlot]) {
-      slotIdx = requestedSlot;
-      console.log('[CharCreate] 使用客戶端指定槽位: ' + slotIdx);
-    } else {
-      // 後備：找第一個空槽位
-      for (let i = 0; i < 3; i++) {
-        if (!charList[i]) { slotIdx = i; break; }
-      }
-      console.log('[CharCreate] 使用第一個空槽位: ' + slotIdx + ' (客戶端請求=' + requestedSlot + ')');
+    for (let i = 0; i < 3; i++) {
+      if (!charList[i]) { slotIdx = i; break; }
+      if (i === 2) slotIdx = 3; // 不應該到這裡
     }
     const newChar = {
       name, classId, level: 1, exp: 0, created: true, createdAt: Date.now(),

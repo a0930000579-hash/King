@@ -4,116 +4,45 @@
   "type": "safe",
   "width": 2496,
   "height": 1664,
-  "background": "/assets/maps/darkforest.jpg",
-  "spawn": {
-    "x": 1200,
-    "y": 900
-  },
-  "safeZone": {
-    "x": 1200,
-    "y": 832,
-    "radius": 600
-  },
+  "background": "/assets/map/darkforest.jpg",
+  "spawn": { "x": 1200, "y": 900 },
+  "safeZone": { "x": 1200, "y": 832, "radius": 600 },
   "levelMin": 50,
   "levelMax": 70,
   "castle": "aden",
   "teleports": [
     {
       "id": "tp_to_dark_cave",
-      "x": 2400,
-      "y": 832,
-      "radius": 100,
+      "x": 2400, "y": 832, "radius": 100,
       "targetMap": "dark_cave",
-      "targetX": 120,
-      "targetY": 832
+      "targetX": 120, "targetY": 832
     },
     {
       "id": "tp_to_dragon_lair",
-      "x": 200,
-      "y": 400,
-      "radius": 100,
+      "x": 200, "y": 400, "radius": 100,
       "targetMap": "dragon_lair",
-      "targetX": 2350,
-      "targetY": 832
+      "targetX": 2350, "targetY": 832
     },
     {
       "id": "tp_to_demon_abyss",
-      "x": 200,
-      "y": 1200,
-      "radius": 100,
+      "x": 200, "y": 1200, "radius": 100,
       "targetMap": "demon_abyss",
-      "targetX": 2350,
-      "targetY": 832
+      "targetX": 2350, "targetY": 832
     }
   ],
   "monsterSpawns": [],
   "npcs": [
-    {
-      "npcId": "shop",
-      "x": 200,
-      "y": 740,
-      "name": "補給官"
-    },
-    {
-      "npcId": "blacksmith",
-      "x": 960,
-      "y": 760,
-      "name": "鐵匠"
-    },
-    {
-      "npcId": "warehouse",
-      "x": 380,
-      "y": 880,
-      "name": "倉庫管理員"
-    },
-    {
-      "npcId": "inn",
-      "x": 520,
-      "y": 780,
-      "name": "前哨營地"
-    },
-    {
-      "npcId": "bulletin",
-      "x": 700,
-      "y": 720,
-      "name": "佈告欄"
-    },
-    {
-      "npcId": "quest",
-      "x": 820,
-      "y": 840,
-      "name": "冒險團長"
-    },
-    {
-      "npcId": "dungeon_master",
-      "x": 1080,
-      "y": 860,
-      "name": "洞窟導遊"
-    },
-    {
-      "npcId": "premium_shop",
-      "x": 940,
-      "y": 900,
-      "name": "高級裝備商"
-    },
-    {
-      "npcId": "main_quest",
-      "x": 620,
-      "y": 920,
-      "name": "遠古守護者"
-    },
-    {
-      "npcId": "guard",
-      "x": 240,
-      "y": 660,
-      "name": "前哨衛兵"
-    },
-    {
-      "npcId": "guard",
-      "x": 1060,
-      "y": 680,
-      "name": "前哨衛兵"
-    }
+    { "npcId": "shop",           "x": 200,  "y": 740, "name": "補給官" },
+    { "npcId": "blacksmith",     "x": 960,  "y": 760, "name": "鐵匠" },
+    { "npcId": "warehouse",      "x": 380,  "y": 880, "name": "倉庫管理員" },
+    { "npcId": "inn",            "x": 520,  "y": 780, "name": "前哨營地" },
+    { "npcId": "bulletin",       "x": 700,  "y": 720, "name": "佈告欄" },
+    { "npcId": "quest",          "x": 820,  "y": 840, "name": "冒險團長" },
+    { "npcId": "dungeon_master", "x": 1080, "y": 860, "name": "洞窟導遊" },
+    { "npcId": "premium_shop",   "x": 940,  "y": 900, "name": "高級裝備商" },
+    { "npcId": "main_quest",     "x": 620,  "y": 920, "name": "遠古守護者" },
+    { "npcId": "guard",          "x": 240,  "y": 660, "name": "前哨衛兵" },
+    { "npcId": "guard",          "x": 1060, "y": 680, "name": "前哨衛兵" }
   ],
   "bgm": "/assets/audio/bgm_cave.mp3"
 }

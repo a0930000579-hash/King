@@ -24,7 +24,6 @@
   let currentServer = null;
   let serverList = [];
   let _pendingCreateSlot = 0; // 待建立角色的 slot index
-  window._pendingCreateSlot = 0; // v4.2.0：暴露給game.js，創角時傳給伺服器
   // ========== 連線狀態判定（v2.1.2 改為 /api/health 精準判斷）==========
   // 邏輯：fetch('/api/health') 回 HTTP 200 且 JSON.status === 'online' 才標已連線
   // 任何其他情況（404/HTML/網路錯誤/非 JSON/欄位不符）一律視為未連線
@@ -852,7 +851,6 @@
               // 空格卡片 → 創建新角色
               if (typeof window.showCharCreate === 'function') {
                 _pendingCreateSlot = idx;
-                window._pendingCreateSlot = idx; // v4.2.0：同步到window
                 _hookCharCreateDone();
                 try {
                   window.showCharCreate();
@@ -901,12 +899,6 @@
         try {
           localStorage.setItem(STORAGE_TOKEN_KEY, data.token);
           localStorage.setItem(STORAGE_ACC_KEY, acc);
-          localStorage.setItem('mmo_account', acc);
-          // v4.0.1：保存短wsSessionId用於WebSocket認證（避免大幀被proxy截斷）
-          if (data.wsSessionId) {
-            localStorage.setItem('mmo_ws_session_id', data.wsSessionId);
-            console.log('[Auth] 已保存wsSessionId:', data.wsSessionId);
-          }
           // 登入成功清除離線標記
           localStorage.removeItem(STORAGE_OFFLINE_KEY);
         } catch (e) {}
