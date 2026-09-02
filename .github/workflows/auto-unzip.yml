@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - '**.zip'
+  workflow_dispatch: # 🌟 修正點 1：開啟這個，你就能在網頁上隨時手動點擊「強制執行解壓縮」！
+
+permissions:
+  contents: write
 
 jobs:
   unzip-and-commit:
@@ -15,12 +19,11 @@ jobs:
       with:
         persist-credentials: true
 
-    # 自動找出 zip 檔並強制覆蓋解壓縮
+    # 🌟 修正點 2：加強尋找邏輯，確保不管你在哪裡上傳、檔名大小寫如何，通通能被抓出來解壓
     - name: Find and unzip all zip files
       run: |
-        find . -name "*.zip" -exec unzip -o {} \;
+        find . -iname "*.zip" -exec unzip -o {} \;
 
-    # 修正了 Bot 的 Email 格式，確保能順利 Push
     - name: Commit and Push changes
       run: |
         git config --global user.name "github-actions[bot]"
@@ -30,7 +33,7 @@ jobs:
         
         if ! git diff-index --quiet HEAD; then
           git commit -m "🤖 自動解壓縮並覆蓋檔案 [skip ci]"
-          git push
+          git push origin main # 🌟 修正點 3：明確指定推回到 main 分支，避免手機端產生的暫時分支混亂
         else
           echo "沒有偵測到任何檔案變更。"
         fi
