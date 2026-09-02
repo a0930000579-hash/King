@@ -1290,6 +1290,8 @@ async function handleApi(req, res, pathname, query) {
         if (acc && acc.passwordHash === hashPassword(tempPw)) {
           loginOk = true;
           token = genToken(tempAcc);
+          // v4.4.3：快取完整token，用於WS shortToken認證
+          if (global._wsSetAccountToken) global._wsSetAccountToken(tempAcc, token);
         }
       }
 
@@ -1385,6 +1387,8 @@ async function handleApi(req, res, pathname, query) {
     }
 
     const token = genToken(account);
+    // v4.4.3：快取完整token，用於WS shortToken認證
+    if (global._wsSetAccountToken) global._wsSetAccountToken(account, token);
     console.log('[Auth] 登入成功:', account);
     return sendJson(res, 200, {
       ok: true,
@@ -2810,6 +2814,12 @@ console.log('[Server] v3.0.0 Server Authoritative Game World 已啟動');
 
 // 讓 ws 模組能用 verifyToken
 global._wsVerifyToken = verifyToken;
+// v4.4.3：初始化 shortToken 快取（用於 WS auth，避免完整token被DO proxy截斷）
+if (!global._wsAccountTokens) global._wsAccountTokens = new Map();
+// 登入成功後調用：把完整token存到帳號對應的快取中
+global._wsSetAccountToken = function(account, token) {
+  try { global._wsAccountTokens.set(account, token); } catch(e) {}
+};
 
 // v2.7.3：注入 long-poll AI 廣播回調（AI 變動時喚醒 poll waiters）
 wsServer.setLPAIBroadcast((serverId, mapId, ais) => {

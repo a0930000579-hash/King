@@ -594,6 +594,7 @@
           // v3.1.2：直接用根路徑 /，避免子路徑部署下 upgrade 失敗
           wsUrl = wsProto + '//' + pageHost + '/';
           console.log('[GAME-WS] ========== WebSocket 連線開始 ==========');
+       _wsDebugLog('開始連線 WS URL=' + wsUrl);
           console.log('[GAME-WS] 頁面 URL =', window.location.href);
           console.log('[GAME-WS]   proto=', pageProto, 'host=', pageHost, 'pathname=', pagePath);
           console.log('[GAME-WS]   serverUrl(origin)=', serverUrl);
@@ -626,19 +627,37 @@
 
        ws.onopen = () => {
          console.log('[GAME-WS] ✅ onopen - upgrade 成功, readyState=', ws.readyState, '(1=OPEN)。發送 auth...');
+         _wsDebugLog('✅ WS握手成功，發送auth');
          _updateWsBadge('connecting', 'WS驗證中');
-         wsSend({
+         // v4.4.3：使用 shortToken + account，整個auth消息<126位元組，避免被DO proxy截斷
+         // 完整token約117位元組，加上其他字段會超過126，被DO proxy截斷導致WS錯誤
+         let authAccount = '';
+         try {
+           if (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) {
+             authAccount = AuthSystem.getAccount() || '';
+           }
+         } catch(e) {}
+         const shortToken = authToken ? authToken.substring(0, 30) : '';
+         const authMsg = {
            type: 'auth',
-           token: authToken,
+           shortToken: shortToken,
+           account: authAccount,
            name: GS?.player?.name || 'Player',
            classId: GS?.player?.classId || 'warrior',
            level: GS?.player?.level || 1,
-         });
-         console.log('[GAME-WS] 已發送 auth, token 長度=', authToken ? authToken.length : 0);
+         };
+         // 計算消息大小，確保<126位元組
+         const msgSize = JSON.stringify(authMsg).length;
+         console.log('[GAME-WS] 已發送 auth (shortToken模式), shortToken長度=', shortToken.length, 'account=', authAccount, '消息大小=', msgSize, '位元組');
+         if (msgSize > 120) {
+           console.warn('[GAME-WS] ⚠️ auth消息超過120位元組，可能被proxy截斷！');
+         }
+         wsSend(authMsg);
        };
 
        ws.onerror = (event) => {
          console.error('[GAME-WS] ❌ onerror 觸發');
+         _wsDebugLog('❌ WS onerror (readyState=' + (ws?.readyState ?? '?') + ')');
          console.error('[GAME-WS]   event.type=', event.type);
          console.error('[GAME-WS]   event.target.url=', event.target?.url || 'n/a');
          console.error('[GAME-WS]   readyState=', ws?.readyState);
@@ -692,6 +711,7 @@
            if (!resolved) {
              resolved = true;
              console.log('[GAME-WS] ✅ auth_ok - 驗證通過, clientId=', msg.id, 'account=', msg.account);
+             _wsDebugLog('✅ auth成功 account=' + msg.account);
              clearTimeout(timeout);
              useWebSocket = true;
              wsConnected = true;
@@ -724,6 +744,7 @@
            return;
          } else if (msg.type === 'auth_fail') {
            console.error('[GAME-WS] ❌ auth_fail - token 驗證失敗, reason=', msg.reason || msg.error || '未知');
+           _wsDebugLog('❌ auth失敗: ' + (msg.reason || msg.error || '未知'));
            clearTimeout(timeout);
            _wsFailureReason = 'auth 失敗: ' + (msg.reason || msg.error || 'token 無效');
            _updateWsBadge('error', 'WS驗證失敗');
@@ -1461,17 +1482,64 @@
 
    // v3.1.2：遊戲畫面左上角 WS 狀態標籤（肉眼可見，不只在 console）
    let _wsBadgeEl = null;
+   // v4.4.3：遊戲內調試面板（手機用戶不用F12，點擊左上角WS標籤即可查看）
+   let _wsDebugPanel = null;
+   let _wsDebugVisible = false;
+   const _wsDebugLogs = [];
+   function _wsDebugLog(msg) {
+     const entry = new Date().toLocaleTimeString() + ' ' + msg;
+     _wsDebugLogs.push(entry);
+     if (_wsDebugLogs.length > 50) _wsDebugLogs.shift();
+     if (_wsDebugPanel && _wsDebugVisible) _updateWsDebugPanel();
+   }
+   function _toggleWsDebug() {
+     if (!_wsDebugPanel) _createWsDebugPanel();
+     _wsDebugVisible = !_wsDebugVisible;
+     _wsDebugPanel.style.display = _wsDebugVisible ? 'block' : 'none';
+     if (_wsDebugVisible) _updateWsDebugPanel();
+   }
+   function _createWsDebugPanel() {
+     const panel = document.createElement('div');
+     panel.id = 'ws-debug-panel';
+     panel.style.cssText = 'position:fixed;top:30px;left:6px;z-index:99998;width:280px;max-height:60vh;overflow-y:auto;background:rgba(0,0,0,0.92);color:#0f0;font-size:10px;font-family:monospace;padding:8px;border-radius:6px;border:1px solid #444;display:none;';
+     panel.innerHTML = '<div style="color:#ffd93d;margin-bottom:4px;">📡 WS 調試面板（點擊WS標籤關閉）</div><div id="ws-debug-content"></div>';
+     document.body.appendChild(panel);
+     _wsDebugPanel = panel;
+   }
+   function _updateWsDebugPanel() {
+     if (!_wsDebugPanel) return;
+     const contentEl = _wsDebugPanel.querySelector('#ws-debug-content');
+     if (!contentEl) return;
+     const info = [
+       '狀態: ' + (status === 1 ? '在線' : status === 2 ? '連線中' : status === 3 ? '重連中' : status === 4 ? '錯誤' : '離線'),
+       'WS已連線: ' + wsConnected,
+       '使用WS: ' + useWebSocket,
+       '伺服器: ' + serverUrl,
+       '地圖: ' + (currentMapId || '無'),
+       '我的ID: ' + (myPlayerId || '無'),
+       '遠端玩家: ' + remotePlayers.size,
+       '失敗原因: ' + (_wsFailureReason || '無'),
+       '--- 最近日誌 ---',
+     ];
+     for (let i = Math.max(0, _wsDebugLogs.length - 20); i < _wsDebugLogs.length; i++) {
+       info.push(_wsDebugLogs[i]);
+     }
+     contentEl.innerHTML = info.join('<br>');
+   }
    function _ensureWsBadge() {
      if (_wsBadgeEl) return;
      try {
        const badge = document.createElement('div');
        badge.id = 'ws-status-badge';
-       badge.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99999;padding:2px 6px;font-size:10px;font-family:monospace;border-radius:3px;pointer-events:none;opacity:0.85;';
+       badge.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99999;padding:2px 6px;font-size:10px;font-family:monospace;border-radius:3px;pointer-events:auto;cursor:pointer;opacity:0.9;user-select:none;';
        badge.textContent = 'WS離線';
        badge.style.background = '#333';
        badge.style.color = '#aaa';
+       badge.title = '點擊查看WS調試信息';
+       badge.addEventListener('click', _toggleWsDebug);
        document.body.appendChild(badge);
        _wsBadgeEl = badge;
+       _wsDebugLog('調試面板就緒，點擊左上角WS標籤查看詳情');
      } catch(e) {}
    }
    function _updateWsBadge(state, label) {
