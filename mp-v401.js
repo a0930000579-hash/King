@@ -398,19 +398,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.2.9] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.3.1] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.2.9] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.3.1] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.2.9] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.3.1] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -812,6 +812,24 @@
           const _allIds = (msg.entities || []).map(e => e.id || '?').join(',');
           _aoiMessageLog.unshift('[aoi_update] entities=' + (msg.entities?.length || 0) + ' ids=[' + _allIds + ']');
           if (_aoiMessageLog.length > 10) _aoiMessageLog.pop();
+          
+          // v4.3.1：直接創建測試方塊，不經過任何中間函數
+          try {
+            var _testDiv = document.getElementById('mp_test_block');
+            if (!_testDiv) {
+              _testDiv = document.createElement('div');
+              _testDiv.id = 'mp_test_block';
+              _testDiv.style.cssText = 'position:fixed !important; left:20px !important; top:100px !important; width:60px !important; height:60px !important; background:red !important; border:3px solid yellow !important; z-index:999999 !important; display:block !important; font-size:10px !important; color:white !important; text-align:center !important; line-height:60px !important;';
+              _testDiv.textContent = '測試';
+              document.body.appendChild(_testDiv);
+              _addDebugLog('[MP-TEST] 測試方塊已創建並添加到body');
+            }
+            // 更新測試方塊顯示實體數
+            _testDiv.textContent = '實體:' + (msg.entities?.length || 0);
+          } catch(_e) {
+            _addDebugLog('[MP-TEST] 測試方塊創建失敗: ' + _e.message);
+          }
+          
           if (msg.entities && Array.isArray(msg.entities)) {
             console.log('[GAME-WS] aoi_update entities數=' + msg.entities.length + ' 內容=' + JSON.stringify(msg.entities).substring(0,200));
             const playerEntities = msg.entities.filter(e => e && (e.kind === 'player' || e.type === 'player' || e.playerId || (e.id && String(e.id).indexOf(':') > 0 && !String(e.id).startsWith('ai:'))));
@@ -1144,9 +1162,10 @@
   }
 
   function addOrUpdateRemotePlayer(ent) {
-    _addDebugLog('[MP-DEBUG addOrUpdateRemotePlayer id=' + ent.id + ' name=' + (ent.name||'?') + ' x=' + ent.x + ' y=' + ent.y);
-    if (ent.id === myPlayerId) return;
+    _addDebugLog('[MP-DEBUG] addOrUpdateRemotePlayer id=' + ent.id + ' name=' + (ent.name||'?') + ' x=' + ent.x + ' y=' + ent.y + ' kind=' + (ent.kind||'?'));
+    if (ent.id === myPlayerId) { _addDebugLog('[MP-DEBUG] 跳過自己: ' + ent.id); return; }
     let p = remotePlayers.get(ent.id);
+    _addDebugLog('[MP-DEBUG] remotePlayers中已存在: ' + (p ? 'YES' : 'NO'));
     const wPos = serverToWorld(ent.x || 0, ent.y || 0);
     if (!p) {
       p = createRemotePlayer(ent, wPos);

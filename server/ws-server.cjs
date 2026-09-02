@@ -818,9 +818,8 @@ function createWsServer(httpServer) {
         name: client.name,
         classId: client.classId,
         level: client.level,
-        // v4.2.0：基於wsId給位置偏移，避免多個玩家堆疊在同一點
-        x: (msg.x || 400) + ((client.wsId % 5) * 40),
-        y: (msg.y || 400) + ((client.wsId % 3) * 30),
+        // v4.2.9：不直接設置x和y，讓game-world.cjs中的_getRandomSpawn隨機選擇10個出生點之一
+        // x和y留空，由服務器端隨機生成，避免人物重疊
         hp: msg.hp || 100,
         maxHp: msg.maxHp || 100,
         mp: msg.mp || 50,
