@@ -355,7 +355,7 @@
   }
   // v3.2.1：大訊息自動分片（chunkSize=50，確保每個chunk <100位元組）
   function wsSend(msg) {
-    _wsDiag('[v4.0.1] wsSend called type=' + (msg.type||msg.t||'?'));
+    _wsDiag('[v4.3.5] wsSend called type=' + (msg.type||msg.t||'?'));
     if (!ws || ws.readyState !== 1) return false;
     try {
       const raw = JSON.stringify(msg);
@@ -398,19 +398,19 @@
       const buf = _clientChunkBuffers.get(cid);
       buf.parts.set(idx, data);
       buf.received++;
-      _wsDiag('[v4.3.3] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
+      _wsDiag('[v4.3.5] 收到chunk cid=' + cid + ' idx=' + idx + '/' + total + ' dataLen=' + data.length);
       if (buf.received >= total) {
         let full = '';
         for (let i = 0; i < total; i++) {
           full += buf.parts.get(i) || '';
         }
         _clientChunkBuffers.delete(cid);
-        _wsDiag('[v4.3.3] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
+        _wsDiag('[v4.3.5] chunk組裝完成 cid=' + cid + ' fullLen=' + full.length);
         try {
           return JSON.parse(full);
         } catch(e) {
           console.error('[GAME-WS] chunk組裝後JSON失敗:', e.message, '前50字=', full.substring(0,50));
-          _wsDiag('[v4.3.3] chunk組裝後JSON失敗: ' + e.message);
+          _wsDiag('[v4.3.5] chunk組裝後JSON失敗: ' + e.message);
           return null;
         }
       }
@@ -462,7 +462,7 @@
    }
 
    function tryWebSocket() {
-     _wsDiag('[v4.0.8] tryWebSocket 開始');
+     _wsDiag('[v4.3.5] tryWebSocket 開始');
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -516,15 +516,15 @@
 
        ws.onopen = () => {
          _wsDiag('✅ onopen - upgrade 成功, readyState=' + ws.readyState);
-         try { _updateWsBadge('connecting', 'WS驗證中'); } catch(e) { _wsDiag('[v4.0.2] badge錯誤: ' + e.message); }
+         try { _updateWsBadge('connecting', 'WS驗證中'); } catch(e) { _wsDiag('[v4.3.5] badge錯誤: ' + e.message); }
          try {
            let wsSessionId = '';
            try { wsSessionId = localStorage.getItem('mmo_ws_session_id') || ''; } catch(e) {}
-           _wsDiag('[v4.0.2] wsSessionId=' + (wsSessionId ? '有' : '無'));
+           _wsDiag('[v4.3.5] wsSessionId=' + (wsSessionId ? '有' : '無'));
            if (wsSessionId) {
              const authMsg = { type: 'auth', wsSessionId: wsSessionId, name: 'Player' };
              const msgLen = JSON.stringify(authMsg).length;
-             _wsDiag('[v4.0.2] wsSessionId認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險'));
+             _wsDiag('[v4.3.5] wsSessionId認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險'));
              wsSend(authMsg);
              try { localStorage.removeItem('mmo_ws_session_id'); } catch(e) {}
            } else {
@@ -532,11 +532,11 @@
              const shortToken = authToken ? authToken.substring(0, 30) : '';
              const authMsg = { type: 'auth', shortToken: shortToken, account: account, name: 'Player' };
              const msgLen = JSON.stringify(authMsg).length;
-             _wsDiag('[v4.0.2] 短token認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險') + ' account=' + account);
+             _wsDiag('[v4.3.5] 短token認證 len=' + msgLen + (msgLen < 126 ? ' 小幀安全' : ' 大幀危險') + ' account=' + account);
              wsSend(authMsg);
            }
          } catch(e) {
-           _wsDiag('[v4.0.2] auth發送異常: ' + e.message);
+           _wsDiag('[v4.3.5] auth發送異常: ' + e.message);
            try { wsSend({ type: 'auth', token: authToken, name: 'Player' }); } catch(e2) {}
          }
 
@@ -625,20 +625,20 @@
              const py = (typeof GS !== 'undefined' && GS?.player?.y != null) ? GS.player.y : 400;
              const joinMsg = { type: 'join_map', s: joinServerId, m: joinMapId, p: joinPlayerId, x: px, y: py };
              const joinLen = JSON.stringify(joinMsg).length;
-             _wsDiag('[v4.0.8] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
+             _wsDiag('[v4.3.5] auth_ok後發送join_map len=' + joinLen + (joinLen < 126 ? ' 小幀安全(不分片)' : ' 大幀需分片') + ' mapId=' + joinMapId);
              console.log('[GAME-WS] auth_ok 後發送 join_map, len=' + joinLen + ', mapId=' + joinMapId + ', msg=' + JSON.stringify(joinMsg));
              try {
                const joinSent = wsSend(joinMsg);
                console.log('[GAME-WS] join_map 發送結果: ' + (joinSent ? '成功' : '失敗'));
-               _wsDiag('[v4.0.8] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
+               _wsDiag('[v4.3.5] join_map發送結果: ' + (joinSent ? '成功' : '失敗'));
              } catch(e) {
                console.error('[GAME-WS] join_map 發送異常:', e);
-               _wsDiag('[v4.0.8] join_map發送異常: ' + e.message);
+               _wsDiag('[v4.3.5] join_map發送異常: ' + e.message);
              }
              resolve(msg);
              } catch(e) {
                console.error('[GAME-WS] ❌ auth_ok處理異常:', e);
-               _wsDiag('[v4.1.0] auth_ok處理異常: ' + e.message);
+               _wsDiag('[v4.3.5] auth_ok處理異常: ' + e.message);
                reject(e);
              }
            }
@@ -650,7 +650,7 @@
              useWebSocket = true;
              wsConnected = true;
              _updateWsBadge('online', 'WS在線');
-             _wsDiag('[v4.0.7] 收到join_map_ok，WS模式正式啟用');
+             _wsDiag('[v4.3.5] 收到join_map_ok，WS模式正式啟用');
              console.log('[GAME-WS] 收到 join_map_ok，WebSocket 模式正式啟用');
              // v4.1.3：連線成功後啟動閒置檢測
              if (typeof _resetIdleTimer === 'function') _resetIdleTimer();
@@ -684,17 +684,17 @@
                if (typeof _setOnlineCount === 'function') {
                  _setOnlineCount(playerEntities.length + 1);
                }
-               _wsDiag('[v4.0.7] join_map_ok處理完成，在線人數=' + (playerEntities.length + 1));
+               _wsDiag('[v4.3.5] join_map_ok處理完成，在線人數=' + (playerEntities.length + 1));
              } else {
                // 沒有entities，至少顯示自己在線
                if (typeof _setOnlineCount === 'function') {
                  _setOnlineCount(1);
                }
-               _wsDiag('[v4.0.7] join_map_ok無entities，在線人數=1(自己)');
+               _wsDiag('[v4.3.5] join_map_ok無entities，在線人數=1(自己)');
              }
            } catch(e) {
              console.error('[GAME-WS] 處理join_map_ok entities出錯:', e);
-             _wsDiag('[v4.0.7] join_map_ok entities處理出錯: ' + e.message);
+             _wsDiag('[v4.3.5] join_map_ok entities處理出錯: ' + e.message);
            }
            return;
          } else if (msg.type === 'auth_fail') {
@@ -808,6 +808,8 @@
         break;
       case 'aoi_update':
         // v4.1.2：正確處理aoi_update，更新remotePlayers和在線人數
+        // v4.3.5：確保渲染循環已啟動
+        if (typeof _startRenderLoop === 'function') _startRenderLoop();
         try {
           const _allIds = (msg.entities || []).map(e => e.id || '?').join(',');
           _aoiMessageLog.unshift('[aoi_update] entities=' + (msg.entities?.length || 0) + ' ids=[' + _allIds + ']');
@@ -1221,172 +1223,119 @@
   }
 
   function buildRemotePlayerDOM(p) {
-    _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM called id=' + p.id + ' name=' + (p.name||'?'));
-    if (typeof document === 'undefined') { _addDebugLog('[MP-DEBUG] document undefined'); return; }
-    var worldLayer = document.getElementById('world-layer');
-    if (!worldLayer) { _addDebugLog('[MP-DEBUG] world-layer NOT FOUND'); return; }
-    
+    _addDebugLog('[MP-RENDER] buildRemotePlayerDOM id=' + p.id + ' name=' + (p.name||'?'));
+    if (typeof document === 'undefined') return;
     try {
       var elDiv = document.createElement('div');
-      elDiv.className = 'world-unit remote-player mp-player idle';
-      elDiv.dataset.id = 'mp_' + p.id;
-      elDiv.dataset.remoteId = p.id;
-      elDiv.dataset.mpId = p.id;
+      elDiv.id = 'mp_fixed_' + p.id.replace(/:/g, '_');
+      elDiv.className = 'mp-fixed-remote-player';
+      elDiv.style.cssText = 'position:fixed !important; width:48px !important; height:64px !important; z-index:99999 !important; display:block !important; visibility:visible !important; opacity:1 !important; pointer-events:none !important;';
       
-      // 國家敵我判定
+      // 背景色：根據國家區分
+      var bgColor = '#4a90d9'; // 藍色=自己人
       var myNation = (typeof window.GS !== 'undefined') ? (GS.nation || null) : null;
-      var isEnemy = p.nation && myNation && p.nation !== myNation;
-      if (isEnemy) elDiv.classList.add('enemy-ai');
+      if (p.nation && myNation && p.nation !== myNation) bgColor = '#d94a4a'; // 紅色=敵人
       
-      // 獲取精靈圖
-      var s = null;
-      if (typeof window.SPRITE !== 'undefined') {
-        if (p.transformId) {
-          var key = String(p.transformId).replace(/^tf_/, '').replace(/^t_/, '');
-          s = SPRITE[key] || SPRITE['t_' + key] || SPRITE[p.classId] || SPRITE.warrior;
-        } else {
-          s = SPRITE[p.classId] || SPRITE.warrior;
-        }
-      }
-      _addDebugLog('[MP-DEBUG] sprite=' + (s ? (s.useImg ? 'IMG' : 'EMOJI') : 'NULL') + ' classId=' + p.classId);
-      
-      var isImg = !!(s && s.useImg);
-      var glow = (s && s.glow) || '#ffe090';
-      var filter = 'drop-shadow(0 0 4px ' + glow + ') drop-shadow(0 2px 3px rgba(0,0,0,0.8))';
-      var nameColor = isEnemy ? '#ff8080' : '#80d0ff';
-      var hpColor = isEnemy ? '#ff5050' : '#50c8ff';
-      
-      // 國旗
-      var flagImg = '';
-      if (typeof window.NATIONS !== 'undefined' && typeof window.safeFlagImg === 'function' && p.nation) {
-        var n = NATIONS.find(function(nn) { return nn.id === p.nation; });
-        if (n) flagImg = safeFlagImg(p.nation, 12);
-      }
+      // 角色方塊
+      var body = document.createElement('div');
+      body.style.cssText = 'width:100%;height:100%;background:linear-gradient(180deg,' + bgColor + ',' + bgColor + 'dd);border:2px solid #fff;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
+      body.textContent = '⚔';
+      body.style.fontSize = '24px';
+      body.style.color = '#fff';
+      elDiv.appendChild(body);
       
       // 名字標籤
-      var nameEl = document.createElement('div');
-      nameEl.className = 'unit-info';
-      nameEl.innerHTML = '<div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:' + hpColor + '"></div></div>' +
-        '<div class="unit-name" style="color:' + nameColor + ';font-size:10px;display:flex;align-items:center;justify-content:center;gap:2px">' + flagImg + '<span>' + (p.name || 'Player') + '</span></div>' +
-        '<div class="unit-level-tag" style="display:none">Lv.' + (p.level || 1) + '</div>';
-      elDiv.appendChild(nameEl);
+      var nameDiv = document.createElement('div');
+      nameDiv.style.cssText = 'position:absolute;top:-16px;left:50%;transform:translateX(-50%);color:#fff;font-size:11px;font-weight:bold;text-shadow:1px 1px 2px #000;white-space:nowrap;';
+      nameDiv.textContent = p.name || 'Player';
+      elDiv.appendChild(nameDiv);
       
-      // 精靈圖包裹層
-      var wrap = document.createElement('div');
-      wrap.className = 'unit-sprite-wrap';
-      wrap.style.width = '64px';
-      wrap.style.height = '80px';
-      wrap.style.background = 'radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%)';
+      // 血條
+      var hpBar = document.createElement('div');
+      hpBar.style.cssText = 'position:absolute;bottom:-6px;left:0;width:100%;height:4px;background:#333;border-radius:2px;';
+      var hpFill = document.createElement('div');
+      hpFill.style.cssText = 'width:100%;height:100%;background:#4ade80;border-radius:2px;';
+      hpBar.appendChild(hpFill);
+      elDiv.appendChild(hpBar);
       
-      if (isImg) {
-        var imgIdle = document.createElement('img');
-        imgIdle.className = 'unit-sprite-img sprite-frame-idle';
-        imgIdle.src = s.idle;
-        imgIdle.style.filter = filter;
-        imgIdle.alt = '';
-        imgIdle.loading = 'lazy';
-        imgIdle.onerror = function() { if (!this.dataset.err) { this.dataset.err='1'; this.classList.add('frame-error'); } };
-        wrap.appendChild(imgIdle);
-        var tomb = document.createElement('div');
-        tomb.className = 'unit-sprite-tomb';
-        tomb.textContent = '墓';
-        tomb.style.display = 'none';
-        wrap.appendChild(tomb);
-      } else {
-        var emoji = document.createElement('div');
-        emoji.className = 'unit-sprite-emoji';
-        emoji.textContent = (s && s.idle) || '⚔';
-        emoji.style.color = (s && s.color) || '#c0a060';
-        emoji.style.fontSize = '52px';
-        emoji.style.filter = filter;
-        wrap.appendChild(emoji);
-      }
-      elDiv.appendChild(wrap);
-      
-      // 陰影
-      var shadow = document.createElement('div');
-      shadow.className = 'unit-shadow';
-      elDiv.appendChild(shadow);
-      
-      // 位置
-      var px = Math.round(p.x || 0);
-      var py = Math.round(p.y || 0);
-      elDiv.style.left = (px - 32) + 'px';
-      elDiv.style.top = (py - 80) + 'px';
-      elDiv.style.zIndex = Math.floor(20 + py / 8);
-      elDiv.style.position = 'absolute';
-      elDiv.style.display = 'block';
-      elDiv.style.visibility = 'visible';
-      elDiv.style.opacity = '1';
-      
-      if (p.dir === -1) elDiv.classList.add('face-left');
-      
-      worldLayer.appendChild(elDiv);
+      document.body.appendChild(elDiv);
       p.el = elDiv;
-      _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM SUCCESS id=' + p.id + ' pos=(' + px + ',' + py + ') parent=' + (elDiv.parentNode ? 'YES' : 'NO') + ' isImg=' + isImg);
+      p._hpFill = hpFill;
+      _addDebugLog('[MP-RENDER] buildRemotePlayerDOM SUCCESS id=' + p.id + ' parent=body');
     } catch(e) {
-      _addDebugLog('[MP-DEBUG] buildRemotePlayerDOM ERROR: ' + e.message + ' stack=' + (e.stack||'').substring(0,300));
+      _addDebugLog('[MP-RENDER] buildRemotePlayerDOM ERROR: ' + e.message);
     }
   }
 
   function refreshRemotePlayerVisual(p) {
     if (!p.el) { buildRemotePlayerDOM(p); return; }
-    // 只更新名字和位置
-    var nameDiv = p.el.querySelector('div');
+    // 更新名字
+    var nameDiv = p.el.querySelector('div:nth-child(2)');
     if (nameDiv && p.name) nameDiv.textContent = p.name;
   }
 
   // ========== 每幀內插 ==========
   function updateRemotePlayers(dt) {
     if (remotePlayers.size === 0) return;
-    const lerpFactor = 1 - Math.pow(0.001, dt);
-
-    for (const p of remotePlayers.values()) {
+    var camX = (typeof window.CAMERA !== 'undefined') ? CAMERA.x : 0;
+    var camY = (typeof window.CAMERA !== 'undefined') ? CAMERA.y : 0;
+    var vw = (typeof window.worldW !== 'undefined') ? worldW : window.innerWidth;
+    var vh = (typeof window.worldH !== 'undefined') ? worldH : window.innerHeight;
+    
+    for (var p of remotePlayers.values()) {
       if (!p.el) continue;
-
-      const dx = p.targetX - p.x;
-      const dy = p.targetY - p.y;
-      const dist = Math.hypot(dx, dy);
-
+      
+      // 內插移動
+      var dx = p.targetX - p.x;
+      var dy = p.targetY - p.y;
+      var dist = Math.hypot(dx, dy);
       if (dist > 0.5) {
+        var lerpFactor = 1 - Math.pow(0.001, dt);
         p.x += dx * lerpFactor;
         p.y += dy * lerpFactor;
-        if (Math.abs(dx) > 1) {
-          const newDir = dx > 0 ? 1 : -1;
-          if (newDir !== p.dir) {
-            p.dir = newDir;
-            p.el.classList.toggle('face-left', p.dir === -1);
-          }
-        }
-        if (dist > 4 && !p._wasWalking) {
-          p.el.classList.remove('idle');
-          p.el.classList.add('walking');
-          p._wasWalking = true;
-        }
       } else {
-        if (p._wasWalking) {
-          p.el.classList.remove('walking');
-          p.el.classList.add('idle');
-          p._wasWalking = false;
-        }
+        p.x = p.targetX;
+        p.y = p.targetY;
       }
-
-      // v4.3.2：正常精靈圖尺寸64x80的位置更新
-      p.el.style.left = (Math.round(p.x) - 32) + 'px';
-      p.el.style.top = (Math.round(p.y) - 80) + 'px';
-      p.el.style.zIndex = Math.floor(20 + p.y / 8);
-      p.el.style.display = 'block';
-      p.el.style.visibility = 'visible';
-      p.el.style.opacity = '1';
-
-      if (typeof window.applyUnitAnimFrame === 'function') {
-        try {
-          const state = p._wasWalking ? 'walking' : 'idle';
-          applyUnitAnimFrame(p.el, 'mp_' + p.id, state);
-        } catch (e) { /* ignore */ }
+      
+      // 計算屏幕座標（世界座標 -> 屏幕座標）
+      var screenX = (p.x - camX) + vw / 2;
+      var screenY = (p.y - camY) + vh / 2;
+      
+      // 更新position:fixed的位置
+      p.el.style.left = Math.round(screenX - 24) + 'px';
+      p.el.style.top = Math.round(screenY - 64) + 'px';
+      
+      // 視口剔除：屏幕外則隱藏
+      var margin = 100;
+      var offscreen = screenX < -margin || screenX > vw + margin || screenY < -margin || screenY > vh + margin;
+      p.el.style.display = offscreen ? 'none' : 'block';
+      
+      // 更新血條
+      if (p._hpFill && p.maxHp) {
+        var hpPct = Math.max(0, Math.min(100, (p.hp / p.maxHp) * 100));
+        p._hpFill.style.width = hpPct + '%';
       }
     }
   }
+  
+  // v4.3.5：獨立渲染循環，確保遠端玩家每幀更新
+  var _renderLoopRunning = false;
+  function _startRenderLoop() {
+    if (_renderLoopRunning) return;
+    _renderLoopRunning = true;
+    var lastTime = performance.now();
+    function loop(now) {
+      var dt = Math.min(100, now - lastTime);
+      lastTime = now;
+      try { updateRemotePlayers(dt / 1000); } catch(e) {}
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+    _addDebugLog('[MP-RENDER] 獨立渲染循環已啟動');
+  }
+  // 直接啟動（如果已經在線）
+  if (status === STATUS.ONLINE) _startRenderLoop();
 
   // v3.1.4：遊戲畫面左上角 網路狀態標籤（增大字體、顯示在線人數、點擊查看診斷）
   let _wsBadgeEl = null;
@@ -1464,10 +1413,26 @@
             var _wl = document.getElementById('world-layer');
             var _wc = _wl ? _wl.children.length : -1;
             var _re = _wl ? _wl.querySelectorAll('.world-unit.remote-player').length : -1;
-            var _info = 'world-layer子元素: ' + _wc + ', 遠端玩家DOM: ' + _re;
+            var _camX = (typeof window.CAMERA !== 'undefined') ? CAMERA.x : '?';
+            var _camY = (typeof window.CAMERA !== 'undefined') ? CAMERA.y : '?';
+            var _myX = (typeof window.GS !== 'undefined' && GS.player) ? GS.player.x : '?';
+            var _myY = (typeof window.GS !== 'undefined' && GS.player) ? GS.player.y : '?';
+            var _info = 'world-layer子元素: ' + _wc + ', 遠端玩家DOM: ' + _re + ' 相機=(' + _camX + ',' + _camY + ') 我=(' + _myX + ',' + _myY + ')';
             if (remotePlayers && remotePlayers.size > 0) {
               for (var _rp of remotePlayers.values()) {
-                var _ei = _rp.el ? ('el=YES parent=' + (_rp.el.parentNode ? 'Y' : 'N') + ' disp=' + _rp.el.style.display + ' vis=' + _rp.el.style.visibility + ' left=' + _rp.el.style.left + ' top=' + _rp.el.style.top + ' z=' + _rp.el.style.zIndex) : 'el=NULL';
+                var _ei = 'el=NULL';
+                if (_rp.el) {
+                  try {
+                    var _rect = _rp.el.getBoundingClientRect();
+                    var _html = _rp.el.innerHTML.substring(0, 200).replace(/\n/g, ' ');
+                    var _imgs = _rp.el.querySelectorAll('img');
+                    var _imgInfo = '';
+                    if (_imgs.length > 0) {
+                      _imgInfo = ' imgs=' + _imgs.length + ' src0=' + (_imgs[0].src || '?').substring(0, 50) + ' complete=' + _imgs[0].complete + ' natW=' + _imgs[0].naturalWidth;
+                    }
+                    _ei = 'el=YES parent=' + (_rp.el.parentNode ? 'Y' : 'N') + ' disp=' + _rp.el.style.display + ' vis=' + _rp.el.style.visibility + ' left=' + _rp.el.style.left + ' top=' + _rp.el.style.top + ' z=' + _rp.el.style.zIndex + ' screen=(' + Math.round(_rect.left) + ',' + Math.round(_rect.top) + ') size=' + _rp.el.offsetWidth + 'x' + _rp.el.offsetHeight + _imgInfo + ' html=' + _html;
+                  } catch(_e) { _ei = 'el=YES err=' + _e.message; }
+                }
                 _info += '\n  [' + _rp.id + '] ' + (_rp.name||'?') + ' pos=(' + Math.round(_rp.x) + ',' + Math.round(_rp.y) + ') ' + _ei;
               }
             }
