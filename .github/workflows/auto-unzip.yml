@@ -1,11 +1,72 @@
-name: Auto Unzip on Upload
+name: Auto Unzip and Overwrite
 
-on: push: paths: - '**.zip' workflow_dispatch:
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "*.zip"
+      - "**/*.zip"
+      - ".github/workflows/unzip.yml"
 
-permissions: contents: write
+permissions:
+  contents: write
 
-jobs: unzip-and-commit: runs-on: ubuntu-latest
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
 
-steps: - name: Checkout repository uses: actions/checkout@v4 with: persist-credentials: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-- name: Find and unzip all zip files run: | find . -name "*.zip" -exec sh -c 'for f; do unzip -o "\(f" && rm -f "\)f"; done' _ {} +
+      - name: Find ZIP
+        id: zip
+        run: |
+          ZIP_FILE=$(find . -type f -name "*.zip" -not -path "./.git/*" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "找不到 ZIP 檔案"
+            exit 1
+          fi
+
+          echo "ZIP: $ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Unzip and overwrite
+        run: |
+          ZIP_FILE="${{ steps.zip.outputs.zip_file }}"
+
+          mkdir -p /tmp/unzip
+
+          unzip -o "$ZIP_FILE" -d /tmp/unzip
+
+          # 將解壓縮後的檔案覆蓋回 GitHub Repository
+          cp -rf /tmp/unzip/. ./
+
+          echo "解壓縮完成，同檔名已覆蓋"
+
+      - name: Remove ZIP
+        run: |
+          rm -f "${{ steps.zip.outputs.zip_file }}"
+
+      - name: Remove workflow ZIP artifacts if needed
+        run: |
+          find . -type f -name "*.zip" -not -path "./.git/*" -delete || true
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "沒有需要更新的檔案"
+            exit 0
+          fi
+
+          git commit -m "Auto unzip and overwrite files"
+          git push
