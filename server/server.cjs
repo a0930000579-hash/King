@@ -1,5 +1,5 @@
 /**
- *   君主之刃 v2.6.0 · 正式營運後端伺服器
+ *   King v4.4.13 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -3033,7 +3033,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  君主之刃 v2.6.0 · 正式營運伺服器');
+    console.log('  King v4.4.13 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());
@@ -3041,7 +3041,7 @@ async function initGM() {
     console.log('  資產目錄: ' + ASSETS_DIR);
     console.log('  資產檔數: ' + assetCount + (assetCount < 100 ? '  [警告] 資產數過少，可能 assets 未正確部署' : ''));
     console.log('  資料後端: ' + db.getBackend() + ' (DB 初始化進行中，稍後會更新)');
-    console.log('  多人連線: WebSocket + Long-Poll 雙通道 (v2.7.3 AI 權威持久化)');
+    console.log('  多人連線: 純 WebSocket（v4.x，已停用 Long-Poll，Server Authoritative AI）');
     console.log('  GM 帳號: ' + GM_ACCOUNT + ' (密碼請透過 GM_PASSWORD 環境變數設定)');
     if (GM_PASSWORD === '19811013') {
       console.log('  [警告] GM 使用預設密碼，強烈建議營運後立即修改！');
