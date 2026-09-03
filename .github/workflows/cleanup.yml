@@ -1,11 +1,46 @@
-name: Cleanup Old Files (Safe)
+name: 選擇性清理檔案 (Selective Cleanup)
+
+# ============================================================
+#  使用方式：
+#   1. 把本檔放到 .github/workflows/cleanup.yml 並推上 GitHub
+#   2. GitHub 仓库頁 → Actions → 左側選「選擇性清理檔案」
+#      → 右側「Run workflow」下拉 → 勾選/填寫 → 綠色按鈕執行
+#   3. 建議第一次「只預覽(dry_run)」保持勾選，先看 Actions 日誌列出會刪什麼
+#      確認無誤後，再取消 dry_run 勾選正式執行
+#   清理完會自動 commit 並 push，DigitalOcean 會接著用最新檔案重新部署
+# ============================================================
+
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/cleanup.yml'
+    inputs:
+      dry_run:
+        description: '【安全】只預覽、不真正刪除（第一次建議勾選）'
+        type: boolean
+        default: true
+      remove_dead_code:
+        description: '刪無引用舊程式碼（server/index.cjs、sprite_object.js、transform.js、tools/）'
+        type: boolean
+        default: true
+      remove_backup_debug:
+        description: '刪備份/舊版/臨時檔（*.bak、*.old、*副本*、diag/e2e/test-*.cjs 等）'
+        type: boolean
+        default: true
+      remove_debug_pages:
+        description: '一併刪除 debug.html、gm.html 除錯頁（預設不刪）'
+        type: boolean
+        default: false
+      reset_data:
+        description: '把 data/ 執行期 JSON 重置為空模板（線上走 PostgreSQL，不影響資料）'
+        type: boolean
+        default: false
+      custom_dirs:
+        description: '要整個刪除的「資料夾」名稱，逗號分隔（例：old_assets,tmp_bak）。留白略過'
+        type: string
+        default: ''
+      custom_files:
+        description: '要刪除的「檔案路徑」，每行或逗號一個（相對於根目錄）。留白略過'
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -19,60 +54,141 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reset data files to empty templates
+      - name: 彙總並執行清理（含白名單保護）
+        shell: bash
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          RM_DEAD: ${{ github.event.inputs.remove_dead_code }}
+          RM_BAK: ${{ github.event.inputs.remove_backup_debug }}
+          RM_DBGPG: ${{ github.event.inputs.remove_debug_pages }}
+          RESET_DATA: ${{ github.event.inputs.reset_data }}
+          CUSTOM_DIRS: ${{ github.event.inputs.custom_dirs }}
+          CUSTOM_FILES: ${{ github.event.inputs.custom_files }}
         run: |
-          echo "=== 重置 data/ 為空模板 ==="
-          mkdir -p data/ai
-          # 這些JSON在v2.8.5強制PostgreSQL後不再存實際數據，只是空模板
-          echo "[]" > data/leaderboard-entries.json
-          echo "[]" > data/accounts.json
-          echo "[]" > data/account-shared.json
-          echo "[]" > data/gm-action-logs.json
-          echo "[]" > data/warehouse-logs.json
-          echo "[]" > data/ai/zeus_village.json
-          echo "[]" > data/ai/cronus_village.json
-          # 保留 data/game-servers.json（GM預設伺服器配置）
-          echo "✓ data/ 已重置為空模板"
+          set -u
+          DELDIR=/tmp/to_delete
+          mkdir -p "$DELDIR"
 
-      - name: Remove explicitly old asset folders
-        run: |
-          echo "=== 刪除明確標示為old的資料夾 ==="
-          rm -rf assets/12_map_old
-          rm -rf assets/transform_old
-          echo "✓ 舊資產資料夾已刪除"
+          # ---------- 防誤刪白名單：以下核心檔/目錄永遠不許刪 ----------
+          PROTECTED_REGEX='^(game|multiplayer|auth|audio|audio-manager|lang|bug-report|iso-map|equip-icons|portrait-generator)\.js$|^index\.html$|^styles\.css$|^auth\.css$|^package(-lock)?\.json$|^assets-manifest\.json$|^manifest\.json$|^routes\.json$|^README\.md$|^server/(server|ws-server|game-world|ai-engine|db-layer)\.cjs$|^\.github/|^assets/$|^equip/$|^gold/$|^item/$|^server/maps/'
 
-      - name: Remove backup and debug files
-        run: |
-          echo "=== 刪除備份檔與除錯檔 ==="
-          rm -f server/index.cjs.bak
-          rm -f server/server.cjs.bak_gm
-          rm -f game-bundle.html
-          rm -f diag.html
-          rm -f e2e.html
-          rm -f test-isolation.cjs
-          rm -f ASSETS-FRAME-AUDIT.txt
-          rm -f PARTS-MANIFEST.txt
-          echo "✓ 備份檔與除錯檔已刪除"
+          is_protected() { echo "$1" | grep -qE "$PROTECTED_REGEX"; }
 
-      - name: Show what was changed
-        run: |
-          echo "=== 變更摘要 ==="
-          git status --short
+          add_target() {
+            local p="$1"
+            [ -z "$p" ] && return 0
+            p="${p#./}"
+            if [ ! -e "$p" ]; then
+              echo "  · 跳過（不存在）: $p"
+              return 0
+            fi
+            if is_protected "$p"; then
+              echo "  ⛔ 拒絕刪除（白名單保護）: $p"
+              return 0
+            fi
+            echo "$p" >> "$DELDIR/list.txt"
+          }
+
+          echo "=========================================="
+          echo " 1) 依勾選彙總刪除清單"
+          echo "=========================================="
+          : > "$DELDIR/list.txt"
+
+          if [ "$RM_DEAD" = "true" ]; then
+            echo "[分類] 無引用舊程式碼"
+            add_target "server/index.cjs"
+            add_target "sprite_object.js"
+            add_target "transform.js"
+            add_target "tools"
+          fi
+
+          if [ "$RM_BAK" = "true" ]; then
+            echo "[分類] 備份/舊版/臨時檔（glob 掃描）"
+            while IFS= read -r f; do add_target "$f"; done < <(
+              find . -type f \
+                \( -iname '*.bak' -o -iname '*.old' -o -iname '*.orig' \
+                   -o -iname '*副本*' -o -iname '*copy*' -o -iname '*.tmp' \
+                   -o -iname 'diag.html' -o -iname 'e2e.html' \
+                   -o -iname 'game-bundle.html' -o -iname 'test-isolation.cjs' \) \
+                ! -path './.git/*' ! -path './node_modules/*'
+            )
+          fi
+
+          if [ "$RM_DBGPG" = "true" ]; then
+            echo "[分類] 除錯頁面"
+            add_target "debug.html"
+            add_target "gm.html"
+          fi
+
+          if [ -n "$CUSTOM_DIRS" ]; then
+            echo "[分類] 自訂資料夾: $CUSTOM_DIRS"
+            echo "$CUSTOM_DIRS" | tr ',' '\n' | while read -r d; do
+              d="$(echo "$d" | xargs)"
+              [ -n "$d" ] && add_target "$d"
+            done
+          fi
+
+          if [ -n "$CUSTOM_FILES" ]; then
+            echo "[分類] 自訂檔案"
+            echo "$CUSTOM_FILES" | tr ',' '\n' | while read -r f; do
+              f="$(echo "$f" | xargs)"
+              [ -n "$f" ] && add_target "$f"
+            done
+          fi
+
           echo ""
-          echo "=== 注意：以下項目未刪除（有風險）==="
-          echo "  - assets/ 根目錄的hash圖檔（遊戲可能直接引用）"
-          echo "  - 根目錄 equip/ gold/ item/（需確認程式碼是否引用）"
-          echo "  - server/public/socket.io/（需確認前端是否使用）"
+          echo "=========================================="
+          echo " 2) 預計刪除清單"
+          echo "=========================================="
+          if [ ! -s "$DELDIR/list.txt" ]; then
+            echo "（沒有任何符合的項目）"
+          else
+            sort -u "$DELDIR/list.txt" | nl
+          fi
 
-      - name: Commit and push
+          DO_RESET=0
+          if [ "$RESET_DATA" = "true" ]; then DO_RESET=1; fi
+
+          echo ""
+          echo "=========================================="
+          echo " 3) 執行"
+          echo "=========================================="
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "🟡 DRY RUN 預覽模式：未實際刪除任何檔案。"
+            echo "   確認清單無誤後，重新執行並取消「只預覽」勾選即可正式清理。"
+            [ "$DO_RESET" = "1" ] && echo "   （正式執行時會把 data/*.json 重置為空模板）"
+            exit 0
+          fi
+
+          if [ -s "$DELDIR/list.txt" ]; then
+            while IFS= read -r t; do
+              rm -rf -- "$t" && echo "  🗑 已刪: $t"
+            done < <(sort -u "$DELDIR/list.txt")
+          else
+            echo "無檔案需要刪除。"
+          fi
+
+          if [ "$DO_RESET" = "1" ]; then
+            echo "重置 data/ 為空模板……"
+            mkdir -p data/ai
+            for j in leaderboard-entries accounts account-shared gm-action-logs warehouse-logs; do
+              echo "[]" > "data/$j.json"
+            done
+            echo "✓ data 已重置"
+          fi
+
+      - name: 提交並推送清理結果
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "沒有變更，略過提交"
+            echo "沒有變更，略過提交。"
           else
-            git commit -m "cleanup: remove old/backup/debug files, reset data templates"
+            echo "======== 本次變更 ========"
+            git status --short
+            git commit -m "chore(cleanup): 選擇性清理舊檔 (GitHub Action)"
             git push
-            echo "✓ 已提交並推送"
+            echo "✓ 已提交並推送，DigitalOcean 將自動重新部署。"
           fi
