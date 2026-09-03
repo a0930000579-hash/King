@@ -26925,9 +26925,34 @@ window.addEventListener('load', function() {
         GS.player.classId = 'warrior';
       }
       if (!GS.currentMap) GS.currentMap = 'village';
+      // 確保玩家有座標
+      if (GS.player.x == null) GS.player.x = 1200;
+      if (GS.player.y == null) GS.player.y = 900;
+      if (GS.player.targetX == null) GS.player.targetX = GS.player.x;
+      if (GS.player.targetY == null) GS.player.targetY = GS.player.y;
       
       console.log('[Auth] onAuthReady完成，準備init: player=', GS.player.name, '/', GS.player.classId, 'map=', GS.currentMap);
       init();
+      
+      // v4.4.7：init完成後，如果WS已連線但還沒joinWorld，補調用
+      //  原因：auth.js中connect()在onAuthReady之前調用，當時GS.player還不存在，
+      //  所以connect()中的自動joinWorld被跳過了。這裡補上。
+      setTimeout(() => {
+        try {
+          if (window.MultiplayerClient && MultiplayerClient.connected) {
+            console.log('[Auth] WS已連線，補調用joinWorld, map=', GS.currentMap);
+            MultiplayerClient.joinWorld().then(result => {
+              console.log('[Auth] joinWorld結果:', result ? '成功' : '失敗');
+            }).catch(e => {
+              console.warn('[Auth] joinWorld異常:', e.message);
+            });
+          } else {
+            console.log('[Auth] WS尚未連線，等待auth_ok後自動join（multiplayer.js中處理）');
+          }
+        } catch(e) {
+          console.warn('[Auth] 補調joinWorld失敗:', e.message);
+        }
+      }, 500);
     };
   } else {
     init();

@@ -735,6 +735,23 @@
              wsReconnectDelay = 1000;
              console.log('[GAME-WS] 認證成功，WebSocket 模式啟用');
              _updateWsBadge('online', 'WS在線');
+             _wsDebugLog('✅ auth成功 account=' + msg.account);
+             // v4.4.7：auth成功後，如果GS.player已存在但還沒joinWorld，自動調用
+             setTimeout(() => {
+               try {
+                 if (typeof GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap && !currentMapId) {
+                   console.log('[GAME-WS] auth_ok後自動joinWorld, map=', GS.currentMap);
+                   _wsDebugLog('🔄 auth_ok後自動joinWorld map=' + GS.currentMap);
+                   MultiplayerClient.joinWorld().then(r => {
+                     _wsDebugLog('joinWorld結果: ' + (r ? '成功' : '失敗'));
+                   }).catch(e => {
+                     _wsDebugLog('joinWorld異常: ' + e.message);
+                   });
+                 }
+               } catch(e) {
+                 _wsDebugLog('自動joinWorld異常: ' + e.message);
+               }
+             }, 300);
              resolve(msg);
            }
            // 若已經在地圖中，重新 join
