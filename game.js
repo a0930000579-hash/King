@@ -17573,10 +17573,17 @@ function updateUI() {
   // HP/MP 條
   const hpMax = getTotalHpMax();
   const mpMax = getTotalMpMax();
-  if (el.hpFill) el.hpFill.style.width = Math.max(0, Math.min(100, (GS.player.hp / hpMax) * 100)) + '%';
-  if (el.mpFill) el.mpFill.style.width = Math.max(0, Math.min(100, (GS.player.mp / mpMax) * 100)) + '%';
-  if (el.hpText) el.hpText.textContent = Math.floor(Math.min(GS.player.hp, hpMax)).toLocaleString() + '/' + Math.floor(hpMax).toLocaleString();
-  if (el.mpText) el.mpText.textContent = Math.floor(Math.min(GS.player.mp, mpMax)).toLocaleString() + '/' + Math.floor(mpMax).toLocaleString();
+  // v4.4.10：hp/mp 數值兜底，存檔缺失或算出 NaN 時回滿，避免顯示「非數值/NaN%」
+  if (!Number.isFinite(+GS.player.hp) || +GS.player.hp < 0) GS.player.hp = hpMax;
+  if (!Number.isFinite(+GS.player.hpMax)) GS.player.hpMax = hpMax;
+  if (!Number.isFinite(+GS.player.mp) || +GS.player.mp < 0) GS.player.mp = mpMax;
+  if (!Number.isFinite(+GS.player.mpMax)) GS.player.mpMax = mpMax;
+  const curHp = Math.max(0, Math.min(+GS.player.hp, hpMax));
+  const curMp = Math.max(0, Math.min(+GS.player.mp, mpMax));
+  if (el.hpFill) el.hpFill.style.width = Math.max(0, Math.min(100, (curHp / hpMax) * 100)) + '%';
+  if (el.mpFill) el.mpFill.style.width = Math.max(0, Math.min(100, (curMp / mpMax) * 100)) + '%';
+  if (el.hpText) el.hpText.textContent = Math.floor(curHp).toLocaleString() + '/' + Math.floor(hpMax).toLocaleString();
+  if (el.mpText) el.mpText.textContent = Math.floor(curMp).toLocaleString() + '/' + Math.floor(mpMax).toLocaleString();
   if (el.miniAtk) el.miniAtk.textContent = Math.floor(getTotalAtk());
   if (el.miniDef) el.miniDef.textContent = Math.floor(getTotalDef());
   if (el.cpValue) el.cpValue.textContent = calcCP().toLocaleString();

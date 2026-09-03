@@ -164,31 +164,47 @@ class Zone {
   }
 
   // ===== 隨機出生點：基於spawn點在±100範圍內生成10個隨機點 =====
-  _getRandomSpawn(playerData) {
-    const baseX = playerData.x != null ? playerData.x : (this.config.spawn?.x || 400);
-    const baseY = playerData.y != null ? playerData.y : (this.config.spawn?.y || 400);
-    // 如果玩家有指定位置，直接使用
-    if (playerData.x != null && playerData.y != null) {
+  _getRandomSpawn(playerData, forceRandom) {
+    const baseX = this.config.spawn?.x || 400;
+    const baseY = this.config.spawn?.y || 400;
+    // 只有非強制（如移動/恢復）且客戶端給了有效坐標時才沿用；首次加入一律伺服器隨機
+    if (!forceRandom && playerData.x != null && playerData.y != null) {
       return { x: playerData.x, y: playerData.y };
     }
-    // 生成10個隨機點，隨機選擇一個
+    // v4.4.10：生成至少12個候選隨機點（±180），優先選擇離已有玩家最遠的點，避免重疊
+    const existing = [...this.players.values()].map(p => ({ x: p.x, y: p.y }));
     const spawnPoints = [];
-    for (let i = 0; i < 10; i++) {
-      const offsetX = (Math.random() - 0.5) * 200; // ±100
-      const offsetY = (Math.random() - 0.5) * 200; // ±100
+    for (let i = 0; i < 12; i++) {
+      const offsetX = (Math.random() - 0.5) * 360;
+      const offsetY = (Math.random() - 0.5) * 360;
       spawnPoints.push({
-        x: Math.max(50, Math.min(this.width - 50, Math.round(baseX + offsetX))),
-        y: Math.max(50, Math.min(this.height - 50, Math.round(baseY + offsetY))),
+        x: Math.max(60, Math.min((this.width||2000) - 60, Math.round(baseX + offsetX))),
+        y: Math.max(60, Math.min((this.height||2000) - 60, Math.round(baseY + offsetY))),
       });
     }
-    const chosen = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
-    console.log(`[Zone-Spawn] ${this.mapId}: 隨機出生點選擇 (${chosen.x}, ${chosen.y})，基點 (${baseX}, ${baseY})`);
+    // 為每個候選點計算與最近已有玩家的距離，取最遠者
+    let chosen = spawnPoints[0];
+    if (existing.length) {
+      let bestScore = -1;
+      for (const sp of spawnPoints) {
+        let nearest = Infinity;
+        for (const e of existing) {
+          const d = (sp.x-e.x)*(sp.x-e.x) + (sp.y-e.y)*(sp.y-e.y);
+          if (d < nearest) nearest = d;
+        }
+        if (nearest > bestScore) { bestScore = nearest; chosen = sp; }
+      }
+    } else {
+      chosen = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+    }
+    console.log(`[Zone-Spawn] ${this.mapId}: 隨機出生點 (${chosen.x}, ${chosen.y})，基點(${baseX},${baseY})，候選12，在線玩家${existing.length}`);
     return chosen;
   }
 
   // ===== 玩家加入 =====
   addPlayer(wsId, playerData) {
-    const spawnPos = this._getRandomSpawn(playerData);
+    // v4.4.10：首次加入伺服器權威強制隨機出生（忽略客戶端坐標，避免全員重疊同一點）
+    const spawnPos = this._getRandomSpawn(playerData, true);
     const entity = {
       id: playerData.id || ('p:' + wsId),  // v4.2.0：優先使用客戶端playerId，保持兩端一致
       kind: 'player',
