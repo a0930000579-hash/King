@@ -22,6 +22,8 @@
   let authToken = '';
   let myPlayerId = null;
   let currentMapId = null;
+  // v4.4.8：客戶端分片重組緩衝區（伺服器對≥100字節消息分片，格式{t:'__c',c,i,n,d}）
+  const clientChunkBuffers = new Map();
   let currentServerId = 'zeus';
   let currentCharIdx = 0;
   let currentWorldW = 2496;
@@ -263,7 +265,7 @@
     joinWorld(opts) {
       opts = opts || {};
       currentCharIdx = opts.charIdx ?? (GS.currentCharIdx ?? 0);
-      const mapId = opts.mapId || GS.currentMap || 'village_01';
+      const mapId = opts.mapId || GS.currentMap || 'village';
       // v2.7.3：優先從 opts 取，其次用已選伺服器（AuthSystem），最後才 fallback zeus
       let serverId = opts.serverId;
       if (!serverId && typeof AuthSystem !== 'undefined' && AuthSystem.getCurrentServer) {
@@ -524,6 +526,9 @@
     _getRemotePlayers() { return remotePlayers; },
     _clearAll() { clearAllRemotePlayers(); },
     _getWebSocket() { return ws; },
+    // v4.4.8：純WS加入地圖（給game.js onAuthReady調用，雙保險）
+    requestAutoJoin() { try { _wsAutoJoinWhenReady(); return true; } catch(e) { return false; } },
+    joinMapViaWs() { try { return _wsJoinMapPure(); } catch(e) { return false; } },
     get isWebSocket() { return useWebSocket; },
     get wsFailureReason() { return _wsFailureReason; },
     getWsFailureReason: getWsFailureReason,
@@ -714,12 +719,35 @@
       ws.onmessage = (ev) => {
         let msg;
         const rawData = typeof ev.data === 'string' ? ev.data : '';
-        _wsDebugLog('📥 收到WS消息 len=' + rawData.length + ' 前50字=' + rawData.substring(0, 50));
         try { msg = JSON.parse(ev.data); } catch(e) {
-          _wsDebugLog('❌ WS消息JSON解析失敗: ' + e.message + ' 原始數據=' + rawData.substring(0, 100));
+          _wsDebugLog('❌ WS消息JSON解析失敗: ' + e.message + ' 原始=' + rawData.substring(0, 80));
           return;
         }
-        if (!msg || !msg.type) {
+        if (!msg) return;
+
+        // v4.4.8：分片重組（伺服器 sendJson 對≥100字節消息分片，每片50字符）
+        if (msg.t === '__c') {
+          const cid = msg.c, idx = msg.i, total = msg.n, part = msg.d || '';
+          let buf = clientChunkBuffers.get(cid);
+          if (!buf) { buf = { parts: new Map(), total: total, received: 0 }; clientChunkBuffers.set(cid, buf); }
+          if (!buf.parts.has(idx)) { buf.parts.set(idx, part); buf.received++; }
+          if (buf.received >= buf.total) {
+            let full = '';
+            for (let i = 0; i < buf.total; i++) full += buf.parts.get(i) || '';
+            clientChunkBuffers.delete(cid);
+            try { msg = JSON.parse(full); } catch(e) {
+              _wsDebugLog('❌ 分片重組後JSON失敗 cid=' + cid + ': ' + e.message);
+              return;
+            }
+            _wsDebugLog('🧩 分片重組完成 cid=' + cid + ' fullLen=' + full.length + ' type=' + msg.type);
+          } else {
+            return; // 還沒收齊，等待後續分片
+          }
+        }
+
+        const rawData2 = JSON.stringify(msg);
+        _wsDebugLog('📥 收到 type=' + msg.type + ' len=' + rawData2.length);
+        if (!msg.type) {
           _wsDebugLog('⚠️ WS消息缺少type字段');
           return;
         }
@@ -734,24 +762,11 @@
              wsConnected = true;
              wsReconnectDelay = 1000;
              console.log('[GAME-WS] 認證成功，WebSocket 模式啟用');
+             setStatus(STATUS.ONLINE);
              _updateWsBadge('online', 'WS在線');
-             _wsDebugLog('✅ auth成功 account=' + msg.account);
-             // v4.4.7：auth成功後，如果GS.player已存在但還沒joinWorld，自動調用
-             setTimeout(() => {
-               try {
-                 if (typeof GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap && !currentMapId) {
-                   console.log('[GAME-WS] auth_ok後自動joinWorld, map=', GS.currentMap);
-                   _wsDebugLog('🔄 auth_ok後自動joinWorld map=' + GS.currentMap);
-                   MultiplayerClient.joinWorld().then(r => {
-                     _wsDebugLog('joinWorld結果: ' + (r ? '成功' : '失敗'));
-                   }).catch(e => {
-                     _wsDebugLog('joinWorld異常: ' + e.message);
-                   });
-                 }
-               } catch(e) {
-                 _wsDebugLog('自動joinWorld異常: ' + e.message);
-               }
-             }, 300);
+             _wsDebugLog('✅ auth成功 account=' + msg.account + '，啟動自動join');
+             // v4.4.8：純WS自動join（等待GS.player就緒，不依賴HTTP/數據庫）
+             _wsAutoJoinWhenReady();
              resolve(msg);
            }
            // 若已經在地圖中，重新 join
@@ -838,6 +853,13 @@
       // v3.0.0：Server Authoritative AOI 事件
       case 'join_map_ok':
         console.log('[WS] ✅ join_map_ok - 伺服器確認加入地圖, AOI半徑=', msg.aoiRadius, '初始實體數=', msg.entities?.length || 0);
+        // v4.4.8：確認本地狀態（純WS join 成功）
+        if (msg.playerId) myPlayerId = msg.playerId;
+        if (msg.mapId) currentMapId = msg.mapId;
+        if (msg.serverId) currentServerId = msg.serverId;
+        setStatus(STATUS.ONLINE);
+        _wsDebugLog('✅ join_map_ok map=' + msg.mapId + ' player=' + msg.playerId + ' 實體數=' + (msg.entities?.length || 0));
+        _updateWsBadge('online', 'WS在線');
         // 設定自己的伺服器端位置
         if (msg.self && typeof window.setServerSelfState === 'function') {
           window.setServerSelfState(msg.self);
@@ -992,9 +1014,65 @@
 
   // ========== Long-Poll 循環 ==========
   function startPollLoop() {
-    if (pollRunning) return;
-    pollRunning = true;
-    pollLoop();
+    // v4.4.8：WS ONLY 模式，停用 long-poll（用戶明確要求只用 WebSocket）
+    return;
+  }
+
+  // v4.4.8：純WS加入地圖（不依賴HTTP /api/mp/join，不依賴數據庫getCharacter）
+  //  玩家資料直接從客戶端GS.player取，WS handleJoinMap 用 gameWorld.playerJoin 加入
+  function _wsJoinMapPure() {
+    try {
+      if (!ws || ws.readyState !== 1) { _wsDebugLog('⚠️ joinPure: WS未就緒'); return false; }
+      if (typeof GS === 'undefined' || !GS.player) { _wsDebugLog('⚠️ joinPure: GS.player不存在'); return false; }
+      const mapId = GS.currentMap || 'village';
+      let account = '';
+      try { account = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? (AuthSystem.getAccount() || '') : ''; } catch(e) {}
+      currentCharIdx = (GS.currentCharIdx != null ? GS.currentCharIdx : (currentCharIdx || 0));
+      const playerId = account + ':' + currentCharIdx;
+      myPlayerId = playerId;
+      currentServerId = currentServerId || 'zeus';
+      const joinMsg = {
+        type: 'join_map',
+        s: currentServerId, m: mapId, p: playerId,
+        n: GS.player.name || 'Player',
+        c: GS.player.classId || 'warrior',
+        l: GS.player.level || 1,
+        charIdx: currentCharIdx,
+        x: GS.player.x, y: GS.player.y,
+        hp: GS.player.hp || 100, maxHp: GS.player.hpMax || GS.player.maxHp || 100,
+        mp: GS.player.mp || 80, maxMp: GS.player.mpMax || GS.player.maxMp || 80,
+        nation: GS.player.nation || (typeof GS !== 'undefined' ? GS.nation : '') || '',
+      };
+      const ok = wsSend(joinMsg);
+      if (ok) {
+        currentMapId = mapId;
+        _wsDebugLog('📤 純WS join_map map=' + mapId + ' player=' + playerId);
+        console.log('[GAME-WS] 純WS join_map:', mapId, playerId, 'name=', joinMsg.n, 'class=', joinMsg.c);
+      } else {
+        _wsDebugLog('❌ join_map發送失敗 wsSend=false');
+      }
+      return ok;
+    } catch(e) { _wsDebugLog('❌ _wsJoinMapPure異常: ' + e.message); return false; }
+  }
+
+  // v4.4.8：等待GS.player就緒後自動join（解決connect早於onAuthReady的時序競爭，每200ms試一次，最長6秒）
+  let _wsAutoJoinTimer = null, _wsAutoJoinTries = 0;
+  function _wsAutoJoinWhenReady() {
+    if (_wsAutoJoinTimer) { clearTimeout(_wsAutoJoinTimer); _wsAutoJoinTimer = null; }
+    _wsAutoJoinTries = 0;
+    const attempt = () => {
+      _wsAutoJoinTries++;
+      if (currentMapId && myPlayerId) { _wsDebugLog('✓ 已在地圖 ' + currentMapId + '，停止自動join'); return; }
+      const playerReady = (typeof GS !== 'undefined' && GS.player && GS.player.classId);
+      const wsReady = !!(ws && ws.readyState === 1 && wsConnected);
+      if (playerReady && wsReady) { _wsJoinMapPure(); return; }
+      if (_wsAutoJoinTries === 1 || _wsAutoJoinTries % 5 === 0) {
+        _wsDebugLog('🔄 等待就緒 第' + _wsAutoJoinTries + '次 player=' + playerReady + ' ws=' + wsReady);
+      }
+      if (_wsAutoJoinTries >= 30) { _wsDebugLog('❌ 等待玩家就緒超時6秒'); return; }
+      _wsAutoJoinTimer = setTimeout(attempt, 200);
+    };
+    attempt();
   }
 
   function pollLoop() {
@@ -1545,7 +1623,7 @@
      const contentEl = _wsDebugPanel.querySelector('#ws-debug-content');
      if (!contentEl) return;
      const info = [
-       '狀態: ' + (status === 1 ? '在線' : status === 2 ? '連線中' : status === 3 ? '重連中' : status === 4 ? '錯誤' : '離線'),
+       '狀態: ' + (status === 'online' ? '在線' : status === 'connecting' ? '連線中' : status === 'reconnecting' ? '重連中' : status === 'error' ? '錯誤' : '離線'),
        'WS已連線: ' + wsConnected,
        '使用WS: ' + useWebSocket,
        '伺服器: ' + serverUrl,

@@ -26934,25 +26934,18 @@ window.addEventListener('load', function() {
       console.log('[Auth] onAuthReady完成，準備init: player=', GS.player.name, '/', GS.player.classId, 'map=', GS.currentMap);
       init();
       
-      // v4.4.7：init完成後，如果WS已連線但還沒joinWorld，補調用
-      //  原因：auth.js中connect()在onAuthReady之前調用，當時GS.player還不存在，
-      //  所以connect()中的自動joinWorld被跳過了。這裡補上。
+      // v4.4.8：init完成後，請求WS純通道自動join（不依賴HTTP/數據庫，內部會等待WS與player就緒）
+      //  解決auth.js中connect()早於onAuthReady、GS.player尚未建立的時序競爭
       setTimeout(() => {
         try {
-          if (window.MultiplayerClient && MultiplayerClient.connected) {
-            console.log('[Auth] WS已連線，補調用joinWorld, map=', GS.currentMap);
-            MultiplayerClient.joinWorld().then(result => {
-              console.log('[Auth] joinWorld結果:', result ? '成功' : '失敗');
-            }).catch(e => {
-              console.warn('[Auth] joinWorld異常:', e.message);
-            });
-          } else {
-            console.log('[Auth] WS尚未連線，等待auth_ok後自動join（multiplayer.js中處理）');
+          if (window.MultiplayerClient && MultiplayerClient.requestAutoJoin) {
+            console.log('[Auth] init完成，請求純WS自動join, map=', GS.currentMap);
+            MultiplayerClient.requestAutoJoin();
           }
         } catch(e) {
-          console.warn('[Auth] 補調joinWorld失敗:', e.message);
+          console.warn('[Auth] requestAutoJoin失敗:', e.message);
         }
-      }, 500);
+      }, 300);
     };
   } else {
     init();
