@@ -28398,4 +28398,15 @@ if (typeof dealDamageToAIPlayer === 'function') {
   console.log('[v3.0] AOI 實體管理模組已載入');
 })();
 
+// v4.4.9：GS/SPRITE 等是751行大IIFE的私有const，外部腳本(multiplayer.js)訪問不到，
+//  導致WS自動join就緒判斷 typeof GS==='undefined'、player永遠false。顯式暴露到window。
+try {
+  window.GS = GS;
+  window.SPRITE = SPRITE;
+  if (typeof addLog === 'function') window.addLog = addLog;
+  if (typeof CLASSES !== 'undefined') window.CLASSES = CLASSES;
+  if (typeof CAMERA !== 'undefined') window.CAMERA = CAMERA;
+  console.log('[v4.4.9] 已暴露 GS/SPRITE 到 window 供跨腳本訪問');
+} catch(e) { console.warn('[v4.4.9] 暴露全局對象失敗:', e.message); }
+
 })();

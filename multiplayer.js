@@ -31,6 +31,7 @@
 
   // v2.7.2：WebSocket 狀態
   let ws = null;
+  let lastServerUrl = null; // v4.4.9：連接冪等，防止auth.js與_initCore重複連接競爭
   let wsConnected = false;
   let wsReconnectDelay = 1000;
   let wsReconnectTimer = null;
@@ -145,6 +146,14 @@
        MultiplayerClient.saveServerUrl(u);
        authToken = token || '';
 
+       // v4.4.9 冪等：同一URL已有WS在連接/在線，直接複用，不再關閉重建（消除雙連接競爭）
+       if (lastServerUrl === serverUrl && ws && (ws.readyState === 0 || ws.readyState === 1)
+           && (status === STATUS.CONNECTING || status === STATUS.ONLINE || status === STATUS.RECONNECTING)) {
+         console.log('[GAME-WS] 同一伺服器連線已存在(' + status + ')，複用，不重複連接');
+         return Promise.resolve();
+       }
+       lastServerUrl = serverUrl;
+
        console.log('[GAME-WS] ===== MultiplayerClient.connect() 被呼叫 =====');
        console.log('[GAME-WS]   serverUrl =', serverUrl);
        console.log('[GAME-WS]   token 長度 =', authToken ? authToken.length : 0);
@@ -199,19 +208,8 @@
              _startWsWithRetry();
              startPollLoop();
            }
-           // 若已有玩家資料，自動 join
-           if (typeof GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
-             return MultiplayerClient.joinWorld().then(result => {
-               if (!result) {
-                 console.warn('[Multi] joinWorld 失敗，退回離線模式');
-                 setStatus(STATUS.ERROR);
-                 if (typeof window.setOfflineMode === 'function') {
-                   window.setOfflineMode(true);
-                 }
-               }
-               return result;
-             });
-           }
+           // v4.4.9：純WS模式不在此走HTTP /api/mp/join（依賴DB易失敗）；join由auth_ok後_wsAutoJoinWhenReady統一處理
+           _wsAutoJoinWhenReady();
            return null;
          })
          .catch(err => {
@@ -220,10 +218,8 @@
            setStatus(STATUS.CONNECTING);
            _updateWsBadge('connecting', 'WS連線中');
            _startWsWithRetry();
-           startPollLoop();
-           if (typeof GS !== 'undefined' && GS.player && GS.player.name && GS.currentMap) {
-             return MultiplayerClient.joinWorld().catch(() => null);
-           }
+           // v4.4.9：純WS，不走HTTP joinWorld；auth_ok後自動join
+           _wsAutoJoinWhenReady();
            return null;
          });
      },
@@ -264,15 +260,15 @@
     // 加入世界（從 auth token 推斷帳號）
     joinWorld(opts) {
       opts = opts || {};
-      currentCharIdx = opts.charIdx ?? (GS.currentCharIdx ?? 0);
-      const mapId = opts.mapId || GS.currentMap || 'village';
+      currentCharIdx = opts.charIdx ?? (window.GS.currentCharIdx ?? 0);
+      const mapId = opts.mapId || window.GS.currentMap || 'village';
       // v2.7.3：優先從 opts 取，其次用已選伺服器（AuthSystem），最後才 fallback zeus
       let serverId = opts.serverId;
       if (!serverId && typeof AuthSystem !== 'undefined' && AuthSystem.getCurrentServer) {
         const srv = AuthSystem.getCurrentServer();
         if (srv && srv.id) serverId = srv.id;
       }
-      if (!serverId && GS.currentServerId) serverId = GS.currentServerId;
+      if (!serverId && window.GS.currentServerId) serverId = window.GS.currentServerId;
       if (!serverId) serverId = currentServerId || 'zeus';
       currentServerId = serverId;
       // 在線模式先告訴 game.js 進入在線狀態，避免本地隨機生成 AI
@@ -324,17 +320,17 @@
                serverId,
                mapId,
                playerId: myPlayerId,
-               name: GS.player?.name || 'Player',
-               classId: GS.player?.classId || 'warrior',
-               level: GS.player?.level || 1,
+               name: window.GS.player?.name || 'Player',
+               classId: window.GS.player?.classId || 'warrior',
+               level: window.GS.player?.level || 1,
                charIdx: currentCharIdx,
-               x: GS.player?.x,
-               y: GS.player?.y,
-               hp: GS.player?.hp,
-               maxHp: GS.player?.hpMax,
-               mp: GS.player?.mp,
-               maxMp: GS.player?.mpMax,
-               nation: GS.player?.nation || '',
+               x: window.GS.player?.x,
+               y: window.GS.player?.y,
+               hp: window.GS.player?.hp,
+               maxHp: window.GS.player?.hpMax,
+               mp: window.GS.player?.mp,
+               maxMp: window.GS.player?.mpMax,
+               nation: window.GS.player?.nation || '',
              });
              console.log('[Multi] WS join_map 已發送 (LP join 完成後)');
            }
@@ -569,7 +565,7 @@
            _updateWsBadge('offline', 'WS離線');
            if (typeof window.addLog === 'function') {
              try {
-               addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
+               window.addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
              } catch(_) {}
            }
            startPollLoop();
@@ -776,17 +772,17 @@
                serverId: currentServerId,
                mapId: currentMapId,
                playerId: myPlayerId,
-               name: GS?.player?.name || 'Player',
-               classId: GS?.player?.classId || 'warrior',
-               level: GS?.player?.level || 1,
+               name: window.GS?.player?.name || 'Player',
+               classId: window.GS?.player?.classId || 'warrior',
+               level: window.GS?.player?.level || 1,
                charIdx: currentCharIdx,
-               x: GS?.player?.x,
-               y: GS?.player?.y,
-               hp: GS?.player?.hp,
-               maxHp: GS?.player?.hpMax,
-               mp: GS?.player?.mp,
-               maxMp: GS?.player?.mpMax,
-               nation: GS?.player?.nation || '',
+               x: window.GS?.player?.x,
+               y: window.GS?.player?.y,
+               hp: window.GS?.player?.hp,
+               maxHp: window.GS?.player?.hpMax,
+               mp: window.GS?.player?.mp,
+               maxMp: window.GS?.player?.mpMax,
+               nation: window.GS?.player?.nation || '',
              });
              console.log('[GAME-WS] auth_ok 後自動 join_map, mapId=' + currentMapId + ', playerId=' + myPlayerId);
            }
@@ -799,7 +795,7 @@
            _updateWsBadge('error', 'WS驗證失敗');
            // v3.1.2：auth 失敗時顯示明確提示給玩家
            if (typeof window.addLog === 'function') {
-             try { addLog('system', '⚠️ 伺服器驗證失敗：' + (msg.reason || msg.error || 'token 無效')); } catch(e) {}
+             try { window.addLog('system', '⚠️ 伺服器驗證失敗：' + (msg.reason || msg.error || 'token 無效')); } catch(e) {}
            }
            if (!resolved) {
              resolved = true;
@@ -833,9 +829,9 @@
             serverId: currentServerId,
             mapId: currentMapId,
             playerId: myPlayerId,
-            name: GS?.player?.name || 'Player',
-            classId: GS?.player?.classId || 'warrior',
-            level: GS?.player?.level || 1,
+            name: window.GS?.player?.name || 'Player',
+            classId: window.GS?.player?.classId || 'warrior',
+            level: window.GS?.player?.level || 1,
             charIdx: currentCharIdx,
           });
         }
@@ -1023,25 +1019,25 @@
   function _wsJoinMapPure() {
     try {
       if (!ws || ws.readyState !== 1) { _wsDebugLog('⚠️ joinPure: WS未就緒'); return false; }
-      if (typeof GS === 'undefined' || !GS.player) { _wsDebugLog('⚠️ joinPure: GS.player不存在'); return false; }
-      const mapId = GS.currentMap || 'village';
+      if (typeof window.GS === 'undefined' || !window.GS.player) { _wsDebugLog('⚠️ joinPure: window.GS.player不存在'); return false; }
+      const mapId = window.GS.currentMap || 'village';
       let account = '';
       try { account = (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) ? (AuthSystem.getAccount() || '') : ''; } catch(e) {}
-      currentCharIdx = (GS.currentCharIdx != null ? GS.currentCharIdx : (currentCharIdx || 0));
+      currentCharIdx = (window.GS.currentCharIdx != null ? window.GS.currentCharIdx : (currentCharIdx || 0));
       const playerId = account + ':' + currentCharIdx;
       myPlayerId = playerId;
       currentServerId = currentServerId || 'zeus';
       const joinMsg = {
         type: 'join_map',
         s: currentServerId, m: mapId, p: playerId,
-        n: GS.player.name || 'Player',
-        c: GS.player.classId || 'warrior',
-        l: GS.player.level || 1,
+        n: window.GS.player.name || 'Player',
+        c: window.GS.player.classId || 'warrior',
+        l: window.GS.player.level || 1,
         charIdx: currentCharIdx,
-        x: GS.player.x, y: GS.player.y,
-        hp: GS.player.hp || 100, maxHp: GS.player.hpMax || GS.player.maxHp || 100,
-        mp: GS.player.mp || 80, maxMp: GS.player.mpMax || GS.player.maxMp || 80,
-        nation: GS.player.nation || (typeof GS !== 'undefined' ? GS.nation : '') || '',
+        x: window.GS.player.x, y: window.GS.player.y,
+        hp: window.GS.player.hp || 100, maxHp: window.GS.player.hpMax || window.GS.player.maxHp || 100,
+        mp: window.GS.player.mp || 80, maxMp: window.GS.player.mpMax || window.GS.player.maxMp || 80,
+        nation: window.GS.player.nation || (typeof window.GS !== 'undefined' ? window.GS.nation : '') || '',
       };
       const ok = wsSend(joinMsg);
       if (ok) {
@@ -1063,13 +1059,15 @@
     const attempt = () => {
       _wsAutoJoinTries++;
       if (currentMapId && myPlayerId) { _wsDebugLog('✓ 已在地圖 ' + currentMapId + '，停止自動join'); return; }
-      const playerReady = (typeof GS !== 'undefined' && GS.player && GS.player.classId);
+      const gsExists = (typeof window.GS !== 'undefined' && !!window.GS);
+      const hasPlayer = !!(gsExists && window.GS.player);
+      const playerReady = !!(hasPlayer && window.GS.player.classId);
       const wsReady = !!(ws && ws.readyState === 1 && wsConnected);
       if (playerReady && wsReady) { _wsJoinMapPure(); return; }
       if (_wsAutoJoinTries === 1 || _wsAutoJoinTries % 5 === 0) {
-        _wsDebugLog('🔄 等待就緒 第' + _wsAutoJoinTries + '次 player=' + playerReady + ' ws=' + wsReady);
+        _wsDebugLog('🔄 等待就緒 第' + _wsAutoJoinTries + '次 GS=' + gsExists + ' player=' + hasPlayer + ' class=' + (hasPlayer?window.GS.player.classId:'無') + ' ws=' + wsReady);
       }
-      if (_wsAutoJoinTries >= 30) { _wsDebugLog('❌ 等待玩家就緒超時6秒'); return; }
+      if (_wsAutoJoinTries >= 75) { _wsDebugLog('❌ 等待玩家就緒超時15秒 GS=' + gsExists + ' player=' + hasPlayer); return; }
       _wsAutoJoinTimer = setTimeout(attempt, 200);
     };
     attempt();
@@ -1349,16 +1347,16 @@
     remotePlayers.clear();
   }
 
-  // ========== 渲染（使用現有 SPRITE 圖資、8幀動畫） ==========
+  // ========== 渲染（使用現有 window.SPRITE 圖資、8幀動畫） ==========
   function getSpriteForRemote(p) {
-    if (typeof SPRITE === 'undefined') return null;
+    if (typeof window.SPRITE === 'undefined') return null;
     if (p.transformId) {
       const key = String(p.transformId).replace(/^tf_/, '').replace(/^t_/, '');
-      if (SPRITE[key]) return SPRITE[key];
-      if (SPRITE['t_' + key]) return SPRITE['t_' + key];
+      if (window.SPRITE[key]) return window.SPRITE[key];
+      if (window.SPRITE['t_' + key]) return window.SPRITE['t_' + key];
     }
-    if (SPRITE[p.classId]) return SPRITE[p.classId];
-    return SPRITE.warrior || null;
+    if (window.SPRITE[p.classId]) return window.SPRITE[p.classId];
+    return window.SPRITE.warrior || null;
   }
 
   // v4.4.0：伺服器端AI渲染
@@ -1407,7 +1405,7 @@
       elDiv.dataset.id = 'mp_ai_' + ai.id.replace(/:/g, '_');
       elDiv.dataset.remoteId = ai.id;
       
-      const s = (typeof SPRITE !== 'undefined') ? (SPRITE[ai.classId] || SPRITE.enemy || SPRITE.warrior || null) : null;
+      const s = (typeof window.SPRITE !== 'undefined') ? (window.SPRITE[ai.classId] || window.SPRITE.enemy || window.SPRITE.warrior || null) : null;
       const isImg = !!(s && s.useImg);
       const glow = s?.glow || '#ff6060';
       const filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
@@ -1454,7 +1452,7 @@
     const filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
 
     // 國家敵我判定
-    const myNation = (typeof GS !== 'undefined') ? (GS.nation || null) : null;
+    const myNation = (typeof window.GS !== 'undefined') ? (window.GS.nation || null) : null;
     const isEnemy = p.nation && myNation && p.nation !== myNation;
     if (isEnemy) elDiv.classList.add('enemy-ai');
 
