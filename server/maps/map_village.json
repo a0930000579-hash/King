@@ -1,0 +1,38 @@
+{
+  "mapId": "village",
+  "name": "米德加特村",
+  "type": "safe",
+  "width": 2496,
+  "height": 1664,
+  "background": "/assets/map/village.jpg",
+  "spawn": { "x": 1200, "y": 900 },
+  "safeZone": { "x": 1200, "y": 832, "radius": 600 },
+  "levelMin": 1,
+  "levelMax": 5,
+  "castle": "gludio",
+  "teleports": [
+    {
+      "id": "tp_to_gludin_field",
+      "x": 2400, "y": 832, "radius": 100,
+      "targetMap": "gludin_field",
+      "targetX": 120, "targetY": 832
+    }
+  ],
+  "monsterSpawns": [],
+  "npcs": [
+    { "npcId": "blacksmith",     "x": 180,  "y": 700, "name": "鐵匠" },
+    { "npcId": "shop",           "x": 420,  "y": 660, "name": "雜貨商人" },
+    { "npcId": "warehouse",      "x": 300,  "y": 860, "name": "倉庫管理員" },
+    { "npcId": "inn",            "x": 600,  "y": 800, "name": "旅館老闆娘" },
+    { "npcId": "bulletin",       "x": 760,  "y": 680, "name": "佈告欄" },
+    { "npcId": "quest",          "x": 900,  "y": 740, "name": "任務官" },
+    { "npcId": "dungeon_master", "x": 1120, "y": 780, "name": "副本管理員" },
+    { "npcId": "premium_shop",   "x": 980,  "y": 880, "name": "高級商人" },
+    { "npcId": "main_quest",     "x": 680,  "y": 900, "name": "大祭司" },
+    { "npcId": "guard",          "x": 140,  "y": 600, "name": "村莊警衛" },
+    { "npcId": "guard",          "x": 1160, "y": 600, "name": "村莊警衛" },
+    { "npcId": "guard",          "x": 560,  "y": 560, "name": "村莊警衛" },
+    { "npcId": "trader",         "x": 500,  "y": 760, "name": "交易員" }
+  ],
+  "bgm": "/assets/audio/bgm_village.mp3"
+}

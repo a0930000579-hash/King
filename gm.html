@@ -1,0 +1,2466 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GM 後台 · 君主之刃</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+    background: #1a0f05;
+    color: #e8d6a8;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  /* ===== 背景粒子 ===== */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(2px 2px at 20% 30%, rgba(240,192,64,0.25), transparent),
+      radial-gradient(1px 1px at 60% 70%, rgba(200,160,80,0.3), transparent),
+      radial-gradient(2px 2px at 80% 20%, rgba(240,200,100,0.18), transparent),
+      radial-gradient(1px 1px at 40% 80%, rgba(180,140,60,0.25), transparent),
+      radial-gradient(1.5px 1.5px at 10% 60%, rgba(220,180,80,0.2), transparent);
+    background-size: 800px 800px;
+    animation: dust 30s linear infinite;
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 0;
+  }
+  @keyframes dust {
+    0% { background-position: 0 0; }
+    100% { background-position: 0 800px; }
+  }
+
+  /* ===== 登入頁 ===== */
+  .login-wrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+    background: radial-gradient(ellipse at 50% 30%, rgba(60,40,20,0.85) 0%, rgba(10,6,2,0.98) 60%, #000 100%),
+                linear-gradient(180deg, #1a0f05 0%, #0a0502 100%);
+  }
+  .login-box {
+    width: 400px; max-width: 90%;
+    padding: 40px 32px;
+    border: 2px solid #8a6a2a;
+    border-radius: 8px;
+    background: rgba(26, 15, 5, 0.9);
+    box-shadow: 0 0 40px rgba(240, 192, 64, 0.15), inset 0 0 20px rgba(240, 192, 64, 0.05);
+    text-align: center;
+  }
+  .login-box h1 {
+    color: #f0c040;
+    font-size: 28px;
+    margin-bottom: 8px;
+    letter-spacing: 4px;
+    text-shadow: 0 0 10px rgba(240, 192, 64, 0.5);
+  }
+  .login-box .subtitle {
+    color: #8a6a2a;
+    font-size: 13px;
+    margin-bottom: 32px;
+    letter-spacing: 2px;
+  }
+  .form-group { margin-bottom: 16px; text-align: left; }
+  .form-group label {
+    display: block;
+    color: #c8a868;
+    font-size: 13px;
+    margin-bottom: 6px;
+    letter-spacing: 1px;
+  }
+  .form-group input {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #8a6a2a;
+    border-radius: 4px;
+    color: #e8d6a8;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .form-group input:focus {
+    border-color: #f0c040;
+    box-shadow: 0 0 8px rgba(240, 192, 64, 0.3);
+  }
+  .btn {
+    display: inline-block;
+    padding: 10px 24px;
+    background: linear-gradient(180deg, #c8a040 0%, #8a6a2a 100%);
+    border: 1px solid #f0c040;
+    border-radius: 4px;
+    color: #1a0f05;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    letter-spacing: 2px;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+  .btn:hover {
+    background: linear-gradient(180deg, #f0c040 0%, #a88030 100%);
+    box-shadow: 0 0 12px rgba(240, 192, 64, 0.5);
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.btn-sm { padding: 6px 14px; font-size: 12px; }
+  .btn.btn-danger {
+    background: linear-gradient(180deg, #c04040 0%, #8a2a2a 100%);
+    border-color: #f06060;
+    color: #fff;
+  }
+  .btn.btn-danger:hover {
+    background: linear-gradient(180deg, #f06060 0%, #a83030 100%);
+  }
+  .btn.btn-warning {
+    background: linear-gradient(180deg, #d0802a 0%, #8a5010 100%);
+    border-color: #f0a040;
+    color: #fff;
+  }
+  .btn.btn-warning:hover {
+    background: linear-gradient(180deg, #f0a040 0%, #b06020 100%);
+  }
+  .btn[disabled], .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .btn.btn-ghost {
+    background: transparent;
+    border: 1px solid #8a6a2a;
+    color: #c8a868;
+  }
+  .btn.btn-ghost:hover {
+    border-color: #f0c040;
+    color: #f0c040;
+    background: rgba(240, 192, 64, 0.1);
+  }
+  .login-error {
+    color: #f06060;
+    font-size: 13px;
+    margin-top: 12px;
+    min-height: 18px;
+  }
+
+  /* ===== 後台主體 ===== */
+  .app {
+    display: flex;
+    min-height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+  /* 側邊欄 */
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, #1a0f05 0%, #0d0803 100%);
+    border-right: 2px solid #8a6a2a;
+    padding: 20px 0;
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    overflow-y: auto;
+    z-index: 10;
+  }
+  .sidebar-logo {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid #3a2a15;
+    margin-bottom: 16px;
+  }
+  .sidebar-logo h2 {
+    color: #f0c040;
+    font-size: 18px;
+    letter-spacing: 3px;
+    text-align: center;
+    text-shadow: 0 0 8px rgba(240, 192, 64, 0.4);
+  }
+  .sidebar-logo .gm-badge {
+    display: block;
+    text-align: center;
+    color: #8a6a2a;
+    font-size: 11px;
+    margin-top: 4px;
+    letter-spacing: 4px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    color: #c8a868;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-left: 3px solid transparent;
+    font-size: 14px;
+  }
+  .nav-item:hover {
+    background: rgba(240, 192, 64, 0.08);
+    color: #f0c040;
+  }
+  .nav-item.active {
+    background: rgba(240, 192, 64, 0.12);
+    color: #f0c040;
+    border-left-color: #f0c040;
+  }
+  .nav-item .icon {
+    width: 18px;
+    text-align: center;
+    font-size: 16px;
+  }
+  .nav-item.danger {
+    color: #e07070;
+    border-top: 1px solid rgba(224, 112, 112, 0.2);
+    margin-top: 8px;
+    padding-top: 14px;
+  }
+  .nav-item.danger:hover {
+    background: rgba(224, 80, 80, 0.1);
+    color: #f06060;
+  }
+  .nav-item.danger.active {
+    background: rgba(224, 80, 80, 0.15);
+    color: #f06060;
+    border-left-color: #e05050;
+  }
+  .danger-card {
+    border: 1px solid rgba(224, 80, 80, 0.4);
+    background: rgba(40, 15, 15, 0.5);
+  }
+  .checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #c8a868;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .sidebar-footer {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 12px 20px;
+    border-top: 1px solid #3a2a15;
+    font-size: 12px;
+    color: #8a6a2a;
+  }
+  .sidebar-footer .gm-account {
+    color: #f0c040;
+    margin-bottom: 4px;
+  }
+  .sidebar-footer .logout {
+    color: #c06060;
+    cursor: pointer;
+    margin-top: 6px;
+  }
+  .sidebar-footer .logout:hover { color: #f06060; }
+
+  /* 主內容 */
+  .main {
+    flex: 1;
+    margin-left: 220px;
+    padding: 24px 28px;
+  }
+  .page-header {
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #3a2a15;
+  }
+  .page-header h2 {
+    color: #f0c040;
+    font-size: 22px;
+    letter-spacing: 2px;
+  }
+  .page-header .desc {
+    color: #8a6a2a;
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  /* 卡片 */
+  .card {
+    background: rgba(26, 15, 5, 0.7);
+    border: 1px solid #3a2a15;
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h3 {
+    color: #f0c040;
+    font-size: 15px;
+    margin-bottom: 14px;
+    letter-spacing: 1px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #3a2a15;
+  }
+
+  /* 儀表板 */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: rgba(26, 15, 5, 0.7);
+    border: 1px solid #3a2a15;
+    border-radius: 6px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.2s;
+  }
+  .stat-card:hover {
+    border-color: #8a6a2a;
+    box-shadow: 0 0 16px rgba(240, 192, 64, 0.1);
+  }
+  .stat-card .value {
+    color: #f0c040;
+    font-size: 32px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    text-shadow: 0 0 10px rgba(240, 192, 64, 0.3);
+  }
+  .stat-card .label {
+    color: #8a6a2a;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .stat-card.online .value { color: #60c060; text-shadow: 0 0 10px rgba(96, 192, 96, 0.3); }
+
+  /* 表格 */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #3a2a15;
+  }
+  th {
+    color: #f0c040;
+    font-weight: normal;
+    font-size: 12px;
+    letter-spacing: 1px;
+    background: rgba(138, 106, 42, 0.1);
+  }
+  tr:hover td { background: rgba(240, 192, 64, 0.04); }
+  td .gm-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: rgba(240, 192, 64, 0.2);
+    color: #f0c040;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
+  /* 搜尋列 */
+  .search-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .search-bar input, .search-bar select, .search-bar textarea {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #8a6a2a;
+    border-radius: 4px;
+    color: #e8d6a8;
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+  }
+  .search-bar input:focus, .search-bar select:focus, .search-bar textarea:focus {
+    border-color: #f0c040;
+  }
+  .search-bar input[type="text"] { min-width: 200px; }
+  .search-bar input[type="number"] { width: 100px; }
+
+  /* 分頁 */
+  .pagination {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 16px;
+  }
+  .pagination button {
+    min-width: 32px;
+    height: 32px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #3a2a15;
+    border-radius: 4px;
+    color: #c8a868;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .pagination button:hover { border-color: #8a6a2a; color: #f0c040; }
+  .pagination button.active {
+    background: rgba(240, 192, 64, 0.2);
+    border-color: #f0c040;
+    color: #f0c040;
+  }
+  .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* 彈窗 */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: #1a0f05;
+    border: 2px solid #8a6a2a;
+    border-radius: 8px;
+    width: 640px;
+    max-width: 92%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 0 40px rgba(240, 192, 64, 0.2);
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #3a2a15;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-header h3 {
+    color: #f0c040;
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+  .modal-close {
+    color: #8a6a2a;
+    cursor: pointer;
+    font-size: 20px;
+    background: none;
+    border: none;
+  }
+  .modal-close:hover { color: #f0c040; }
+  .modal-body { padding: 20px; }
+  .modal-footer {
+    padding: 14px 20px;
+    border-top: 1px solid #3a2a15;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  /* 分頁籤 */
+  .tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #3a2a15;
+  }
+  .tab {
+    padding: 10px 20px;
+    color: #8a6a2a;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .tab:hover { color: #f0c040; }
+  .tab.active {
+    color: #f0c040;
+    border-bottom-color: #f0c040;
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* 廣播列表 */
+  .broadcast-item {
+    padding: 12px;
+    border: 1px solid #3a2a15;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, 0.3);
+  }
+  .broadcast-item .meta {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: #8a6a2a;
+  }
+  .broadcast-item .meta .type {
+    padding: 1px 6px;
+    background: rgba(240, 192, 64, 0.2);
+    color: #f0c040;
+    border-radius: 3px;
+  }
+  .broadcast-item .text {
+    color: #e8d6a8;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* 表單區塊 */
+  .form-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .form-row label {
+    min-width: 80px;
+    color: #c8a868;
+    font-size: 13px;
+  }
+  .form-row input, .form-row select, .form-row textarea {
+    flex: 1;
+    min-width: 120px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #8a6a2a;
+    border-radius: 4px;
+    color: #e8d6a8;
+    padding: 8px 10px;
+    font-size: 13px;
+    outline: none;
+  }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus {
+    border-color: #f0c040;
+  }
+  textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: rgba(26, 15, 5, 0.95);
+    border: 1px solid #8a6a2a;
+    border-radius: 4px;
+    color: #f0c040;
+    font-size: 13px;
+    z-index: 2000;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    transform: translateX(120%);
+    transition: transform 0.3s;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.error { border-color: #c06060; color: #f06060; }
+  .toast.success { border-color: #60c060; color: #60c060; }
+
+  /* 響應式：手機改為 drawer 模式 */
+  @media (max-width: 768px) {
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: -260px;
+      width: 240px;
+      height: 100vh;
+      z-index: 1000;
+      transition: left 0.3s ease;
+      overflow-y: auto;
+    }
+    .sidebar.open { left: 0; }
+    .sidebar-logo h2, .sidebar-logo .gm-badge,
+    .nav-item span:not(.icon), .sidebar-footer .gm-account { display: block; }
+    .nav-item { justify-content: flex-start; padding: 12px 16px; }
+    .main { margin-left: 0; padding: 16px; padding-top: 56px; }
+    .modal { width: 95%; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .gm-mobile-header {
+      display: flex;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: linear-gradient(180deg, #1a1208, #120a04);
+      border-bottom: 1px solid #3a2a15;
+      align-items: center;
+      padding: 0 12px;
+      z-index: 999;
+      gap: 12px;
+    }
+    .gm-hamburger {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      background: #2a1a08;
+      border: 1px solid #4a3015;
+      border-radius: 4px;
+    }
+    .gm-hamburger span {
+      display: block;
+      width: 20px;
+      height: 2px;
+      background: #c8a868;
+      border-radius: 1px;
+    }
+    .gm-mobile-title {
+      color: #e8c060;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .gm-drawer-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 999;
+    }
+    .gm-drawer-overlay.open { display: block; }
+  }
+
+  @media (min-width: 769px) {
+    .gm-mobile-header, .gm-drawer-overlay { display: none !important; }
+  }
+
+  .hidden { display: none !important; }
+  .text-right { text-align: right; }
+  .mt-10 { margin-top: 10px; }
+  .mt-16 { margin-top: 16px; }
+  .flex { display: flex; }
+  .gap-8 { gap: 8px; }
+  .gap-12 { gap: 12px; }
+  .flex-wrap { flex-wrap: wrap; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+  .w-full { width: 100%; }
+
+  /* Bug 回報樣式 */
+  .bug-item {
+    padding: 12px;
+    border: 1px solid #3a2a15;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    background: rgba(0, 0, 0, 0.3);
+  }
+  .bug-item .bug-head {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .bug-item .bug-id {
+    color: #8a6a2a;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  .bug-item .bug-account {
+    color: #f0c040;
+    font-size: 12px;
+  }
+  .bug-item .bug-desc {
+    color: #e8d6a8;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+  .bug-item .bug-meta {
+    color: #8a6a2a;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 登入頁 ===== -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-box">
+    <h1>GM 後台</h1>
+    <div class="subtitle">君主之刃 · 管理系統</div>
+    <div class="form-group">
+      <label>GM 帳號</label>
+      <input type="text" id="loginAccount" placeholder="請輸入 GM 帳號" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>密碼</label>
+      <input type="password" id="loginPassword" placeholder="請輸入密碼" autocomplete="current-password">
+    </div>
+    <button class="btn w-full" onclick="doLogin()">登入</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- ===== 後台主體 ===== -->
+<div class="app hidden" id="app">
+  <!-- 手機版頂部欄 -->
+  <div class="gm-mobile-header">
+    <div class="gm-hamburger" onclick="toggleDrawer()">
+      <span></span><span></span><span></span>
+    </div>
+    <div class="gm-mobile-title">GM 後台</div>
+  </div>
+  <div class="gm-drawer-overlay" onclick="toggleDrawer()"></div>
+  <!-- 側邊欄 -->
+  <div class="sidebar" id="gmSidebar">
+    <div class="sidebar-logo">
+      <h2>GM 後台</h2>
+      <span class="gm-badge">MONARCH BLADE</span>
+    </div>
+    <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
+      <span class="icon">⚔</span><span>概況儀表板</span>
+    </div>
+    <div class="nav-item" data-page="online" onclick="switchPage('online')">
+      <span class="icon">👥</span><span>線上玩家</span>
+    </div>
+    <div class="nav-item" data-page="players" onclick="switchPage('players')">
+      <span class="icon">👤</span><span>玩家管理</span>
+    </div>
+    <div class="nav-item" data-page="reward" onclick="switchPage('reward')">
+      <span class="icon">🎁</span><span>道具/裝備管理</span>
+    </div>
+    <div class="nav-item" data-page="transform" onclick="switchPage('transform')">
+      <span class="icon">✦</span><span>變身管理</span>
+    </div>
+    <div class="nav-item" data-page="announce" onclick="switchPage('announce')">
+      <span class="icon">📣</span><span>公告管理</span>
+    </div>
+    <div class="nav-item" data-page="castle" onclick="switchPage('castle')">
+      <span class="icon">🏰</span><span>攻城/城堡設定</span>
+    </div>
+    <div class="nav-item highlight" data-page="servers" onclick="switchPage('servers')">
+      <span class="icon">🌐</span><span>★伺服器管理</span>
+    </div>
+    <div class="nav-item danger" data-page="database" onclick="switchPage('database')">
+      <span class="icon">☠</span><span>資料庫管理</span>
+    </div>
+    <div class="nav-item" data-page="gmlog" onclick="switchPage('gmlog')">
+      <span class="icon">📋</span><span>操作日誌</span>
+    </div>
+    <div class="nav-item" data-page="bug" onclick="switchPage('bug')">
+      <span class="icon">🐛</span><span>Bug 回報</span>
+    </div>
+    <div class="sidebar-footer">
+      <div class="gm-account" id="gmAccount">--</div>
+      <div id="gmServerStatus">伺服器: 連線中</div>
+      <div class="logout" onclick="doLogout()">登出</div>
+    </div>
+  </div>
+
+  <!-- 主內容 -->
+  <div class="main">
+
+    <!-- ===== 儀表板 ===== -->
+    <div class="page" id="page-dashboard">
+      <div class="page-header">
+        <h2>概況儀表板</h2>
+        <div class="desc">即時監控伺服器運行狀態</div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card online">
+          <div class="value" id="statOnline">--</div>
+          <div class="label">線上玩家</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statTotal">--</div>
+          <div class="label">註冊總數</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statStatus">--</div>
+          <div class="label">伺服器狀態</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statVersion">--</div>
+          <div class="label">版本</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>伺服器資訊</h3>
+        <div style="font-size: 13px; color: #c8a868; line-height: 2;">
+          <div>資料庫後端：<span id="dbBackend">--</span></div>
+          <div>資產數量：<span id="assetCount">--</span></div>
+          <div>即時同步：<span id="syncMode">--</span></div>
+          <div>最後更新：<span id="lastUpdate">--</span></div>
+        </div>
+        <div class="mt-16">
+          <button class="btn btn-sm btn-ghost" onclick="loadDashboard()">重新整理</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 玩家管理 ===== -->
+    <div class="page hidden" id="page-players">
+      <div class="page-header">
+        <h2>玩家管理</h2>
+        <div class="desc">搜尋與編輯玩家資料</div>
+      </div>
+      <div class="search-bar">
+        <input type="text" id="playerSearch" placeholder="輸入帳號搜尋..." onkeyup="if(event.key==='Enter')searchPlayers()">
+        <button class="btn btn-sm" onclick="searchPlayers()">搜尋</button>
+        <button class="btn btn-sm btn-ghost" onclick="resetPlayerSearch()">重置</button>
+        <span style="color:#8a6a2a;font-size:12px;margin-left:auto;" id="playerTotal">共 0 筆</span>
+      </div>
+      <div class="card" style="padding:0;">
+        <table>
+          <thead>
+            <tr>
+              <th>帳號</th>
+              <th>身分</th>
+              <th>角色數</th>
+              <th>註冊時間</th>
+              <th style="width:120px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="playerTableBody">
+            <tr><td colspan="5" style="text-align:center;color:#8a6a2a;padding:24px;">載入中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="playerPagination"></div>
+    </div>
+
+    <!-- ===== 全服廣播 ===== -->
+    <div class="page hidden" id="page-broadcast">
+      <div class="page-header">
+        <h2>全服廣播</h2>
+        <div class="desc">發送全服公告與活動通知</div>
+      </div>
+      <div class="card">
+        <h3>發送廣播</h3>
+        <div class="form-row">
+          <label>類型</label>
+          <select id="bcType" style="flex:0 0 140px;">
+            <option value="system">系統公告</option>
+            <option value="event">活動通知</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>內容</label>
+          <textarea id="bcText" placeholder="輸入廣播內容..."></textarea>
+        </div>
+        <div class="text-right mt-10">
+          <button class="btn" onclick="sendBroadcast()">發送廣播</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>廣播歷史</h3>
+        <div id="broadcastList">
+          <div style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 發放獎勵 ===== -->
+    <div class="page hidden" id="page-reward">
+      <div class="page-header">
+        <h2>發放獎勵</h2>
+        <div class="desc">全服或指定玩家發放獎勵</div>
+      </div>
+      <div class="tabs">
+        <div class="tab active" onclick="switchRewardTab('all')">全服發放</div>
+        <div class="tab" onclick="switchRewardTab('single')">指定玩家</div>
+      </div>
+
+      <div class="tab-content active" id="tab-all">
+        <div class="card">
+          <h3>全服發放獎勵</h3>
+          <div class="form-row">
+            <label>類型</label>
+            <select id="rewardAllType" onchange="toggleRewardAllItem()">
+              <option value="gem">鑽石</option>
+              <option value="gold">金幣</option>
+              <option value="item">道具</option>
+            </select>
+          </div>
+          <div class="form-row" id="rewardAllAmountRow">
+            <label>數量</label>
+            <input type="number" id="rewardAllAmount" value="100" min="1">
+          </div>
+          <div class="form-row hidden" id="rewardAllItemIdRow">
+            <label>道具ID</label>
+            <input type="text" id="rewardAllItemId" placeholder="例: item_001">
+          </div>
+          <div class="form-row hidden" id="rewardAllItemNameRow">
+            <label>道具名稱</label>
+            <input type="text" id="rewardAllItemName" placeholder="例: 體力藥水">
+          </div>
+          <div class="text-right mt-10">
+            <button class="btn" onclick="giveAllReward()">全服發放</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-single">
+        <div class="card">
+          <h3>指定玩家發放</h3>
+          <div class="form-row">
+            <label>玩家帳號</label>
+            <input type="text" id="rewardSingleAccount" placeholder="輸入玩家帳號">
+          </div>
+          <div class="form-row">
+            <label>操作</label>
+            <select id="rewardSingleAction">
+              <option value="addGem">增加鑽石</option>
+              <option value="addGold">增加金幣</option>
+              <option value="setGem">設定鑽石</option>
+              <option value="setGold">設定金幣</option>
+              <option value="setLevel">設定等級</option>
+              <option value="setExp">設定經驗</option>
+              <option value="giveItem">給予道具</option>
+              <option value="addTransform">增加變身</option>
+              <option value="removeTransform">移除變身</option>
+              <option value="addHero">增加英雄</option>
+              <option value="removeHero">移除英雄</option>
+              <option value="teleport">傳送</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>數值 / 數量</label>
+            <input type="text" id="rewardSingleValue" value="100" placeholder="數值">
+          </div>
+          <div class="form-row">
+            <label>道具/變身/英雄ID</label>
+            <input type="text" id="rewardSingleItemId" placeholder="選填，道具/變身/英雄ID">
+          </div>
+          <div class="text-right mt-10">
+      <button class="btn" onclick="giveSingleReward()">發放</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 道具裝備編輯器 ===== -->
+      <div class="page hidden" id="page-items">
+        <div class="page-header">
+          <h2>道具裝備編輯器</h2>
+          <div class="desc">新增與編輯自訂義道具/裝備</div>
+        </div>
+        <div class="card">
+          <h3>新增/更新道具</h3>
+          <div class="form-row">
+            <label>道具ID</label>
+            <input type="text" id="itemId" placeholder="例: custom_sword_001">
+          </div>
+          <div class="form-row">
+            <label>名稱</label>
+            <input type="text" id="itemName" placeholder="道具名稱">
+          </div>
+          <div class="form-row">
+            <label>類型</label>
+            <select id="itemType">
+              <option value="consumable">消耗品</option>
+              <option value="weapon">武器</option>
+              <option value="armor">防具</option>
+              <option value="accessory">飾品</option>
+              <option value="boots">鞋子</option>
+              <option value="helmet">頭盔</option>
+              <option value="transform">變身卡</option>
+              <option value="hero">英雄</option>
+              <option value="pet">守護</option>
+            </select>
+            <label>品階</label>
+            <select id="itemRarity">
+              <option value="common">普通</option>
+              <option value="green">綠色</option>
+              <option value="blue">藍色</option>
+              <option value="purple">紫色</option>
+              <option value="orange">橙色</option>
+              <option value="legendary">傳說</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>等級需求</label>
+            <input type="number" id="itemLvlReq" value="1" min="1" style="flex:0 0 120px;">
+            <label>價格</label>
+            <input type="number" id="itemPrice" value="0" min="0" style="flex:0 0 120px;">
+            <label>職業限制</label>
+            <select id="itemClass" style="flex:0 0 140px;">
+              <option value="">無限制</option>
+              <option value="warrior">戰士</option>
+              <option value="paladin">聖騎士</option>
+              <option value="rogue">盜賊</option>
+              <option value="archer">弓箭手</option>
+              <option value="mage">法師</option>
+              <option value="warlock">術士</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>能力值 (JSON)</label>
+            <input type="text" id="itemStats" placeholder='例: {"atk":100,"def":50}'>
+          </div>
+          <div class="form-row">
+            <label>描述</label>
+            <textarea id="itemDesc" placeholder="道具描述" rows="2"></textarea>
+          </div>
+          <div class="form-row">
+            <label>圖示路徑</label>
+            <input type="text" id="itemIcon" placeholder="assets/item/icon_sword.jpg">
+          </div>
+          <div class="text-right mt-10">
+            <button class="btn btn-ghost" onclick="clearItemForm()">清空</button>
+            <button class="btn" onclick="saveItem()">儲存道具</button>
+          </div>
+        </div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3>道具列表</h3>
+            <select id="itemFilterType" onchange="loadItems()" style="width:140px;">
+              <option value="">全部</option>
+              <option value="consumable">消耗品</option>
+              <option value="weapon">武器</option>
+              <option value="armor">防具</option>
+              <option value="transform">變身</option>
+              <option value="hero">英雄</option>
+              <option value="pet">守護</option>
+            </select>
+          </div>
+          <div id="itemList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 攻城戰設定 ===== -->
+      <div class="page hidden" id="page-castle">
+        <div class="page-header">
+          <h2>攻城戰設定</h2>
+          <div class="desc">調整攻城時間、指定城堡歸屬</div>
+        </div>
+        <div class="card">
+          <div id="castleList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 遊戲公告 ===== -->
+      <div class="page hidden" id="page-announce">
+        <div class="page-header">
+          <h2>遊戲公告</h2>
+          <div class="desc">跑馬燈、登入公告、即時廣播</div>
+        </div>
+        <div class="card">
+          <h3>新增公告</h3>
+          <div class="form-row">
+            <label>類型</label>
+            <select id="annType" style="flex:0 0 160px;">
+              <option value="marquee">跑馬燈</option>
+              <option value="login">登入公告</option>
+              <option value="broadcast">即時廣播</option>
+            </select>
+            <label>優先級</label>
+            <input type="number" id="annPriority" value="0" min="0" style="flex:0 0 80px;">
+          </div>
+          <div class="form-row">
+            <label>標題</label>
+            <input type="text" id="annTitle" placeholder="選填">
+          </div>
+          <div class="form-row">
+            <label>內容</label>
+            <textarea id="annContent" placeholder="公告內容..." rows="3"></textarea>
+          </div>
+          <div class="text-right mt-10">
+            <button class="btn" onclick="createAnnouncement()">發布公告</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>公告列表</h3>
+          <div id="annList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 遊戲參數 ===== -->
+      <div class="page hidden" id="page-config">
+        <div class="page-header">
+          <h2>遊戲參數</h2>
+          <div class="desc">全域倍率與平衡設定</div>
+        </div>
+        <div class="card">
+          <div id="configList" style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+        </div>
+      </div>
+
+      <!-- ===== GM 操作日誌 ===== -->
+      <div class="page hidden" id="page-gmlog">
+        <div class="page-header">
+          <h2>GM 操作日誌</h2>
+          <div class="desc">所有 GM 操作留痕</div>
+        </div>
+        <div class="card" style="padding:0;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:180px;">時間</th>
+                <th style="width:120px;">GM</th>
+                <th style="width:120px;">對象</th>
+                <th style="width:120px;">動作</th>
+                <th>細節</th>
+              </tr>
+            </thead>
+            <tbody id="gmLogBody">
+              <tr><td colspan="5" style="text-align:center;color:#8a6a2a;padding:24px;">載入中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    <!-- ===== Bug 回報 ===== -->
+    <div class="page hidden" id="page-bug">
+      <div class="page-header">
+        <h2>Bug 回報</h2>
+        <div class="desc">檢視與處理玩家回報的問題</div>
+      </div>
+      <div class="flex justify-between items-center mb-10">
+        <span style="color:#8a6a2a;font-size:13px;" id="bugCount">共 0 筆</span>
+        <button class="btn btn-sm btn-danger" onclick="clearAllBugs()">清空全部</button>
+      </div>
+      <div id="bugList">
+        <div style="color:#8a6a2a;text-align:center;padding:20px;">載入中...</div>
+      </div>
+    </div>
+
+    <!-- ===== 伺服器管理（v2.6.0 新增） ===== -->
+    <div class="page hidden" id="page-servers">
+      <div class="page-header">
+        <h2 style="color:#60d0ff;">🌐 伺服器管理</h2>
+        <div class="desc">建立與管理遊戲伺服器，控制開放狀態、人數上限與初始設定</div>
+      </div>
+      <div class="card">
+        <div class="flex justify-between items-center">
+          <h3>伺服器清單</h3>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm" onclick="openServerModal()">+ 新增伺服器</button>
+            <button class="btn btn-sm btn-ghost" onclick="resetAllAI()" title="清除所有AI持久化檔案並重新生成">↻ 重置全部 AI</button>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名稱</th>
+                <th>狀態</th>
+                <th>AI數量</th>
+                <th>初始等級</th>
+                <th>人數上限</th>
+                <th>線上</th>
+                <th>建立時間</th>
+                <th style="width:200px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="serverTableBody">
+              <tr><td colspan="9" style="text-align:center;color:#8a6a2a;padding:24px;">載入中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 伺服器編輯彈窗 -->
+    <div class="modal hidden" id="serverModal">
+      <div class="modal-header">
+        <h3 id="serverModalTitle">新增伺服器</h3>
+        <button class="modal-close" onclick="closeServerModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>伺服器 ID <span style="color:#e05050;">*</span></label>
+          <input type="text" id="srvId" placeholder="例如：zeus" maxlength="32">
+        </div>
+        <div class="form-row">
+          <label>伺服器名稱 <span style="color:#e05050;">*</span></label>
+          <input type="text" id="srvName" placeholder="例如：宙斯" maxlength="32">
+        </div>
+        <div class="form-row">
+          <label>狀態</label>
+          <select id="srvStatus">
+            <option value="open">open - 玩家可進入</option>
+            <option value="preparing">preparing - 準備中（顯示鎖定）</option>
+            <option value="closed">closed - 維護中</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>AI 數量</label>
+          <input type="number" id="srvAiCount" value="5" min="0" max="50">
+        </div>
+        <div class="form-row">
+          <label>初始等級</label>
+          <input type="number" id="srvInitLevel" value="1" min="1" max="99">
+        </div>
+        <div class="form-row">
+          <label>人數上限</label>
+          <input type="number" id="srvMaxPlayers" value="200" min="1" max="1000">
+        </div>
+        <div class="form-row">
+          <label>伺服器資訊</label>
+          <textarea id="srvInfo" rows="3" placeholder="伺服器描述或備註"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeServerModal()">取消</button>
+        <button class="btn" onclick="saveServer()">儲存</button>
+      </div>
+    </div>
+
+    <!-- ===== 資料庫管理（危險區塊） ===== -->
+    <div class="page hidden" id="page-database">
+      <div class="page-header">
+        <h2 style="color:#e05050;">☠ 資料庫管理</h2>
+        <div class="desc" style="color:#e07070;">危險區塊：以下操作不可逆，請謹慎使用</div>
+      </div>
+
+      <!-- 即時統計 -->
+      <div class="card">
+        <h3>各表即時筆數</h3>
+        <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);" id="dbStatsGrid">
+          <div class="stat-card"><div class="value" id="dbStat-accounts">--</div><div class="label">帳號</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-characters">--</div><div class="label">角色</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-account_shared">--</div><div class="label">帳號共享</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-warehouse_logs">--</div><div class="label">倉庫記錄</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-announcements">--</div><div class="label">公告</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-gm_action_logs">--</div><div class="label">GM 日誌</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-bug_reports">--</div><div class="label">Bug 回報</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-game_config">--</div><div class="label">遊戲參數</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-castle_states">--</div><div class="label">城堡狀態</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-custom_items">--</div><div class="label">自定義道具</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-game_servers">--</div><div class="label">伺服器</div></div>
+          <div class="stat-card"><div class="value" id="dbStat-leaderboard_entries">--</div><div class="label">排行榜</div></div>
+        </div>
+        <div class="mt-16 flex gap-10">
+          <button class="btn btn-sm btn-ghost" onclick="loadDbStats()">重新整理</button>
+          <span style="color:#8a6a2a;font-size:12px;align-self:center;" id="dbStatsTime"></span>
+        </div>
+      </div>
+
+      <!-- 一鍵清空快捷列 -->
+      <div class="card danger-card">
+        <h3 style="color:#e05050;">⚡ 一鍵清空數據</h3>
+        <div class="desc" style="color:#c06060;margin-bottom:12px;">三個層級的清空操作，按鈕點擊後立即執行，請謹慎操作。</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+          <div style="background:rgba(40,30,20,0.6);border:1px solid rgba(200,140,60,0.3);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;color:#e0a860;margin-bottom:4px;">清空 AI 數據</div>
+            <div style="font-size:12px;color:#a08050;margin-bottom:10px;">刪除所有伺服器 AI 實體與持久化檔案，按 GM 設定的 aiCount 重新生成</div>
+            <button class="btn" style="background:#a07028;width:100%;" onclick="confirmClearAI()">清空 AI 數據</button>
+          </div>
+          <div style="background:rgba(40,30,20,0.6);border:1px solid rgba(200,140,60,0.3);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;color:#e0a860;margin-bottom:4px;">清空排行榜</div>
+            <div style="font-size:12px;color:#a08050;margin-bottom:10px;">刪除排行榜所有記錄，下次從真實玩家 + AI 重新計算</div>
+            <button class="btn" style="background:#a07028;width:100%;" onclick="confirmClearLeaderboard()">清空排行榜</button>
+          </div>
+          <div style="background:rgba(60,20,20,0.6);border:1px solid rgba(224,80,80,0.4);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;color:#e05050;margin-bottom:4px;">重置全部數據</div>
+            <div style="font-size:12px;color:#c06060;margin-bottom:10px;">清空所有玩家角色、背包、AI、排行榜（保留帳號表？→ 見下方詳細）</div>
+            <button class="btn btn-danger" style="width:100%;" onclick="scrollToFullReset()">前往完整重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 全部重置 -->
+      <div class="card danger-card">
+        <h3 style="color:#e05050;">全部重置</h3>
+        <div class="desc" style="color:#c06060;">清空所有遊戲資料：帳號、角色、共享資料、倉庫、公告、日誌、Bug 回報。game_config 與 castle_states 重置為預設值。GM 帳號會自動重建。</div>
+        <div class="form-row mt-16">
+          <label>保留自定義道具</label>
+          <label class="checkbox-inline">
+            <input type="checkbox" id="resetKeepCustom" checked> 保留 custom_items 表
+          </label>
+        </div>
+        <div class="form-row">
+          <label>確認字 <span style="color:#e05050;">*</span></label>
+          <input type="text" id="resetConfirm" placeholder="請輸入 RESET 以確認" oninput="checkResetConfirm()">
+        </div>
+        <div class="text-right mt-10">
+          <button class="btn btn-danger" id="btnResetAll" disabled onclick="confirmResetAll()">全部重置</button>
+        </div>
+      </div>
+
+      <!-- 只清角色 -->
+      <div class="card danger-card">
+        <h3 style="color:#e07050;">只清角色</h3>
+        <div class="desc" style="color:#c06060;">刪除所有角色、帳號共享資料與倉庫記錄，但保留帳號（玩家可重新登入創角）。</div>
+        <div class="text-right mt-16">
+          <button class="btn btn-warning" onclick="confirmResetCharacters()">清空角色資料</button>
+        </div>
+      </div>
+
+      <!-- 清空日誌 -->
+      <div class="card danger-card">
+        <h3 style="color:#c08040;">清空日誌</h3>
+        <div class="desc" style="color:#c06060;">清空 GM 操作日誌與 Bug 回報。本次操作本身會留下一條記錄。</div>
+        <div class="text-right mt-16">
+          <button class="btn" style="background:#8a5a2a;" onclick="confirmResetLogs()">清空日誌</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== 玩家編輯彈窗 ===== -->
+<div class="modal-overlay" id="playerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">玩家編輯</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody">
+      <!-- 動態內容 -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== 全域變數 =====
+const API_BASE = '';
+let gmToken = localStorage.getItem('gmToken') || '';
+let gmAccount = localStorage.getItem('gmAccount') || '';
+let currentPage = 'dashboard';
+let playerPage = 1;
+let playerPageSize = 20;
+let playerTotal = 0;
+let playerSearchKw = '';
+
+// ===== 工具函數 =====
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+async function apiCall(path, options = {}) {
+  const headers = options.headers || {};
+  headers['Content-Type'] = 'application/json';
+  if (gmToken) headers['Authorization'] = 'Bearer ' + gmToken;
+  try {
+    const res = await fetch(API_BASE + path, { ...options, headers });
+    const data = await res.json();
+    if (res.status === 401 || res.status === 403) {
+      if (path !== '/api/gm/login') {
+        showToast('登入已過期，請重新登入', 'error');
+        doLogout();
+      }
+    }
+    return data;
+  } catch (e) {
+    showToast('網路錯誤: ' + e.message, 'error');
+    return { error: e.message };
+  }
+}
+
+// ===== 登入 =====
+function doLogin() {
+  const account = document.getElementById('loginAccount').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  if (!account || !password) {
+    errEl.textContent = '請輸入帳號與密碼';
+    return;
+  }
+  apiCall('/api/gm/login', {
+    method: 'POST',
+    body: JSON.stringify({ account, password }),
+  }).then(data => {
+    if (data.ok && data.token) {
+      gmToken = data.token;
+      gmAccount = data.account;
+      localStorage.setItem('gmToken', gmToken);
+      localStorage.setItem('gmAccount', gmAccount);
+      showToast('登入成功', 'success');
+      enterApp();
+    } else {
+      errEl.textContent = data.error || '登入失敗';
+    }
+  });
+}
+
+function doLogout() {
+  gmToken = '';
+  gmAccount = '';
+  localStorage.removeItem('gmToken');
+  localStorage.removeItem('gmAccount');
+  document.getElementById('loginWrap').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+}
+
+function enterApp() {
+  document.getElementById('loginWrap').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('gmAccount').textContent = 'GM: ' + gmAccount;
+  switchPage('dashboard');
+}
+
+// ===== 頁面切換 =====
+function switchPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  document.querySelectorAll('.page').forEach(el => el.classList.add('hidden'));
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.remove('hidden');
+
+  if (page === 'dashboard') loadDashboard();
+  else if (page === 'players') searchPlayers();
+  else if (page === 'broadcast') loadBroadcasts();
+  else if (page === 'announce') loadAnnouncements();
+  else if (page === 'items') loadItems();
+  else if (page === 'castle') loadCastles();
+  else if (page === 'config') loadConfig();
+  else if (page === 'gmlog') loadGMLogs();
+  else if (page === 'bug') loadBugs();
+  else if (page === 'database') loadDbStats();
+  else if (page === 'servers') loadServerList();
+  // 手機版：切頁後關閉 drawer
+  if (window.innerWidth <= 768) closeDrawer();
+}
+
+// ===== 手機版 Drawer 切換 =====
+function toggleDrawer() {
+  const sidebar = document.getElementById('gmSidebar');
+  const overlay = document.querySelector('.gm-drawer-overlay');
+  if (!sidebar || !overlay) return;
+  if (sidebar.classList.contains('open')) {
+    closeDrawer();
+  } else {
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+  }
+}
+function closeDrawer() {
+  const sidebar = document.getElementById('gmSidebar');
+  const overlay = document.querySelector('.gm-drawer-overlay');
+  if (sidebar) sidebar.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+// ===== 伺服器管理 =====
+let currentServerEditId = null;
+
+async function loadServerList() {
+  const tbody = document.getElementById('serverTableBody');
+  if (!tbody) return;
+  try {
+    const data = await apiCall('/api/gm/server/list');
+    if (data && data.ok && data.servers) {
+      const servers = data.servers;
+      if (servers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#8a6a2a;padding:24px;">尚無伺服器，請點「新增伺服器」建立</td></tr>';
+        return;
+      }
+      tbody.innerHTML = servers.map(s => {
+        const statusLabel = { open: '開放', preparing: '準備中', closed: '維護' }[s.status] || s.status;
+        const statusClass = s.status === 'open' ? 'status-open' : s.status === 'preparing' ? 'status-preparing' : 'status-closed';
+        return `
+          <tr>
+            <td><code style="color:#c8a868;">${s.id}</code></td>
+            <td><strong>${s.name}</strong></td>
+            <td><span class="${statusClass}" style="padding:2px 8px;border-radius:3px;font-size:12px;">${statusLabel}</span></td>
+            <td>${s.aiCount}</td>
+            <td>${s.initLevel}</td>
+            <td>${s.maxPlayers}</td>
+            <td>${s.onlineCount != null ? s.onlineCount : '--'}</td>
+            <td style="font-size:12px;color:#8a6a2a;">${s.createdAt ? new Date(s.createdAt).toLocaleDateString('zh-TW') : '--'}</td>
+             <td>
+               <div class="flex gap-6" style="flex-wrap:wrap;">
+                 <button class="btn btn-xs" onclick="editServer('${s.id}')">編輯</button>
+                 <button class="btn btn-xs btn-ghost" onclick="toggleServerStatus('${s.id}', '${s.status}')">
+                   ${s.status === 'open' ? '關閉' : '開啟'}
+                 </button>
+                 <button class="btn btn-xs" onclick="resetServerAI('${s.id}')" title="清空AI持久化並重新生成">重設AI</button>
+                 <button class="btn btn-xs btn-danger" onclick="deleteServer('${s.id}')">刪除</button>
+               </div>
+             </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#e05050;padding:24px;">載入失敗：${e.message}</td></tr>`;
+  }
+}
+
+function openServerModal(srv) {
+  currentServerEditId = srv ? srv.id : null;
+  document.getElementById('serverModalTitle').textContent = srv ? '編輯伺服器' : '新增伺服器';
+  document.getElementById('srvId').value = srv ? srv.id : '';
+  document.getElementById('srvId').disabled = !!srv; // 編輯時不可改ID
+  document.getElementById('srvName').value = srv ? srv.name : '';
+  document.getElementById('srvStatus').value = srv ? srv.status : 'closed';
+  document.getElementById('srvAiCount').value = srv ? srv.aiCount : 5;
+  document.getElementById('srvInitLevel').value = srv ? srv.initLevel : 1;
+  document.getElementById('srvMaxPlayers').value = srv ? srv.maxPlayers : 200;
+  document.getElementById('srvInfo').value = srv ? (srv.info || '') : '';
+  document.getElementById('serverModal').classList.remove('hidden');
+}
+
+function closeServerModal() {
+  document.getElementById('serverModal').classList.add('hidden');
+  currentServerEditId = null;
+}
+
+async function saveServer() {
+  const id = document.getElementById('srvId').value.trim();
+  const name = document.getElementById('srvName').value.trim();
+  const status = document.getElementById('srvStatus').value;
+  const aiCount = parseInt(document.getElementById('srvAiCount').value) || 0;
+  const initLevel = parseInt(document.getElementById('srvInitLevel').value) || 1;
+  const maxPlayers = parseInt(document.getElementById('srvMaxPlayers').value) || 200;
+  const info = document.getElementById('srvInfo').value.trim();
+  
+  if (!id) { showToast('請輸入伺服器ID', 'error'); return; }
+  if (!name) { showToast('請輸入伺服器名稱', 'error'); return; }
+  
+  try {
+    if (currentServerEditId) {
+      // 編輯
+      await apiCall('/api/gm/server/update', {
+        method: 'POST',
+        body: JSON.stringify({ id: currentServerEditId, name, status, aiCount, initLevel, maxPlayers, info }),
+      });
+      showToast('更新成功', 'success');
+    } else {
+      // 新增
+      await apiCall('/api/gm/server/create', {
+        method: 'POST',
+        body: JSON.stringify({ id, name, status, aiCount, initLevel, maxPlayers, info }),
+      });
+      showToast('建立成功', 'success');
+    }
+    closeServerModal();
+    loadServerList();
+  } catch (e) {
+    showToast('操作失敗：' + e.message, 'error');
+  }
+}
+
+async function editServer(id) {
+  try {
+    const data = await apiCall('/api/gm/server/list');
+    if (data && data.ok && data.servers) {
+      const srv = data.servers.find(s => s.id === id);
+      if (srv) openServerModal(srv);
+    }
+  } catch (e) {
+    showToast('載入失敗：' + e.message, 'error');
+  }
+}
+
+async function toggleServerStatus(id, currentStatus) {
+  // open <-> closed 快速切換；preparing 需要手動編輯
+  const next = currentStatus === 'open' ? 'closed' : 'open';
+  try {
+    await apiCall('/api/gm/server/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ id, status: next }),
+    });
+    showToast('狀態已切換為 ' + next, 'success');
+    loadServerList();
+  } catch (e) {
+    showToast('切換失敗：' + e.message, 'error');
+  }
+}
+
+async function deleteServer(id) {
+  if (!confirm('確定要刪除伺服器「' + id + '」嗎？此操作不可逆！')) return;
+  if (!confirm('再次確認：真的要刪除此伺服器嗎？')) return;
+  try {
+    await apiCall('/api/gm/server/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    showToast('已刪除', 'success');
+    loadServerList();
+  } catch (e) {
+    showToast('刪除失敗：' + e.message, 'error');
+  }
+}
+
+// v2.7.5：重置單一伺服器的 AI
+async function resetServerAI(id) {
+  if (!confirm('確定要重置伺服器「' + id + '」的所有 AI 嗎？\n（清空持久化檔案、重新生成）')) return;
+  try {
+    const data = await apiCall('/api/gm/server/reset-ai', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+    if (data && data.ok) {
+      showToast('AI 已重置，影響 ' + (data.mapsReset || 0) + ' 張地圖', 'success');
+      loadServerList();
+    }
+  } catch (e) {
+    showToast('重置失敗：' + e.message, 'error');
+  }
+}
+
+// v2.7.5：重置全部伺服器的 AI
+async function resetAllAI() {
+  if (!confirm('確定要重置所有伺服器的 AI 嗎？\n（這會清除所有 data/ai 持久化檔案）')) return;
+  if (!confirm('再次確認：真的要重置全部 AI 嗎？')) return;
+  try {
+    const data = await apiCall('/api/gm/admin/reset-ai-all', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    if (data && data.ok) {
+      showToast('全部 AI 已重置（' + data.serverCount + ' 服 / ' + data.totalMaps + ' 張地圖）', 'success');
+      loadServerList();
+    }
+  } catch (e) {
+    showToast('重置失敗：' + e.message, 'error');
+  }
+}
+
+// ===== 儀表板 =====
+async function loadDashboard() {
+  const [health, online, players, stats] = await Promise.all([
+    apiCall('/api/health'),
+    apiCall('/api/gm/online'),
+    apiCall('/api/gm/players?page=1&pageSize=1'),
+    apiCall('/api/gm/admin/stats').catch(() => null),
+  ]);
+
+  if (health && health.status) {
+    document.getElementById('statStatus').textContent = health.status === 'online' ? '運行中' : health.status;
+    document.getElementById('statVersion').textContent = health.version || '--';
+    const dbBackend = health.dbBackend || '--';
+    const dbErr = health.dbError;
+    const dbEl = document.getElementById('dbBackend');
+    if (dbErr) {
+      dbEl.textContent = dbBackend + '（錯誤：' + dbErr + '）';
+      dbEl.style.color = '#e06060';
+    } else {
+      dbEl.textContent = dbBackend;
+      dbEl.style.color = dbBackend === 'postgres' ? '#60c080' : '#c8a868';
+    }
+    document.getElementById('assetCount').textContent = health.assetCount || '--';
+    // v2.9.0：正確顯示即時同步方式 — 優先 WebSocket，其次 long-poll
+    const syncEl = document.getElementById('syncMode');
+    if (health.webSocket && health.wsCount != null && health.wsCount > 0) {
+      syncEl.textContent = 'WebSocket（' + health.wsCount + ' 人在線）';
+      syncEl.style.color = '#60c080';
+    } else if (health.webSocket) {
+      if (health.lpCount != null && health.lpCount > 0) {
+        syncEl.textContent = 'LP降級（' + health.lpCount + ' 人在線）';
+        syncEl.style.color = '#e0c060';
+      } else {
+        syncEl.textContent = 'WebSocket（閒置）';
+        syncEl.style.color = '#60c080';
+      }
+    } else if (health.longPoll) {
+      syncEl.textContent = '長輪詢（已啟用）';
+      syncEl.style.color = '#c8a868';
+    } else {
+      syncEl.textContent = '未啟用';
+      syncEl.style.color = '#e06060';
+    }
+  }
+  if (online && (online.players || online.list)) {
+    const list = online.players || online.list || [];
+    const cnt = online.count != null ? online.count : list.length;
+    document.getElementById('statOnline').textContent = cnt;
+  } else if (stats && stats.onlineCount != null) {
+    document.getElementById('statOnline').textContent = stats.onlineCount;
+  }
+  if (stats && stats.totalAccounts != null) {
+    // v2.9.0：優先用 admin/stats（從 PG 查的），最準確
+    document.getElementById('statTotal').textContent = stats.totalAccounts;
+  } else if (players && players.total != null) {
+    document.getElementById('statTotal').textContent = players.total;
+  } else if (health && health.totalAccounts != null) {
+    document.getElementById('statTotal').textContent = health.totalAccounts;
+  }
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-TW');
+}
+
+// ===== 玩家管理 =====
+async function searchPlayers() {
+  playerSearchKw = document.getElementById('playerSearch').value.trim();
+  playerPage = 1;
+  await loadPlayerPage();
+}
+
+async function resetPlayerSearch() {
+  document.getElementById('playerSearch').value = '';
+  playerSearchKw = '';
+  playerPage = 1;
+  await loadPlayerPage();
+}
+
+async function loadPlayerPage() {
+  const params = new URLSearchParams({
+    page: playerPage,
+    pageSize: playerPageSize,
+    search: playerSearchKw,
+  });
+  const data = await apiCall('/api/gm/players?' + params.toString());
+  const tbody = document.getElementById('playerTableBody');
+  if (!data.ok) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f06060;">載入失敗: ' + (data.error || '') + '</td></tr>';
+    return;
+  }
+  playerTotal = data.total;
+  document.getElementById('playerTotal').textContent = '共 ' + data.total + ' 筆';
+
+  if (data.list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8a6a2a;padding:24px;">無資料</td></tr>';
+  } else {
+    tbody.innerHTML = data.list.map(p => `
+      <tr>
+        <td style="color:#f0c040;">${escapeHtml(p.account)}</td>
+        <td>${p.isGM ? '<span class="gm-tag">GM</span>' : '一般玩家'}</td>
+        <td>${p.characterCount}</td>
+        <td style="color:#8a6a2a;font-size:12px;">${formatDate(p.createdAt)}</td>
+        <td><button class="btn btn-sm" onclick="openPlayerModal('${escapeHtml(p.account)}')">查看/編輯</button></td>
+      </tr>
+    `).join('');
+  }
+  renderPagination();
+}
+
+function renderPagination() {
+  const totalPages = Math.ceil(playerTotal / playerPageSize);
+  const container = document.getElementById('playerPagination');
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button onclick="changePlayerPage(${playerPage - 1})" ${playerPage <= 1 ? 'disabled' : ''}>上一頁</button>`;
+  const maxShow = 5;
+  let start = Math.max(1, playerPage - 2);
+  let end = Math.min(totalPages, start + maxShow - 1);
+  start = Math.max(1, end - maxShow + 1);
+  for (let i = start; i <= end; i++) {
+    html += `<button class="${i === playerPage ? 'active' : ''}" onclick="changePlayerPage(${i})">${i}</button>`;
+  }
+  html += `<button onclick="changePlayerPage(${playerPage + 1})" ${playerPage >= totalPages ? 'disabled' : ''}>下一頁</button>`;
+  container.innerHTML = html;
+}
+
+function changePlayerPage(p) {
+  if (p < 1) return;
+  playerPage = p;
+  loadPlayerPage();
+}
+
+// ===== 玩家編輯彈窗 =====
+async function openPlayerModal(account) {
+  const data = await apiCall('/api/gm/player/' + encodeURIComponent(account));
+  if (!data.ok) {
+    showToast('載入失敗: ' + (data.error || ''), 'error');
+    return;
+  }
+  document.getElementById('modalTitle').textContent = '玩家資料 - ' + account;
+  const body = document.getElementById('modalBody');
+  const chars = data.characters || [];
+  const acc = data.account || {};
+
+  let html = `
+    <div style="margin-bottom:16px;">
+      <div style="color:#8a6a2a;font-size:12px;margin-bottom:4px;">基本資料</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:13px;">
+        <div><span style="color:#8a6a2a;">帳號：</span><span style="color:#f0c040;">${escapeHtml(acc.account)}</span></div>
+        <div><span style="color:#8a6a2a;">身分：</span>${acc.isGM ? '<span class="gm-tag">GM</span>' : '一般玩家'}</div>
+        <div><span style="color:#8a6a2a;">角色數：</span>${data.characterCount}</div>
+        <div style="grid-column:span 3;"><span style="color:#8a6a2a;">註冊時間：</span>${formatDate(acc.createdAt)}</div>
+      </div>
+    </div>
+  `;
+
+  if (chars.length === 0) {
+    html += '<div style="color:#8a6a2a;text-align:center;padding:20px;">此玩家尚未創建角色</div>';
+  } else {
+    for (const c of chars) {
+      const sd = c.saveData || {};
+      const res = sd.resources || {};
+      const pl = sd.player || {};
+      html += `
+        <div style="border:1px solid #3a2a15;border-radius:4px;padding:14px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <span style="color:#f0c040;font-size:14px;">角色 #${c.charIdx + 1}：${escapeHtml(c.name || '未命名')}</span>
+            <span style="color:#8a6a2a;font-size:12px;">Lv.${pl.level || 1} ${escapeHtml(c.classId || '')}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:12px;margin-bottom:10px;">
+            <div><span style="color:#8a6a2a;">金幣：</span>${res.gold || 0}</div>
+            <div><span style="color:#8a6a2a;">鑽石：</span>${res.gem || 0}</div>
+            <div><span style="color:#8a6a2a;">經驗：</span>${pl.exp || 0}</div>
+            <div><span style="color:#8a6a2a;">背包：</span>${(sd.inventory || []).length} 件</div>
+            <div><span style="color:#8a6a2a;">變身：</span>${(sd.transforms || []).length} 個</div>
+            <div><span style="color:#8a6a2a;">英雄：</span>${(sd.ownedHeroes || []).length} 個</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="quickAdjust('${escapeHtml(account)}', ${c.charIdx}, 'addGem', prompt('增加鑽石數量：', '1000'))">+鑽石</button>
+            <button class="btn btn-sm" onclick="quickAdjust('${escapeHtml(account)}', ${c.charIdx}, 'addGold', prompt('增加金幣數量：', '10000'))">+金幣</button>
+            <button class="btn btn-sm btn-ghost" onclick="quickAdjust('${escapeHtml(account)}', ${c.charIdx}, 'setLevel', prompt('設定等級：', '1'))">設等級</button>
+            <button class="btn btn-sm btn-ghost" onclick="quickAdjust('${escapeHtml(account)}', ${c.charIdx}, 'setExp', prompt('設定經驗：', '0'))">設經驗</button>
+            <button class="btn btn-sm btn-ghost" onclick="quickAdjustItem('${escapeHtml(account)}', ${c.charIdx})">+道具</button>
+            <button class="btn btn-sm btn-ghost" onclick="quickAdjustTransform('${escapeHtml(account)}', ${c.charIdx})">+變身</button>
+            <button class="btn btn-sm btn-ghost" onclick="quickAdjustHero('${escapeHtml(account)}', ${c.charIdx})">+英雄</button>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  body.innerHTML = html;
+  document.getElementById('playerModal').classList.add('show');
+}
+
+async function quickAdjust(account, charIdx, action, value) {
+  if (value === null || value === '') return;
+  const data = await apiCall('/api/gm/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ account, charIdx, action, value }),
+  });
+  if (data.ok) {
+    showToast('操作成功', 'success');
+    openPlayerModal(account); // 重新載入
+  } else {
+    showToast('操作失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function quickAdjustItem(account, charIdx) {
+  const itemId = prompt('道具ID：', 'item_001');
+  if (!itemId) return;
+  const count = parseInt(prompt('數量：', '1')) || 1;
+  const data = await apiCall('/api/gm/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ account, charIdx, action: 'giveItem', itemId, count }),
+  });
+  if (data.ok) {
+    showToast('發放成功', 'success');
+    openPlayerModal(account);
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function quickAdjustTransform(account, charIdx) {
+  const tid = prompt('變身ID：', 'transform_01');
+  if (!tid) return;
+  const tname = prompt('變身名稱：', tid) || tid;
+  const data = await apiCall('/api/gm/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ account, charIdx, action: 'addTransform', itemId: tid, itemName: tname }),
+  });
+  if (data.ok) {
+    showToast('增加成功', 'success');
+    openPlayerModal(account);
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function quickAdjustHero(account, charIdx) {
+  const hid = prompt('英雄ID：', 'hero_01');
+  if (!hid) return;
+  const hname = prompt('英雄名稱：', hid) || hid;
+  const data = await apiCall('/api/gm/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ account, charIdx, action: 'addHero', itemId: hid, itemName: hname }),
+  });
+  if (data.ok) {
+    showToast('增加成功', 'success');
+    openPlayerModal(account);
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+function closeModal() {
+  document.getElementById('playerModal').classList.remove('show');
+}
+
+// ===== 廣播 =====
+async function sendBroadcast() {
+  const text = document.getElementById('bcText').value.trim();
+  const type = document.getElementById('bcType').value;
+  if (!text) { showToast('請輸入廣播內容', 'error'); return; }
+  const data = await apiCall('/api/gm/broadcast', {
+    method: 'POST',
+    body: JSON.stringify({ text, type }),
+  });
+  if (data.ok) {
+    showToast('廣播發送成功', 'success');
+    document.getElementById('bcText').value = '';
+    loadBroadcasts();
+  } else {
+    showToast('發送失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function loadBroadcasts() {
+  const data = await apiCall('/api/gm/broadcasts');
+  const listEl = document.getElementById('broadcastList');
+  if (!data.ok || !data.list) {
+    listEl.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  if (data.list.length === 0) {
+    listEl.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">尚無廣播記錄</div>';
+    return;
+  }
+  listEl.innerHTML = data.list.map(b => `
+    <div class="broadcast-item">
+      <div class="meta">
+        <span class="type">${escapeHtml(b.type || 'system')}</span>
+        <span>${formatDate(b.time)}</span>
+      </div>
+      <div class="text">${escapeHtml(b.text)}</div>
+    </div>
+  `).join('');
+}
+
+// ===== 獎勵發放 =====
+function switchRewardTab(tab) {
+  document.querySelectorAll('#page-reward .tab').forEach((el, i) => {
+    el.classList.toggle('active', (tab === 'all' && i === 0) || (tab === 'single' && i === 1));
+  });
+  document.getElementById('tab-all').classList.toggle('active', tab === 'all');
+  document.getElementById('tab-single').classList.toggle('active', tab === 'single');
+}
+
+function toggleRewardAllItem() {
+  const type = document.getElementById('rewardAllType').value;
+  const isItem = type === 'item';
+  document.getElementById('rewardAllAmountRow').classList.toggle('hidden', isItem);
+  document.getElementById('rewardAllItemIdRow').classList.toggle('hidden', !isItem);
+  document.getElementById('rewardAllItemNameRow').classList.toggle('hidden', !isItem);
+}
+
+async function giveAllReward() {
+  const type = document.getElementById('rewardAllType').value;
+  const amount = parseInt(document.getElementById('rewardAllAmount').value) || 0;
+  const itemId = document.getElementById('rewardAllItemId').value.trim();
+  const itemName = document.getElementById('rewardAllItemName').value.trim();
+
+  if (type !== 'item' && amount <= 0) { showToast('請輸入有效數量', 'error'); return; }
+  if (type === 'item' && !itemId) { showToast('請輸入道具ID', 'error'); return; }
+
+  if (!confirm('確定要全服發送' + (type === 'gem' ? '鑽石' : type === 'gold' ? '金幣' : '道具') + '嗎？')) return;
+
+  const body = { type, amount };
+  if (type === 'item') { body.itemId = itemId; body.itemName = itemName; body.amount = amount || 1; }
+  const data = await apiCall('/api/gm/give-all', { method: 'POST', body: JSON.stringify(body) });
+  if (data.ok) {
+    showToast('發放成功！共發放 ' + data.grantedCount + ' 個角色', 'success');
+  } else {
+    showToast('發放失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function giveSingleReward() {
+  const account = document.getElementById('rewardSingleAccount').value.trim();
+  const action = document.getElementById('rewardSingleAction').value;
+  const value = document.getElementById('rewardSingleValue').value;
+  const itemId = document.getElementById('rewardSingleItemId').value.trim();
+
+  if (!account) { showToast('請輸入玩家帳號', 'error'); return; }
+
+  const body = { account, action, value };
+  if (itemId) body.itemId = itemId;
+  if (action === 'giveItem') body.count = parseInt(value) || 1;
+
+  const data = await apiCall('/api/gm/adjust', { method: 'POST', body: JSON.stringify(body) });
+  if (data.ok) {
+    showToast('發放成功', 'success');
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+// ===== Bug 回報 =====
+async function loadBugs() {
+  const data = await apiCall('/api/bug-report/list');
+  const listEl = document.getElementById('bugList');
+  if (!data.ok || !data.list) {
+    listEl.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  document.getElementById('bugCount').textContent = '共 ' + data.list.length + ' 筆';
+  if (data.list.length === 0) {
+    listEl.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">尚無 Bug 回報</div>';
+    return;
+  }
+  listEl.innerHTML = data.list.map(b => `
+    <div class="bug-item">
+      <div class="bug-head">
+        <span class="bug-id">${escapeHtml(b.id || '')}</span>
+        <div class="flex gap-8">
+          <span class="bug-account">${escapeHtml(b.account || '匿名')}</span>
+          <button class="btn btn-sm btn-danger" onclick="deleteBug('${escapeHtml(b.id)}')">刪除</button>
+        </div>
+      </div>
+      <div class="bug-desc">${escapeHtml(b.description || '')}</div>
+      <div class="bug-meta">
+        版本: ${escapeHtml(b.version || '')} · 
+        ${b.player ? '角色: ' + escapeHtml(b.player.name || '') + ' Lv.' + (b.player.level || '') : ''} · 
+        ${formatDate(b.createdAt)}
+      </div>
+      ${b.errors && b.errors.length ? '<div class="bug-meta" style="margin-top:4px;color:#c06060;">錯誤: ' + b.errors.slice(0, 3).map(e => escapeHtml(String(e).slice(0, 80))).join(' | ') + '</div>' : ''}
+    </div>
+  `).join('');
+}
+
+async function deleteBug(id) {
+  if (!confirm('確定要刪除這筆回報嗎？')) return;
+  const data = await apiCall('/api/bug-report/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (data.ok) {
+    showToast('已刪除', 'success');
+    loadBugs();
+  } else {
+    showToast('刪除失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function clearAllBugs() {
+  if (!confirm('確定要清空所有 Bug 回報嗎？此操作無法復原！')) return;
+  const data = await apiCall('/api/bug-report/clear', { method: 'POST' });
+  if (data.ok) {
+    showToast('已清空', 'success');
+    loadBugs();
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+// ===== 道具編輯器 =====
+async function loadItems() {
+  const type = document.getElementById('itemFilterType').value;
+  const url = '/api/gm/items' + (type ? '?type=' + encodeURIComponent(type) : '');
+  const data = await apiCall(url);
+  const el = document.getElementById('itemList');
+  if (!data.ok || !data.list) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  if (data.list.length === 0) {
+    el.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">尚無自定義道具</div>';
+    return;
+  }
+  el.innerHTML = data.list.map(it => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #3a2a15;">
+      <div style="flex:1;">
+        <span style="color:#f0c040;">${escapeHtml(it.name || it.id)}</span>
+        <span style="color:#8a6a2a;font-size:12px;margin-left:8px;">[${escapeHtml(it.type)}] [${escapeHtml(it.rarity)}] Lv.${it.levelRequire}</span>
+        <div style="color:#8a6a2a;font-size:11px;margin-top:2px;">${escapeHtml(it.id)} · ${escapeHtml(it.description || '無描述')}</div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick='editItem(${JSON.stringify(it).replace(/'/g, "&#39;")})'>編輯</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteItem('${escapeHtml(it.id)}')">刪除</button>
+    </div>
+  `).join('');
+}
+
+async function saveItem() {
+  const id = document.getElementById('itemId').value.trim();
+  const name = document.getElementById('itemName').value.trim();
+  const type = document.getElementById('itemType').value;
+  const rarity = document.getElementById('itemRarity').value;
+  const levelRequire = parseInt(document.getElementById('itemLvlReq').value) || 1;
+  const price = parseInt(document.getElementById('itemPrice').value) || 0;
+  const classRestriction = document.getElementById('itemClass').value || null;
+  const description = document.getElementById('itemDesc').value.trim();
+  const iconPath = document.getElementById('itemIcon').value.trim();
+  let stats = {};
+  const statsRaw = document.getElementById('itemStats').value.trim();
+  if (statsRaw) {
+    try { stats = JSON.parse(statsRaw); } catch (e) { showToast('能力值 JSON 格式錯誤', 'error'); return; }
+  }
+  if (!id || !name) { showToast('請填寫 ID 與名稱', 'error'); return; }
+
+  const body = { id, name, type, rarity, levelRequire, price, classRestriction, description, iconPath, stats };
+  const data = await apiCall('/api/gm/items', { method: 'POST', body: JSON.stringify(body) });
+  if (data.ok) {
+    showToast('儲存成功', 'success');
+    clearItemForm();
+    loadItems();
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+function editItem(it) {
+  document.getElementById('itemId').value = it.id || '';
+  document.getElementById('itemName').value = it.name || '';
+  document.getElementById('itemType').value = it.type || 'consumable';
+  document.getElementById('itemRarity').value = it.rarity || 'common';
+  document.getElementById('itemLvlReq').value = it.levelRequire || 1;
+  document.getElementById('itemPrice').value = it.price || 0;
+  document.getElementById('itemClass').value = it.classRestriction || '';
+  document.getElementById('itemDesc').value = it.description || '';
+  document.getElementById('itemIcon').value = it.iconPath || '';
+  document.getElementById('itemStats').value = it.stats ? JSON.stringify(it.stats) : '';
+  document.getElementById('itemId').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function clearItemForm() {
+  ['itemId','itemName','itemDesc','itemIcon','itemStats'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('itemType').value = 'consumable';
+  document.getElementById('itemRarity').value = 'common';
+  document.getElementById('itemLvlReq').value = 1;
+  document.getElementById('itemPrice').value = 0;
+  document.getElementById('itemClass').value = '';
+}
+
+async function deleteItem(id) {
+  if (!confirm('確定要刪除道具 ' + id + ' 嗎？')) return;
+  const data = await apiCall('/api/gm/items/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (data.ok) { showToast('已刪除', 'success'); loadItems(); }
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== 攻城戰設定 =====
+async function loadCastles() {
+  const data = await apiCall('/api/gm/castles');
+  const el = document.getElementById('castleList');
+  if (!data.ok || !data.list) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  const nations = ['kent', 'oren', 'dion', 'aden'];
+  el.innerHTML = data.list.map(c => `
+    <div style="border:1px solid #3a2a15;border-radius:4px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:#f0c040;font-size:15px;">${escapeHtml(c.castleId)} 城堡</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          <input type="checkbox" ${c.siegeEnabled ? 'checked' : ''} onchange="updateCastle('${escapeHtml(c.castleId)}', 'siegeEnabled', this.checked)">
+          攻城戰開啟
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:13px;">
+        <div>
+          <span style="color:#8a6a2a;">所屬國家：</span>
+          <select onchange="updateCastle('${escapeHtml(c.castleId)}', 'ownerNation', this.value)">
+            ${nations.map(n => `<option value="${n}" ${c.ownerNation === n ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <span style="color:#8a6a2a;">開始時間(時)：</span>
+          <input type="number" value="${c.siegeStartHour}" min="0" max="23" style="width:60px;" onchange="updateCastle('${escapeHtml(c.castleId)}', 'siegeStartHour', parseInt(this.value)||20)">
+        </div>
+        <div>
+          <span style="color:#8a6a2a;">持續(分鐘)：</span>
+          <input type="number" value="${c.siegeDurationMin}" min="5" max="480" style="width:60px;" onchange="updateCastle('${escapeHtml(c.castleId)}', 'siegeDurationMin', parseInt(this.value)||60)">
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function updateCastle(castleId, key, value) {
+  const body = {}; body[key] = value;
+  const data = await apiCall('/api/gm/castles/' + encodeURIComponent(castleId), { method: 'POST', body: JSON.stringify(body) });
+  if (data.ok) showToast('已更新', 'success');
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== 遊戲公告 =====
+async function loadAnnouncements() {
+  const data = await apiCall('/api/gm/announcements');
+  const el = document.getElementById('annList');
+  if (!data.ok || !data.list) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  if (data.list.length === 0) {
+    el.innerHTML = '<div style="color:#8a6a2a;text-align:center;padding:20px;">尚無公告</div>';
+    return;
+  }
+  el.innerHTML = data.list.map(a => `
+    <div style="border:1px solid #3a2a15;border-radius:4px;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="color:#f0c040;font-weight:600;">${escapeHtml(a.title || '無標題')}</span>
+          <span style="color:#8a6a2a;font-size:11px;margin-left:8px;">[${escapeHtml(a.type)}] 優先級: ${a.priority || 0}</span>
+          <span style="color:#8a6a2a;font-size:11px;margin-left:8px;">${formatDate(a.createdAt)}</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-ghost" onclick="toggleAnn('${a.id}', ${!a.active})">${a.active ? '下架' : '上架'}</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteAnn('${a.id}')">刪除</button>
+        </div>
+      </div>
+      <div style="color:#e8d090;font-size:13px;margin-top:6px;">${escapeHtml(a.content || '')}</div>
+    </div>
+  `).join('');
+}
+
+async function createAnnouncement() {
+  const type = document.getElementById('annType').value;
+  const title = document.getElementById('annTitle').value.trim();
+  const content = document.getElementById('annContent').value.trim();
+  const priority = parseInt(document.getElementById('annPriority').value) || 0;
+  if (!content) { showToast('請輸入公告內容', 'error'); return; }
+  const data = await apiCall('/api/gm/announcements', {
+    method: 'POST',
+    body: JSON.stringify({ type, title, content, priority }),
+  });
+  if (data.ok) {
+    showToast('發布成功', 'success');
+    document.getElementById('annTitle').value = '';
+    document.getElementById('annContent').value = '';
+    loadAnnouncements();
+  } else {
+    showToast('失敗: ' + (data.error || ''), 'error');
+  }
+}
+
+async function toggleAnn(id, active) {
+  const data = await apiCall('/api/gm/announcements/' + id, {
+    method: 'PUT',
+    body: JSON.stringify({ active }),
+  });
+  if (data.ok) { showToast('已更新', 'success'); loadAnnouncements(); }
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+async function deleteAnn(id) {
+  if (!confirm('確定要刪除此公告嗎？')) return;
+  const data = await apiCall('/api/gm/announcements/' + id, { method: 'DELETE' });
+  if (data.ok) { showToast('已刪除', 'success'); loadAnnouncements(); }
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== 遊戲參數 =====
+async function loadConfig() {
+  const data = await apiCall('/api/gm/config');
+  const el = document.getElementById('configList');
+  if (!data.ok || !data.config) {
+    el.innerHTML = '<div style="color:#f06060;text-align:center;padding:20px;">載入失敗</div>';
+    return;
+  }
+  const cfg = data.config;
+  const items = [
+    { key: 'exp_rate', name: '經驗倍率', step: '0.1' },
+    { key: 'gold_rate', name: '金幣倍率', step: '0.1' },
+    { key: 'drop_rate', name: '掉寶倍率', step: '0.1' },
+    { key: 'class_change_cost', name: '轉職費用(鑽石)', step: '100' },
+    { key: 'warehouse_max_slots', name: '倉庫最大格數', step: '10' },
+  ];
+  el.innerHTML = items.map(it => `
+    <div class="form-row">
+      <label style="width:160px;">${it.name}</label>
+      <input type="number" value="${cfg[it.key] ?? 0}" step="${it.step}" style="flex:0 0 200px;" data-key="${it.key}" onchange="saveConfig('${it.key}', parseFloat(this.value))">
+    </div>
+  `).join('');
+}
+
+async function saveConfig(key, value) {
+  const data = await apiCall('/api/gm/config', {
+    method: 'POST',
+    body: JSON.stringify({ key, value }),
+  });
+  if (data.ok) showToast(key + ' 已更新為 ' + value, 'success');
+  else showToast('失敗: ' + (data.error || ''), 'error');
+}
+
+// ===== GM 日誌 =====
+async function loadGMLogs() {
+  const data = await apiCall('/api/gm/logs?limit=50');
+  const tbody = document.getElementById('gmLogBody');
+  if (!data.ok || !data.list) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f06060;">載入失敗</td></tr>';
+    return;
+  }
+  if (data.list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8a6a2a;padding:24px;">尚無記錄</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.list.map(log => `
+    <tr>
+      <td style="font-size:11px;color:#8a6a2a;">${formatDate(log.createdAt || log.time)}</td>
+      <td style="color:#f0c040;">${escapeHtml(log.gmAccount || '')}</td>
+      <td>${escapeHtml(log.targetAccount || '--')}</td>
+      <td style="color:#60c0a0;">${escapeHtml(log.action || '')}</td>
+      <td style="font-size:11px;color:#c8a868;">${escapeHtml(log.detail ? JSON.stringify(log.detail) : '')}</td>
+    </tr>
+  `).join('');
+}
+
+// ===== 工具 =====
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatDate(d) {
+  if (!d) return '--';
+  try {
+    const date = new Date(d);
+    return date.toLocaleString('zh-TW', { hour12: false });
+  } catch (e) { return String(d); }
+}
+
+// ===== 初始化 =====
+document.getElementById('loginPassword').addEventListener('keypress', e => {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('loginAccount').addEventListener('keypress', e => {
+  if (e.key === 'Enter') document.getElementById('loginPassword').focus();
+});
+
+// 點彈窗背景關閉
+document.getElementById('playerModal').addEventListener('click', e => {
+  if (e.target.id === 'playerModal') closeModal();
+});
+
+// ===== 資料庫管理（危險區塊） =====
+
+async function loadDbStats() {
+  const data = await apiCall('/api/gm/admin/stats');
+  if (data && data.ok && data.stats) {
+    const s = data.stats;
+    const fields = ['accounts', 'characters', 'account_shared', 'warehouse_logs',
+      'gm_action_logs', 'announcements', 'game_config', 'castle_states',
+       'custom_items', 'bug_reports', 'game_servers'];
+    for (const f of fields) {
+      const el = document.getElementById('dbStat-' + f);
+      if (el) el.textContent = s[f] != null ? s[f].toLocaleString() : '--';
+    }
+    document.getElementById('dbStatsTime').textContent = '更新時間：' + new Date().toLocaleString('zh-TW');
+  }
+}
+
+function checkResetConfirm() {
+  const val = document.getElementById('resetConfirm').value.trim();
+  document.getElementById('btnResetAll').disabled = val !== 'RESET';
+}
+
+function confirmResetAll() {
+  const val = document.getElementById('resetConfirm').value.trim();
+  if (val !== 'RESET') {
+    showToast('請先輸入確認字 RESET', 'error');
+    return;
+  }
+  const keep = document.getElementById('resetKeepCustom').checked;
+  const msg = keep
+    ? '確定要全部重置嗎？所有帳號、角色、資料將被清空，僅保留自定義道具。此操作不可逆！'
+    : '確定要全部重置嗎？所有資料將被清空，包含自定義道具！此操作不可逆！';
+  if (!confirm(msg)) return;
+  if (!confirm('再次確認：真的要執行全部重置嗎？')) return;
+
+  const btn = document.getElementById('btnResetAll');
+  btn.disabled = true;
+  btn.textContent = '處理中...';
+
+  apiCall('/api/gm/admin/reset-all', {
+    method: 'POST',
+    body: JSON.stringify({ keepCustomItems: keep }),
+  }).then(data => {
+    btn.disabled = false;
+    btn.textContent = '全部重置';
+    if (data && data.ok) {
+      const c = data.counts;
+      const detail = [
+        '帳號: ' + c.accounts,
+        '角色: ' + c.characters,
+        '公告: ' + c.announcements,
+        'GM日誌: ' + c.gm_action_logs,
+        'Bug: ' + c.bug_reports,
+      ].join(' / ');
+      showToast('重置完成！' + detail, 'success');
+      document.getElementById('resetConfirm').value = '';
+      checkResetConfirm();
+      loadDbStats();
+    } else {
+      showToast('重置失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  });
+}
+
+function confirmResetCharacters() {
+  if (!confirm('確定要清空所有角色、共享資料與倉庫記錄嗎？帳號將保留。此操作不可逆！')) return;
+  if (!confirm('再次確認：真的要清空所有角色嗎？')) return;
+
+  apiCall('/api/gm/admin/reset-characters', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      const c = data.counts;
+      showToast('角色資料已清空！角色: ' + c.characters + ' / 共享: ' + c.account_shared + ' / 倉庫: ' + c.warehouse_logs, 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  });
+}
+
+function confirmResetLogs() {
+  if (!confirm('確定要清空 GM 日誌與 Bug 回報嗎？此操作不可逆！')) return;
+
+  apiCall('/api/gm/admin/reset-logs', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      const c = data.counts;
+      showToast('日誌已清空！GM日誌: ' + c.gm_action_logs + ' / Bug: ' + c.bug_reports, 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  });
+}
+
+// 一鍵清空 AI 數據
+function confirmClearAI() {
+  if (!confirm('確定要清空所有伺服器的 AI 數據嗎？\n\n· 刪除所有 AI 實體與持久化檔案\n· 按 GM 設定的 aiCount 重新生成新 AI\n· 影響所有伺服器與所有地圖\n\n此操作不可逆！')) return;
+  if (!confirm('再次確認：真的要重置全部 AI 嗎？')) return;
+
+  apiCall('/api/gm/admin/reset-ai-all', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      showToast('AI 數據已清空並重新生成！共 ' + data.serverCount + ' 服 / ' + data.totalMaps + ' 張地圖', 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  }).catch(e => {
+    showToast('失敗：' + e.message, 'error');
+  });
+}
+
+// 一鍵清空排行榜
+function confirmClearLeaderboard() {
+  if (!confirm('確定要清空排行榜所有記錄嗎？\n\n· 刪除排行榜表所有記錄\n· 下次從真實玩家 + AI 重新計算\n\n此操作不可逆！')) return;
+
+  apiCall('/api/gm/admin/clear-leaderboard', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then(data => {
+    if (data && data.ok) {
+      showToast('排行榜已清空，共刪除 ' + data.counts.leaderboard_entries + ' 筆', 'success');
+      loadDbStats();
+    } else {
+      showToast('失敗：' + (data?.error || '未知錯誤'), 'error');
+    }
+  }).catch(e => {
+    showToast('失敗：' + e.message, 'error');
+  });
+}
+
+// 捲動到完整重置區塊
+function scrollToFullReset() {
+  const el = document.querySelector('#page-database .danger-card:nth-of-type(2) h3');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 自動登入
+if (gmToken && gmAccount) {
+  // 驗證 token 有效性
+  apiCall('/api/auth/me').then(data => {
+    if (data.ok && data.isGM) {
+      enterApp();
+    } else {
+      doLogout();
+    }
+  });
+}
+</script>
+</body>
+</html>
