@@ -57,6 +57,21 @@
   let pollAbortController = null;
   let pollRunning = false;
   let reconnectDelay = 1000;
+  // v4.4.12：嚴禁離線遊戲——主動關閉標誌 + 斷線已回登入頁防重入
+  let _manualClose = false;
+  let _forcedBackToLogin = false;
+  // 意外斷線：不重連、不降級、不進離線，立即清理並回登入頁
+  function _forceBackToLogin(reason) {
+    if (_forcedBackToLogin || _manualClose) return;
+    _forcedBackToLogin = true;
+    try { if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; } } catch(e) {}
+    try { setStatus(STATUS.OFFLINE); } catch(e) {}
+    try { if (typeof window.setOfflineMode === 'function') window.setOfflineMode(false); } catch(e) {}
+    console.error('[GAME-WS] 連線中斷，立即返回登入頁：', reason);
+    try { window.alert('與伺服器連線中斷，即將返回登入頁。\n原因：' + (reason || '網路斷線')); } catch(e) {}
+    try { localStorage.removeItem('mmo_keep_session'); } catch(e) {}
+    try { if (typeof window.location !== 'undefined') window.location.reload(); } catch(e) {}
+  }
   let lastPollTime = 0;
   let lastUpdateTime = 0;
   const UPDATE_THROTTLE = 100; // v2.7.5：50ms → 100ms（10Hz），降低廣播頻寬
@@ -226,6 +241,7 @@
 
 
     disconnect() {
+      _manualClose = true; // v4.4.12：主動斷線，不觸發「意外斷線回登入頁」
       if (currentMapId) {
         try {
           if (ws && wsConnected) {
@@ -576,6 +592,7 @@
    }
 
    function tryWebSocket() {
+      _manualClose = false; _forcedBackToLogin = false; // v4.4.12 新連線重置斷線標誌
      return new Promise((resolve, reject) => {
        if (typeof WebSocket === 'undefined') {
          _wsFailureReason = '瀏覽器不支援 WebSocket';
@@ -703,12 +720,13 @@
           reject(new Error(reason));
           return;
         }
-        // 意外斷線：嘗試重連，或降級 long-poll
-        if (useWebSocket && status === STATUS.ONLINE) {
-          console.warn('[WS] 線中斷，降級 long-poll 並嘗試重連');
-          useWebSocket = false;
-          startPollLoop();
-          scheduleWsReconnect();
+        // v4.4.12：已在線後意外斷線——嚴禁離線/降級/自動重連，立即回登入頁
+        if (status === STATUS.ONLINE) {
+          let _rs = '連線被關閉 code=' + (event.code || '?');
+          if (event.code === 1006) _rs = '網路中斷或伺服器無回應（1006）';
+          else if (event.code === 4001) _rs = '登入驗證失效，請重新登入（4001）';
+          else if (event.code === 1000) _rs = '被伺服器登出（可能於其他裝置登入）';
+          _forceBackToLogin(_rs);
         }
       };
 
@@ -1426,8 +1444,8 @@
       ai.el = elDiv;
       ai._hpFill = elDiv.querySelector('.unit-hp-fill');
       
-      if (typeof positionUnit === 'function') {
-        try { positionUnit(elDiv, ai.x, ai.y, 'enemy'); } catch(e) {}
+      if (typeof window.positionUnit === 'function') {
+        try { window.positionUnit(elDiv, ai.x, ai.y, 'enemy'); } catch(e) {}
       } else {
         elDiv.style.left = (ai.x - w/2) + 'px';
         elDiv.style.bottom = ai.y + 'px';
@@ -1461,17 +1479,17 @@
 
     // 國旗
     let flagImg = '';
-    if (typeof NATIONS !== 'undefined' && typeof safeFlagImg === 'function' && p.nation) {
-      const n = NATIONS.find(nn => nn.id === p.nation);
-      if (n) flagImg = safeFlagImg(p.nation, 12);
+    if (typeof window.NATIONS !== 'undefined' && typeof window.safeFlagImg === 'function' && p.nation) {
+      const n = window.NATIONS.find(nn => nn.id === p.nation);
+      if (n) flagImg = window.safeFlagImg(p.nation, 12);
     }
 
     const w = 64, h = 80;
     const coverMode = s?.coverMode ? 'sprite-cover-mode' : '';
     const multiFrame = s?.multiFrame ? 'sprite-multi-frame' : '';
 
-    const onErrorStr = (typeof handleImgError === 'function')
-      ? 'handleImgError(this)'
+    const onErrorStr = (typeof window.handleImgError === 'function')
+      ? 'window.handleImgError(this)'
       : '';
 
     let walkImgs = '';
@@ -1504,11 +1522,11 @@
     worldLayer.appendChild(elDiv);
     p.el = elDiv;
 
-    if (typeof initUnitAnimState === 'function') {
-      try { initUnitAnimState('mp_' + p.id); } catch (e) { /* ignore */ }
+    if (typeof window.initUnitAnimState === 'function') {
+      try { window.initUnitAnimState('mp_' + p.id); } catch (e) { /* ignore */ }
     }
-    if (typeof positionUnit === 'function') {
-      try { positionUnit(elDiv, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
+    if (typeof window.positionUnit === 'function') {
+      try { window.positionUnit(elDiv, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
     } else {
       elDiv.style.left = (p.x - w / 2) + 'px';
       elDiv.style.bottom = p.y + 'px';
@@ -1560,17 +1578,17 @@
         }
       }
 
-      if (typeof positionUnit === 'function') {
-        try { positionUnit(p.el, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
+      if (typeof window.positionUnit === 'function') {
+        try { window.positionUnit(p.el, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
       } else {
         p.el.style.left = (p.x - 32) + 'px';
         p.el.style.bottom = p.y + 'px';
       }
 
-      if (typeof applyUnitAnimFrame === 'function') {
+      if (typeof window.applyUnitAnimFrame === 'function') {
         try {
           const state = p._wasWalking ? 'walking' : 'idle';
-          applyUnitAnimFrame(p.el, 'mp_' + p.id, state);
+          window.applyUnitAnimFrame(p.el, 'mp_' + p.id, state);
         } catch (e) { /* ignore */ }
       }
     }
@@ -1578,8 +1596,8 @@
     // v4.4.0：更新伺服器AI位置
     for (const ai of serverAIs.values()) {
       if (!ai.el) continue;
-      if (typeof positionUnit === 'function') {
-        try { positionUnit(ai.el, ai.x, ai.y, 'enemy'); } catch(e) {}
+      if (typeof window.positionUnit === 'function') {
+        try { window.positionUnit(ai.el, ai.x, ai.y, 'enemy'); } catch(e) {}
       } else {
         ai.el.style.left = (ai.x - 25) + 'px';
         ai.el.style.bottom = ai.y + 'px';

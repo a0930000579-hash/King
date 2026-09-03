@@ -27277,24 +27277,11 @@ function wrapServerAI(sai) {
 }
 
 /** 標示離線模式（WS + long-poll 都失敗時） */
-window.setOfflineMode = function(isOffline) {
-  _offlineMode = !!isOffline;
-  if (isOffline) {
-    _serverAIActive = false;
-    // UI 標示：離線模式小標籤
-    let tag = document.getElementById('offline-mode-tag');
-    if (!tag) {
-      tag = document.createElement('div');
-      tag.id = 'offline-mode-tag';
-      tag.style.cssText = 'position:fixed;top:4px;left:50%;transform:translateX(-50%);z-index:9999;padding:2px 10px;background:#5a3020;color:#ffc080;font-size:10px;border:1px solid #804020;border-radius:0 0 6px 6px;font-family:inherit;letter-spacing:2px;';
-      tag.textContent = '離 線 模 式';
-      document.body.appendChild(tag);
-    }
-    tag.style.display = 'block';
-  } else {
-    const tag = document.getElementById('offline-mode-tag');
-    if (tag) tag.style.display = 'none';
-  }
+window.setOfflineMode = function(/* isOffline */) {
+  // v4.4.12：嚴格禁止離線遊戲——無論何處呼叫，永遠強制在線，不顯示離線標籤、不本地生成
+  _offlineMode = false;
+  const tag = document.getElementById('offline-mode-tag');
+  if (tag) tag.style.display = 'none';
 };
 
 /**
@@ -28413,6 +28400,13 @@ try {
   if (typeof addLog === 'function') window.addLog = addLog;
   if (typeof CLASSES !== 'undefined') window.CLASSES = CLASSES;
   if (typeof CAMERA !== 'undefined') window.CAMERA = CAMERA;
+  // v4.4.12：multiplayer.js 跨script渲染依賴，必須顯式暴露（否則typeof恆false，遠端玩家定位/動畫失效→原地不動）
+  if (typeof positionUnit === 'function') window.positionUnit = positionUnit;
+  if (typeof applyUnitAnimFrame === 'function') window.applyUnitAnimFrame = applyUnitAnimFrame;
+  if (typeof initUnitAnimState === 'function') window.initUnitAnimState = initUnitAnimState;
+  if (typeof handleImgError === 'function') window.handleImgError = handleImgError;
+  if (typeof safeFlagImg === 'function') window.safeFlagImg = safeFlagImg;
+  if (typeof NATIONS !== 'undefined') window.NATIONS = NATIONS;
   console.log('[v4.4.9] 已暴露 GS/SPRITE 到 window 供跨腳本訪問');
 } catch(e) { console.warn('[v4.4.9] 暴露全局對象失敗:', e.message); }
 

@@ -824,6 +824,7 @@ function createWsServer(httpServer) {
             try { oldClient.socket.close(1000, 'duplicate login'); } catch(e) {}
             if (oldClient.mapId && oldClient.serverId) {
               try { gameWorld.playerLeave(oldClient.serverId, oldClient.mapId, oldWsId); } catch(e) {}
+              try { getMapState(oldClient.serverId, oldClient.mapId).delete(oldWsId); } catch(e) {}
             }
           }
         }
@@ -873,6 +874,7 @@ function createWsServer(httpServer) {
     // 離開舊地圖
     if (client.mapId && client.serverId) {
       gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);
+      getMapState(client.serverId, client.mapId).delete(client.wsId); // v4.4.12：同步移出廣播名單
     }
 
     client.serverId = serverId;
@@ -935,6 +937,9 @@ function createWsServer(httpServer) {
         bgm: mapCfg.bgm,
       };
     }
+    // v4.4.12：把client註冊進地圖廣播名單（broadcastToMap依賴，否則player_move/chat等同地圖廣播發不出去→別人看不到你移動）
+    getMapState(serverId, mapId).set(client.wsId, client);
+
     sendJson(client.socket, reply);
 
     console.log('[WS-JOIN] ✅ 發送 join_map_ok, entities數=' + snapshot.entities.length + ' wsId=' + client.wsId + ' account=' + client.account);
@@ -956,8 +961,11 @@ function createWsServer(httpServer) {
     );
 
     if (result.success) {
+      // v4.4.12：切換地圖，廣播名單從舊圖遷移到新圖
+      try { getMapState(client.serverId, fromMap).delete(client.wsId); } catch(e) {}
       // 更新 client 狀態
       client.mapId = targetMap;
+      getMapState(client.serverId, targetMap).set(client.wsId, client);
       const payload = {
         type: 'map_change',
         fromMap,
@@ -1070,6 +1078,7 @@ function createWsServer(httpServer) {
     clients.delete(client.wsId);
     if (client.mapId && client.serverId) {
       gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);
+      getMapState(client.serverId, client.mapId).delete(client.wsId); // v4.4.12
     }
     console.log(`[WS] 客戶端斷線 wsId=${client.wsId} account=${client.account || '未認證'}`);
   }
