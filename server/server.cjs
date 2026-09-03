@@ -926,9 +926,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'King',
-      version: '4.4.8',
-      build: '4.4.8-ws-pure',
-      buildId: '4.4.8-ws-pure',
+      version: '4.4.9',
+      build: '4.4.9-gamejs-fix',
+      buildId: '4.4.9-gamejs-fix',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),

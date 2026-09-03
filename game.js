@@ -13375,6 +13375,9 @@ function _renderNPCsFromConfig(npcs) {
 // 暴露給 multiplayer.js 的全域函數
 window.handleMapChange = handleMapChange;
 
+// v4.4.8 修復：補回丟失的 renderNPCs 函數聲明（此前函數體懸空導致整個 game.js 語法錯誤、全文不執行）
+function renderNPCs(map) {
+  if (!map) return;
   npcLayer.innerHTML = '';
   if (!map.npcs) return;
   // NPC id 到 SPRITE key 的映射
