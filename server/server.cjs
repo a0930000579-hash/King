@@ -1,5 +1,5 @@
 /**
- *   King v4.4.14 · 正式營運後端伺服器
+ *   King v4.4.16 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -926,9 +926,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'King',
-      version: '4.4.14',
-      build: '4.4.14-sync',
-      buildId: '4.4.14-sync',
+      version: '4.4.16',
+      build: '4.4.16-wsauth',
+      buildId: '4.4.16-wsauth',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -1405,6 +1405,11 @@ async function handleApi(req, res, pathname, query) {
   if (req.method === 'GET' && pathname === '/api/auth/me') {
     const accName = await getAuthAccount(req);
     if (!accName) return sendJson(res, 401, { error: '未登入' });
+    // v4.4.16：刷新進程內 WS token 快取（雙保險；主通道已改為 URL query 無狀態認證，不依賴此快取）
+    try {
+      const _bearer = req.headers['authorization'] || '';
+      if (_bearer.startsWith('Bearer ') && global._wsSetAccountToken) global._wsSetAccountToken(accName, _bearer.slice(7));
+    } catch (e) {}
     const acc = await db.getAccount(accName);
     if (!acc) return sendJson(res, 401, { error: '帳號不存在' });
     const charCount = await db.getCharacterCount(accName, 'zeus');
@@ -3033,7 +3038,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  King v4.4.14 · 正式營運伺服器');
+    console.log('  King v4.4.16 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());

@@ -12746,3 +12746,105 @@ img { display: block; pointer-events: none; }
 button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   border-radius: 10px;
 }
+
+/* ============================================================
+   v4.4.15 世界單位：加大圓角（裁切精靈圖方角）+ 進場一次性淡入
+   ============================================================ */
+/* 精靈圖本體圓角，去掉 JPG 黑/白底造成的四方角 */
+.world-unit .unit-sprite-wrap {
+  border-radius: 14px !important;
+  overflow: hidden;
+}
+.world-unit .unit-sprite-img,
+.world-unit .dir-sprite-layer,
+.world-unit .dir-sprite {
+  border-radius: 14px;
+}
+/* 名字/血條/等級標一併更圓潤 */
+.world-unit .unit-hp-bar,
+.world-unit .unit-hp-fill { border-radius: 8px; }
+.world-unit .unit-name,
+.world-unit .unit-level-tag { border-radius: 8px; }
+/* 實體建立時整體一次性淡入（只動 opacity，不碰定位 transform，不會因走路切幀重播） */
+.world-unit {
+  animation: king-unit-fade-in 0.28s ease both;
+}
+@keyframes king-unit-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ============================================================
+   v4.4.16 圓角總收口：所有「圖片型」方塊一律圓角，杜絕四方卡牌感
+   （方角元兇是 <img> 本體，這裡對 img/容器一併收口）
+   ============================================================ */
+/* 世界單位精靈：圓角裁切黑/白底方角（容器與圖本體都圓） */
+.world-unit .unit-sprite-wrap {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+.world-unit .unit-sprite-img,
+.world-unit .dir-sprite-layer,
+.world-unit .dir-sprite,
+.world-unit img {
+  border-radius: 12px !important;
+}
+/* 創角/職業/國家/變身/寵物/抽卡 卡片內圖片 */
+.class-card, .class-card .class-sprite, .class-card .class-sprite img,
+.nation-card, .nation-card .nation-card-flag, .nation-card-flag, .nation-flag,
+.transform-card, .hero-card, .pet-card, .summon-card,
+.gacha-card, .gacha-card img, .gacha-flip-card img,
+.castle-card, .synth-result-card, .equip-detail-card {
+  border-radius: 14px !important;
+  overflow: hidden;
+}
+/* 頭像/肖像/各類縮略圖 */
+.avatar-small, .avatar, .avatar img, .char-portrait, .portrait,
+.cc2-class-portrait, .cc2-class-portrait img, .class-portrait,
+.create-preview img, .char-avatar, .char-avatar img {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+/* 槽位與其內圖標 */
+.char-equip-slot, .equip-slot, .pet-slot, .synth-slot, .skill-slot,
+.log-bar-slot, .empty-slot, .slot, .slot-filled, .slot-empty,
+.char-equip-slot img, .equip-slot img, .pet-slot img, .log-bar-slot img,
+.item-icon, .item-icon img, .skill-icon-img {
+  border-radius: 10px !important;
+}
+/* 列表/背包/角色列 */
+.char-list-item, .inventory-item, .bag-item, .list-row, .friend-item,
+.guild-member, .ranking-row, .shop-item, .mail-item {
+  border-radius: 12px !important;
+}
+/* 彈窗/面板本體 */
+.modal-content, .dialog-box, .game-modal, .popup-inner, .panel,
+.nation-select-inner, .cc2-panel {
+  border-radius: 16px !important;
+}
+
+/* v4.4.16：已去背透明精靈關閉 screen 混合（screen 只為舊 JPG 去純黑底，
+   對透明 PNG 會把黑色盔甲也變透明）。JS 偵測到 alpha 通道後加 .sprite-has-alpha */
+.unit-sprite-wrap.sprite-has-alpha .unit-sprite-img,
+.unit-sprite-wrap.sprite-has-alpha .dir-sprite,
+.unit-sprite-wrap.sprite-has-alpha img {
+  mix-blend-mode: normal !important;
+}
+
+/* ============================================================
+   v4.4.16 Foot Anchor 錨點歸一（修復金變/紫變等「跑圖、比例跑掉」）
+   錨點數值由 sprite-anchor.js 量測主體邊界後寫入 CSS 變量；
+   img 只負責靜態對齊，行走/攻擊擺動由 wrap 層承擔，互不覆蓋。
+   ============================================================ */
+.unit-sprite-img.anchor-normalized {
+  object-fit: contain !important;
+  object-position: 0% 0% !important;
+  transform-origin: 0 0 !important;
+  transform: translate(var(--ax, 0px), var(--ay, 0px)) scale(var(--as, 1), var(--as, 1));
+  animation: none !important; /* 關掉 img 層 single-frame-breath 等，避免 transform 覆蓋錨點 */
+}
+/* 面向左：以容器垂直中軸整體鏡像（錨點對齊不變，動態轉向即時響應） */
+.world-unit.face-left .unit-sprite-img.anchor-normalized {
+  transform: translate(calc(100% - var(--ax, 0px)), var(--ay, 0px))
+             scale(calc(var(--as, 1) * -1), var(--as, 1));
+}

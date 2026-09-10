@@ -2,6 +2,36 @@
     君主之刃 · 自由移動 MMORPG - 主逻辑 v3
     ============================================================ */
 
+// v4.4.16：透明去背精靈自動偵測。已去背 PNG（邊緣有 alpha）關閉 mix-blend-mode:screen，
+// 否則 screen 會把角色的黑色盔甲也一併「變透明」；舊式純黑底 JPG 維持 screen 去黑。
+(function () {
+  function probeSpriteAlpha(img) {
+    try {
+      if (!img || !img.naturalWidth) return;
+      var w = Math.min(32, img.naturalWidth), h = Math.min(32, img.naturalHeight);
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var ctx = c.getContext('2d'); ctx.clearRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+      var d = ctx.getImageData(0, 0, w, h).data, hasAlpha = false;
+      for (var y = 0; y < h && !hasAlpha; y++) {
+        for (var x = 0; x < w; x++) {
+          if (x === 0 || y === 0 || x === w - 1 || y === h - 1) {
+            if (d[(y * w + x) * 4 + 3] < 250) { hasAlpha = true; break; }
+          }
+        }
+      }
+      var wrap = (img.closest && img.closest('.unit-sprite-wrap')) || img.parentNode;
+      if (wrap && wrap.classList) { wrap.classList.toggle('sprite-has-alpha', hasAlpha); }
+    } catch (e) { /* 跨域無法讀取時保持原混合模式 */ }
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('load', function (e) {
+      var t = e.target;
+      if (t && t.tagName === 'IMG' && t.classList && t.classList.contains('unit-sprite-img')) probeSpriteAlpha(t);
+    }, true);
+  }
+  if (typeof window !== 'undefined') window._probeSpriteAlpha = probeSpriteAlpha;
+})();
+
 // ==================== 離線模式 / 本地圖資支援 ====================  
 let USE_LOCAL_ASSETS = false;
 try { USE_LOCAL_ASSETS = localStorage.getItem('useLocal') === '1'; } catch(e) {}
@@ -4748,12 +4778,44 @@ const NATIONS = [
 ];
 
 // 國家國旗圖資（暗黑天堂風格）
-const NATION_FLAGS = {
-  kent:  assetUrl('aadkrfkbmmmbi_ve_miaoda'), // 紅金獅
-  oren:  assetUrl('aadkrfhuxlkbq_ve_miaoda'), // 藍銀鷹
-  dion:  assetUrl('aadkrffmdt4ei_ve_miaoda'), // 綠交叉劍
-  aden:  assetUrl('aadkrfkbmmmci_ve_miaoda'), // 金皇冠
+// v4.4.15：改為 let，manifest 就緒後用 refreshNationFlags() 以最終路徑重算，
+//   避免定義當下 manifest 尚未載入、assetUrl 固化成錯誤路徑導致排行榜/國家頁黑圈
+const NATION_FLAG_IDS = {
+  kent:  'aadkrfkbmmmbi_ve_miaoda', // 紅金獅
+  oren:  'aadkrfhuxlkbq_ve_miaoda', // 藍銀鷹
+  dion:  'aadkrffmdt4ei_ve_miaoda', // 綠交叉劍
+  aden:  'aadkrfkbmmmci_ve_miaoda', // 金皇冠
 };
+// v4.4.16：上述 hash 實為 ASSET MISSING 佔位圖（原始美術從未上傳），
+// 改用內聯 SVG 國家色紋章 data URI，確保排行榜/國家頁/名條永不顯示缺圖。
+const NATION_CREST_SVG = {
+  kent:  { light: '#ff6060', dark: '#a01010', border: '#c02020', emoji: '🦁' },
+  oren:  { light: '#60a0ff', dark: '#103080', border: '#4080ff', emoji: '🦅' },
+  dion:  { light: '#60d060', dark: '#106020', border: '#40c060', emoji: '⚔️' },
+  aden:  { light: '#ffd060', dark: '#a07010', border: '#ffc040', emoji: '👑' },
+};
+function nationFlagDataURI(id) {
+  const c = NATION_CREST_SVG[id] || NATION_CREST_SVG.kent;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>` +
+    `<defs><radialGradient id='g' cx='35%25' cy='30%25'><stop offset='0%25' stop-color='${c.light}'/><stop offset='100%25' stop-color='${c.dark}'/></radialGradient></defs>` +
+    `<circle cx='32' cy='32' r='29' fill='url(%23g)' stroke='${c.border}' stroke-width='2'/>` +
+    `<text x='32' y='44' font-size='30' text-anchor='middle'>${c.emoji}</text></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+let NATION_FLAGS = {
+  kent:  nationFlagDataURI('kent'),
+  oren:  nationFlagDataURI('oren'),
+  dion:  nationFlagDataURI('dion'),
+  aden:  nationFlagDataURI('aden'),
+};
+function refreshNationFlags() {
+  try {
+    NATION_FLAGS.kent = nationFlagDataURI('kent');
+    NATION_FLAGS.oren = nationFlagDataURI('oren');
+    NATION_FLAGS.dion = nationFlagDataURI('dion');
+    NATION_FLAGS.aden = nationFlagDataURI('aden');
+  } catch (e) { console.warn('[Assets] 國旗紋章重算失敗:', e); }
+}
 
 // CSS 繪製國旗 fallback（圖片加載失敗時備用：彩色小圓點）
 function getNationFlagHTML(nationId) {
@@ -6623,6 +6685,71 @@ function loadGameFromSlot(idx) {
   } catch(e) { console.warn('[存檔] 槽位載入失敗:', e); return false; }
 }
 
+// v4.4.15：某等級對應的升級經驗上限（Lv1=100，每級 ×1.3，與升級迴圈一致）
+function expMaxForLevel(level) {
+  let lv = Math.max(1, parseInt(level, 10) || 1);
+  let e = 100;
+  for (let i = 1; i < lv; i++) e = Math.floor(e * 1.3);
+  return e;
+}
+// v4.4.15：依「職業基礎 + 等級成長」派生角色裸屬性（與創角 / 升級公式一致）
+//   裝備 / 變身 / 英雄 / 守護的加成不寫進 player.atk，統一由 getTotalAtk() 顯示時疊加
+function deriveClassBaseForLevel(classId, level) {
+  const cid = (typeof CLASSES === 'object' && CLASSES[classId]) ? classId : 'warrior';
+  const cls = CLASSES[cid];
+  const pref = (typeof CLASS_STAT_PREFS === 'object' && CLASS_STAT_PREFS[cid]) || CLASS_STAT_PREFS.warrior;
+  const lv = Math.max(1, parseInt(level, 10) || 1);
+  const ups = lv - 1;
+  const strBonus = (pref.str - 10) * 1.5;
+  const conBonus = (pref.con - 10) * 8;
+  const dexBonus = (pref.dex - 10) * 0.5;
+  const baseAtk = Math.floor(Number(cls.baseStats.atk) + strBonus);
+  const baseDef = Math.floor(Number(cls.baseStats.def) + dexBonus * 0.5);
+  const baseHp  = Math.floor(Number(cls.baseStats.hpMax) + conBonus);
+  return {
+    atk: baseAtk + ups * Math.floor(cls.baseStats.atk * 0.06),
+    def: baseDef + ups * Math.floor(cls.baseStats.def * 0.05),
+    hpMax: baseHp + ups * Math.floor(cls.baseStats.hpMax * 0.08),
+    mpMax: Number(cls.baseStats.mpMax) || 100,
+    crit: Math.floor(Number(cls.baseStats.crit || 5) + dexBonus * 0.3),
+  };
+}
+// v4.4.15：存檔載入後的欄位級歸一化，根治「經驗 NaN%、重登攻防縮水、hpMax 命名不一致」
+//   伺服器舊存檔用 maxHp/maxMp、且可能缺 expMax，這裡統一遷移 / 補齊
+function normalizeLoadedPlayer() {
+  const p = GS.player;
+  if (!p || typeof p !== 'object') return;
+  if (!p.classId || !(typeof CLASSES === 'object' && CLASSES[p.classId])) p.classId = 'warrior';
+  const lv = Math.max(1, parseInt(p.level, 10) || 1);
+  p.level = lv;
+  if (!Number.isFinite(+p.exp) || +p.exp < 0) p.exp = 0;
+  // 舊欄位遷移：maxHp/maxMp -> hpMax/mpMax
+  if ((p.hpMax == null || !Number.isFinite(+p.hpMax)) && p.maxHp != null) p.hpMax = +p.maxHp;
+  if ((p.mpMax == null || !Number.isFinite(+p.mpMax)) && p.maxMp != null) p.mpMax = +p.maxMp;
+  // 經驗上限缺失 / 非法 -> 按等級重算（否則 exp/expMax = NaN%）
+  if (!Number.isFinite(+p.expMax) || +p.expMax <= 0) p.expMax = expMaxForLevel(lv);
+  // 裸屬性由職業 + 等級權威派生，避免伺服器另一套基礎值 / 殘檔導致重登攻防異常
+  const base = deriveClassBaseForLevel(p.classId, lv);
+  p.atk = base.atk;
+  p.def = base.def;
+  p.hpMax = base.hpMax;
+  p.mpMax = base.mpMax;
+  if (!Number.isFinite(+p.crit)) p.crit = base.crit;
+  if (!Number.isFinite(+p.hp) || +p.hp < 0 || +p.hp > p.hpMax) p.hp = p.hpMax;
+  if (!Number.isFinite(+p.mp) || +p.mp < 0 || +p.mp > p.mpMax) p.mp = p.mpMax;
+  if (p.x == null || !Number.isFinite(+p.x)) p.x = 1200;
+  if (p.y == null || !Number.isFinite(+p.y)) p.y = 900;
+  if (p.targetX == null) p.targetX = p.x;
+  if (p.targetY == null) p.targetY = p.y;
+  if (!p.skillCooldowns || !Array.isArray(p.skillCooldowns)) p.skillCooldowns = [0,0,0,0,0,0,0,0];
+  if (!p.buffs || typeof p.buffs !== 'object') p.buffs = {};
+  // resources 欄位級補全（不覆蓋已有合法值）
+  if (!GS.resources || typeof GS.resources !== 'object') GS.resources = { gold: 0, gem: 0 };
+  if (!Number.isFinite(+GS.resources.gold)) GS.resources.gold = 0;
+  if (!Number.isFinite(+GS.resources.gem)) GS.resources.gem = 0;
+  if (!GS.equipment || typeof GS.equipment !== 'object') GS.equipment = {};
+}
+
 // 將存檔資料合併到 GS（共用邏輯）
 function applySaveData(data) {
   if (!data || typeof data !== 'object') return false;
@@ -6643,6 +6770,8 @@ function applySaveData(data) {
   if (!Array.isArray(GS.monsters)) GS.monsters = [];
   if (!GS.resources || typeof GS.resources !== 'object') GS.resources = { gold: 0, gem: 0 };
   if (!GS.inventory) GS.inventory = [];
+  // v4.4.15：欄位級歸一化，補齊 expMax/hpMax/atk/def，根治 NaN% 與重登數值縮水
+  normalizeLoadedPlayer();
   console.log('[存檔] 英雄', GS.ownedHeroes?.length || 0, '張 / 寵物', GS.ownedPets?.length || 0, '張 / 變身', GS.ownedTransforms?.length || 0, '張');
   return true;
 }
@@ -6900,6 +7029,33 @@ function init() {
   requestAnimationFrame(gameLoop);
 }
 
+// v4.4.15：精靈圖預載 — 進圖前把所有 useImg 精靈圖預先下載進瀏覽器快取，
+//   避免 AOI 實體（AI / 遠端玩家 / 怪物）建立當下才開始抓圖，造成「先出名字、2~4 秒後才出本體」
+let _spriteIdlePreloaded = false;
+let _spriteFramePreloaded = false;
+function _collectSpriteUrl(urls, u) {
+  if (typeof u === 'string' && u && (u.startsWith('assets/') || u.startsWith('http') || u.startsWith('/spark/'))) urls.add(u);
+}
+function preloadSpriteImages(frames) {
+  try {
+    if (typeof SPRITE !== 'object') return;
+    if (frames && _spriteFramePreloaded) return;
+    if (!frames && _spriteIdlePreloaded) return;
+    const urls = new Set();
+    const frameKeys = ['walk','walk2','walk3','walk4','attack','attack2','attack3','hit'];
+    for (const key in SPRITE) {
+      const s = SPRITE[key];
+      if (!s || typeof s !== 'object' || !s.useImg) continue;
+      _collectSpriteUrl(urls, s.idle);
+      if (frames) frameKeys.forEach(f => _collectSpriteUrl(urls, s[f]));
+    }
+    let n = 0;
+    urls.forEach(u => { const im = new Image(); im.decoding = 'async'; im.src = u; n++; });
+    if (frames) _spriteFramePreloaded = true; else _spriteIdlePreloaded = true;
+    console.log('[Assets] 精靈預載下發 ' + n + ' 張' + (frames ? '（含動作幀）' : '（idle）'));
+  } catch (e) { console.warn('[Assets] 精靈預載失敗:', e); }
+}
+
 // v2.4.0：manifest 載入後刷新所有 sprite 圖片路徑（玩家、怪物、NPC）
 function refreshAllSprites() {
   try {
@@ -6969,6 +7125,8 @@ function _initCore() {
     } catch(e) { console.warn('[Init] 導回選角失敗:', e); }
     throw new Error('角色資料缺失，請重新選擇角色');
   }
+  // v4.4.15：先用當前 URL 立即預載 idle（不等 manifest），讓首批 AOI 實體儘快有本體圖
+  try { preloadSpriteImages(false); } catch (e) {}
   // v2.4.0：啟動時非同步載入 assets-manifest（失敗也不影響，走 fallback）
   loadAssetsManifest().then(manifest => {
     if (manifest) {
@@ -6978,9 +7136,18 @@ function _initCore() {
         // v2.7.7：manifest 非同步回呼可能在 __resetGameState 之後到達，增加 GS.player 防衛
         if (GS.currentMap && sceneBg && GS.player) loadMap(GS.currentMap);
         refreshAllSprites();
+        refreshNationFlags(); // v4.4.15：manifest 就緒後重算國旗最終路徑
       } catch (e) { console.warn('[Init] manifest 載入後刷新失敗:', e); }
     }
-  });
+    // v4.4.15：manifest 底定 URL 後重新預載，並刷新已建立的 AOI 實體，消除「先名字後圖」
+    try {
+      preloadSpriteImages(false);
+      preloadSpriteImages(true);
+      if (typeof window._refreshAOISprites === 'function') window._refreshAOISprites();
+    } catch (e) {}
+  }).catch(() => { try { preloadSpriteImages(true); } catch (e) {} });
+  // v4.4.15：空閒後補預動作幀（行走/攻擊/受擊），不阻塞首屏
+  setTimeout(() => { try { preloadSpriteImages(true); } catch (e) {} }, 1500);
   // 缓存 DOM
   el = {
     scene: $('battle-scene'),
@@ -11994,11 +12161,11 @@ function initCC2UI() {
       btn.style.cursor = 'pointer';
       btn.title = detail.name + ' — 點擊選擇此職業';
       // v2.4.0：使用職業頭像 icon，加上邊框強化可點擊性
-      const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
+      const portraitUrl = 'assets/class/' + cid + '/portrait.png'; // v4.4.15：manifest 實際為 .png，onerror 再回退 .jpg
       if (sp.useImg && sp.idle) {
         btn.innerHTML = `<img src="${portraitUrl}" alt="${detail.name}" 
           style="width:100%;height:100%;object-fit:cover;border-radius:4px"
-          onerror="this.style.display='none';var fb=this.parentElement.querySelector('.cc2-icon-fallback');if(fb)fb.style.display='flex';"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none">${detail.name.slice(0, 1)}</span>`;
+          onerror="if(!this.dataset.triedJpg&&/\.png(\?|$)/.test(this.src)){this.dataset.triedJpg='1';this.src=this.src.replace('.png','.jpg');return;}this.style.display='none';var fb=this.parentElement.querySelector('.cc2-icon-fallback');if(fb)fb.style.display='flex';"/><span class="cc2-icon-fallback" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none">${detail.name.slice(0, 1)}</span>`;
       } else {
         btn.innerHTML = `<span class="cc2-icon-fallback" style="display:flex;position:absolute;inset:0;align-items:center;justify-content:center;color:#e8c060;font-size:14px;font-weight:700;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.8)">${detail.name.slice(0, 1)}</span>`;
       }
@@ -12081,7 +12248,7 @@ function updateCC2Portrait() {
   const cid = charCreateState.classId;
   const detail = CLASS_DETAIL[cid];
   // v2.4.0：使用職業立繪真圖（portrait.jpg），不再用精靈圖當大立繪
-  const portraitUrl = 'assets/class/' + cid + '/portrait.jpg';
+  const portraitUrl = 'assets/class/' + cid + '/portrait.png'; // v4.4.15：manifest 實際為 .png，onerror 再回退 .jpg
   
   portraitEl.innerHTML = `
     <div class="cc2-portrait-fallback" style="display:none">
@@ -12091,7 +12258,7 @@ function updateCC2Portrait() {
     <img src="${portraitUrl}" alt="${detail ? detail.name : ''}" class="cc2-portrait-img cc2-portrait-real" 
          style="display:none;object-fit:contain;width:100%;height:100%"
          onload="this.style.display='block';var fb=this.parentElement.querySelector('.cc2-portrait-fallback');if(fb)fb.style.display='none'"
-         onerror="this.style.display='none';var fb=this.parentElement.querySelector('.cc2-portrait-fallback');if(fb)fb.style.display='flex'"/>
+         onerror="if(!this.dataset.triedJpg&&/\.png(\?|$)/.test(this.src)){this.dataset.triedJpg='1';this.src=this.src.replace('.png','.jpg');return;}this.style.display='none';var fb=this.parentElement.querySelector('.cc2-portrait-fallback');if(fb)fb.style.display='flex'"/>
   `;
 }
 
@@ -12337,7 +12504,18 @@ function confirmCC2CharCreate() {
     }
     addLog('system', '歡迎來到君主之刃，' + name + '！');
     addLog('system', '點擊地面移動，點擊菜單按鈕查看國家/公會/城堡。');
-    
+
+    // v4.4.15：新角給予初始資源，並立即把完整存檔（expMax/atk/def/資源）上傳伺服器
+    //   否則伺服器 createCharacter 的缺欄位初始檔會在重登時覆蓋，導致金幣歸 0、經驗 NaN%
+    try {
+      if (!GS.resources || typeof GS.resources !== 'object') GS.resources = { gold: 0, gem: 0 };
+      if (!Number.isFinite(+GS.resources.gold) || +GS.resources.gold <= 0) GS.resources.gold = 300000;
+      if (!Number.isFinite(+GS.resources.gem) || +GS.resources.gem <= 0) GS.resources.gem = 3000000;
+      normalizeLoadedPlayer();
+      updateUI();
+      saveGame();
+    } catch(e) { console.warn('[創角] 初始存檔失敗:', e); }
+
     // 初始化音訊系統
     if (typeof AudioSystem !== 'undefined' && AudioSystem) {
       try {
@@ -12454,9 +12632,11 @@ function showNationSelect() {
         ${NATIONS.map(n => {
           const dotBg = { kent: 'radial-gradient(circle at 30% 30%,#ff6060,#a01010)', oren: 'radial-gradient(circle at 30% 30%,#60a0ff,#103080)', dion: 'radial-gradient(circle at 30% 30%,#60d060,#106020)', aden: 'radial-gradient(circle at 30% 30%,#ffd060,#a07010)' }[n.id];
           const borderColor = { kent: '#c02020', oren: '#4080ff', dion: '#40c060', aden: '#ffc040' }[n.id];
+          // v4.4.16：原始國旗 hash 為 ASSET MISSING 佔位圖，改用國家色+紋章 emoji 內聯繪製，永不缺圖
+          const crest = { kent: '🦁', oren: '🦅', dion: '⚔️', aden: '👑' }[n.id] || '🛡️';
           return `
           <div class="nation-card" data-nation="${n.id}">
-            <div class="nation-card-flag" data-flag="${n.id}" style="width:64px;height:64px;margin:0 auto;border-radius:50%;border:2px solid rgba(240,192,64,0.5);overflow:hidden;box-shadow:0 0 12px rgba(240,192,64,0.3);background:${dotBg};border-color:${borderColor}"></div>
+            <div class="nation-card-flag" data-flag="${n.id}" style="width:64px;height:64px;margin:0 auto;border-radius:50%;border:2px solid ${borderColor};box-shadow:0 0 12px rgba(240,192,64,0.3);background:${dotBg};display:flex;align-items:center;justify-content:center;font-size:32px;line-height:1">${crest}</div>
             <div class="nation-card-name">${n.name}</div>
             <div class="nation-card-desc">${n.desc}</div>
           </div>`;
@@ -12465,15 +12645,7 @@ function showNationSelect() {
       <button class="nation-select-skip" id="nation-select-skip">暫不選擇，稍後再加入</button>
     </div>
   `;
-  // 動態注入國旗圖片，失敗則保留CSS背景圓點
-  modal.querySelectorAll('[data-flag]').forEach(div => {
-    const nid = div.dataset.flag;
-    const img = new Image();
-    img.src = NATION_FLAGS[nid] || NATION_FLAGS.kent;
-    img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
-    img.onload = () => { div.innerHTML = ''; div.appendChild(img); };
-    img.onerror = () => { /* 保留 CSS 背景圓點 */ };
-  });
+  // v4.4.16：國旗原始圖為佔位圖，國家選擇頁已改用 emoji 紋章，不再注入缺失圖片
   modal.style.display = 'flex';
 
   modal.querySelectorAll('.nation-card').forEach(card => {
@@ -17572,9 +17744,14 @@ function recalcPlayerStats() {
 // ==================== UI ====================
 function updateUI() {
   el.playerLevel.textContent = GS.player.level;
-  const expPct = Math.min(100, (GS.player.exp / GS.player.expMax) * 100);
+  // v4.4.15：經驗百分比 NaN 兜底（expMax 缺失時按等級重算）
+  let expMax = +GS.player.expMax;
+  if (!Number.isFinite(expMax) || expMax <= 0) expMax = (typeof expMaxForLevel === 'function') ? expMaxForLevel(GS.player.level) : 100;
+  const expCur = Number.isFinite(+GS.player.exp) ? +GS.player.exp : 0;
+  const expPct = Math.max(0, Math.min(100, (expCur / expMax) * 100));
   if (el.expPct) el.expPct.textContent = Math.floor(expPct) + '%';
-  el.gemCount.textContent = GS.resources.gem.toLocaleString();
+  const gemVal = Number.isFinite(+GS.resources?.gem) ? +GS.resources.gem : 0;
+  el.gemCount.textContent = gemVal.toLocaleString();
   // HP/MP 條
   const hpMax = getTotalHpMax();
   const mpMax = getTotalMpMax();
@@ -26949,7 +27126,9 @@ window.addEventListener('load', function() {
       if (GS.player.y == null) GS.player.y = 900;
       if (GS.player.targetX == null) GS.player.targetX = GS.player.x;
       if (GS.player.targetY == null) GS.player.targetY = GS.player.y;
-      
+      // v4.4.15：無論走哪個分支，進 init 前統一補齊 expMax/hpMax/atk/def（新角公式相同，幂等）
+      try { normalizeLoadedPlayer(); } catch(e) { console.warn('[Auth] 角色歸一化失敗:', e); }
+
       console.log('[Auth] onAuthReady完成，準備init: player=', GS.player.name, '/', GS.player.classId, 'map=', GS.currentMap);
       init();
       
@@ -28399,6 +28578,27 @@ if (typeof dealDamageToAIPlayer === 'function') {
   };
 
   window._aoiTick = tickAOI;
+
+  // v4.4.15：manifest / 精靈預載就緒後，對已建立的 AOI 實體重設一次 idle src，
+  //   命中瀏覽器快取即可立即顯示本體（根治「先出名字標籤、數秒後才補圖」）
+  window._refreshAOISprites = function() {
+    let n = 0;
+    for (const ent of aoiEntities.values()) {
+      try {
+        if (!ent.el || !ent.data) continue;
+        const cls = SPRITE[ent.data.classId] || SPRITE.enemy || SPRITE.warrior;
+        const idle = cls && cls.idle;
+        if (!idle) continue;
+        const idleImg = ent.el.querySelector('img.sprite-frame-idle, img.unit-sprite-img');
+        if (idleImg && idleImg.dataset.presetSrc !== idle) {
+          idleImg.src = idle;
+          idleImg.dataset.presetSrc = idle;
+          n++;
+        }
+      } catch (e) {}
+    }
+    if (n) console.log('[AOI] 預載就緒，刷新', n, '個實體精靈');
+  };
 
   // v4.4.14：player_move 是全圖即時廣播（比 100ms aoi_update 更快），用它直接刷新 AOI 實體的插值目標，
   // 讓遠端玩家移動更跟手。實體尚未建立時忽略（等 aoi_enter/aoi_update 建立），避免用不完整資料建立空殼。
