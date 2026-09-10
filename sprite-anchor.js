@@ -14,6 +14,8 @@
   var TARGET_H_RATIO = 0.94;   // 角色主體統一佔容器高度 94%
   var ALPHA_TH = 40;           // 主體不透明閾值
   var DENS = 0.02;             // 行/列密度閾值（濾零散雜點）
+  var PROBE_MAX = 128;         // 量測降採樣最長邊（效能：手機上不對原圖全畫素掃描）
+  var boxCache = Object.create(null); // 同一 src 只量一次，多單位共用
 
   // 密度投影找主體區間：以中心為種子向兩側擴展，跨越有限空洞
   function span(cnt, thr, maxGap) {
@@ -40,25 +42,37 @@
 
   function bodyBox(img) {
     var W = img.naturalWidth, H = img.naturalHeight;
-    var c = document.createElement('canvas'); c.width = W; c.height = H;
+    var key = img.currentSrc || img.src || (W + 'x' + H);
+    if (boxCache[key]) return boxCache[key];
+    // 降採樣到最長邊 PROBE_MAX，像素量降數百倍，邊界精度仍足夠
+    var scale = Math.min(1, PROBE_MAX / Math.max(W, H));
+    var sw = Math.max(1, Math.round(W * scale)), sh = Math.max(1, Math.round(H * scale));
+    var c = document.createElement('canvas'); c.width = sw; c.height = sh;
     var ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, W, H);
-    var d = ctx.getImageData(0, 0, W, H).data;
-    var row = new Int32Array(H);
-    for (var y = 0; y < H; y++) {
-      var rc = 0, base = y * W * 4;
-      for (var x = 0; x < W; x++) if (d[base + x * 4 + 3] > ALPHA_TH) rc++;
+    ctx.drawImage(img, 0, 0, sw, sh);
+    var d = ctx.getImageData(0, 0, sw, sh).data;
+    var row = new Int32Array(sh);
+    for (var y = 0; y < sh; y++) {
+      var rc = 0, base = y * sw * 4;
+      for (var x = 0; x < sw; x++) if (d[base + x * 4 + 3] > ALPHA_TH) rc++;
       row[y] = rc;
     }
-    var ys = span(row, W * DENS, H * 0.03), t = ys[0], b = ys[1];
-    if (b <= t) return null;
-    var col = new Int32Array(W);
+    var ys = span(row, sw * DENS, sh * 0.03), t = ys[0], b = ys[1];
+    if (b <= t) { boxCache[key] = null; return null; }
+    var col = new Int32Array(sw);
     for (var yy = t; yy <= b; yy++) {
-      var bb = yy * W * 4;
-      for (var xx = 0; xx < W; xx++) if (d[bb + xx * 4 + 3] > ALPHA_TH) col[xx]++;
+      var bb = yy * sw * 4;
+      for (var xx = 0; xx < sw; xx++) if (d[bb + xx * 4 + 3] > ALPHA_TH) col[xx]++;
     }
-    var xs = span(col, (b - t) * DENS, W * 0.03);
-    return { l: xs[0], r: xs[1], t: t, b: b };
+    var xs = span(col, (b - t) * DENS, sw * 0.03);
+    // 小圖邊界 → 原圖座標
+    var inv = 1 / scale;
+    var box = {
+      l: Math.round(xs[0] * inv), r: Math.round(xs[1] * inv),
+      t: Math.round(t * inv), b: Math.round(b * inv)
+    };
+    boxCache[key] = box;
+    return box;
   }
 
   function normalize(img) {

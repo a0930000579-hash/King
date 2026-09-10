@@ -12848,3 +12848,23 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   transform: translate(calc(100% - var(--ax, 0px)), var(--ay, 0px))
              scale(calc(var(--as, 1) * -1), var(--as, 1));
 }
+
+/* ============================================================
+   v4.4.16 手機效能：變身光效 blur 降載
+   持續動畫的 blur(8px/6px/4px) 是手機 GPU 卡頓大戶；
+   只在窄窗（手機）降低模糊半徑，桌面保留原始光效。
+   不碰 transform 定位，避免干擾世界座標/動畫。
+   ============================================================ */
+@media (max-width: 860px) {
+  .transform-aura .aura-glow-outer { filter: blur(3px) !important; }
+  .transform-aura .aura-smoke span { filter: blur(1.5px) !important; }
+  .world-unit.hero.transform-rarity-gold .aura-smoke span { filter: blur(2px) !important; }
+  .transform-aura .aura-flames span { filter: none !important; }
+  .transform-aura .bolt { box-shadow: 0 0 6px #ffd060 !important; }
+}
+/* 使用者系統開啟「減少動態效果」時，停用變身粒子動畫 */
+@media (prefers-reduced-motion: reduce) {
+  .transform-aura .aura-smoke,
+  .transform-aura .aura-flames,
+  .transform-aura .aura-lightning { animation: none !important; }
+}
