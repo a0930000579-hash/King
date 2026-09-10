@@ -1,0 +1,152 @@
+name: ZIP Merge Deploy (Force Overwrite)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: king-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge-extract uploaded ZIPs (FORCE OVERWRITE)
+        shell: bash
+        run: |
+          set -u
+          echo "========================================"
+          echo "  開始處理ZIP更新包（強制覆蓋模式）"
+          echo "========================================"
+
+          zips=()
+          while IFS= read -r f; do zips+=("$f"); done < <(find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*')
+          echo "找到 ${#zips[@]} 個ZIP文件"
+
+          if [ "${#zips[@]}" -eq 0 ]; then
+            echo "沒有新的ZIP文件，保持現有文件。"
+            exit 0
+          fi
+
+          # 顯示每個ZIP的內容清單（用於調試）
+          for z in "${zips[@]}"; do
+            echo ""
+            echo "=============================="
+            echo "ZIP文件: $z"
+            echo "=============================="
+            echo "ZIP內容清單:"
+            unzip -l "$z" | head -30
+            echo "..."
+          done
+
+          # 關鍵：先刪除要更新的核心文件，確保不會有舊文件殘留
+          echo ""
+          echo "========================================"
+          echo "  刪除舊的核心文件（確保完全覆蓋）"
+          echo "========================================"
+          rm -f game.js multiplayer.js index.html auth.js
+          rm -f server/server.cjs server/ws-server.cjs server/game-world.cjs server/ai-engine.cjs
+          rm -f server/db-layer.cjs server/index.cjs
+          echo "已刪除舊的核心文件"
+
+          # 解壓縮所有ZIP，強制覆蓋
+          for z in "${zips[@]}"; do
+            echo ""
+            echo "=============================="
+            echo "解壓縮: $z"
+            echo "=============================="
+            unzip -o -q "$z" -d . || { echo "❌ unzip失敗: $z"; exit 1; }
+            echo "✅ 解壓縮完成: $z"
+          done
+
+          # 如果ZIP中有嵌套目錄（如King-main/），提升文件到根目錄
+          if [ ! -f index.html ]; then
+            inner=$(find . -mindepth 2 -type f -name index.html ! -path './.git/*' ! -path './.github/*' | head -n 1 || true)
+            if [ -n "$inner" ]; then
+              d=$(dirname "$inner")
+              echo ""
+              echo "========================================"
+              echo "  檢測到嵌套目錄，提升文件: $d"
+              echo "========================================"
+              shopt -s dotglob nullglob
+              # 先刪除根目錄可能存在的舊server目錄
+              rm -rf server
+              # 移動所有文件
+              mv "$d"/* . 2>/dev/null || true
+              rm -rf "$d"
+              echo "✅ 文件已提升到根目錄"
+            fi
+          fi
+
+          # 驗證關鍵文件是否存在
+          echo ""
+          echo "========================================"
+          echo "  驗證關鍵文件"
+          echo "========================================"
+          for f in game.js multiplayer.js index.html auth.js server/server.cjs server/ws-server.cjs server/game-world.cjs server/ai-engine.cjs; do
+            if [ -f "$f" ]; then
+              size=$(wc -c < "$f")
+              mtime=$(stat -c '%y' "$f" | cut -d. -f1)
+              echo "✅ $f ($size bytes, $mtime)"
+            else
+              echo "❌ $f 不存在！"
+            fi
+          done
+
+          # 刪除已處理的ZIP文件
+          find . -type f -iname '*.zip' ! -path './.git/*' ! -path './.github/*' -delete || true
+          echo ""
+          echo "已刪除處理過的ZIP文件"
+
+          # 顯示資產數量
+          echo ""
+          echo "資產文件數量: $(find assets -type f 2>/dev/null | wc -l)"
+
+      - name: Show changes
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "  Git變更摘要"
+          echo "========================================"
+          git status --short
+          echo ""
+          echo "核心文件變更:"
+          git diff --stat -- game.js multiplayer.js index.html auth.js server/ 2>/dev/null || true
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 不要修改工作流文件
+          git checkout -- .github 2>/dev/null || true
+
+          # 強制添加所有文件（忽略.gitignore）
+          git add -f -A
+          git reset -q -- .github 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "沒有變更。"
+          else
+            echo ""
+            echo "========================================"
+            echo "  提交變更"
+            echo "========================================"
+            git commit -m "deploy: force overwrite from ZIP update package [skip ci]"
+            git push
+            echo "✅ 已提交並推送！"
+            echo ""
+            echo "最新提交:"
+            git log -1 --oneline
+          fi

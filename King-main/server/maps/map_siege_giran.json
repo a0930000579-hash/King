@@ -1,0 +1,17 @@
+{
+  "mapId": "siege_giran",
+  "name": "尼德威阿爾城·攻城戰",
+  "type": "castle_siege",
+  "width": 2048,
+  "height": 2048,
+  "background": "/assets/map/siege.jpg",
+  "spawn": { "x": 1024, "y": 1024 },
+  "safeZone": null,
+  "levelMin": 30,
+  "levelMax": 99,
+  "castle": "giran",
+  "teleports": [],
+  "monsterSpawns": [],
+  "npcs": [],
+  "bgm": "/assets/audio/bgm_siege.mp3"
+}

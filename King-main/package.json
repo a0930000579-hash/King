@@ -1,0 +1,16 @@
+{
+  "name": "miaoda-design-html-app",
+  "version": "4.4.15",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/server.cjs"
+  },
+  "dependencies": {
+    "pg": "^8.12.0",
+    "pg-types": "^2.2.0"
+  }
+}

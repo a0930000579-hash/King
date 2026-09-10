@@ -1,0 +1,36 @@
+{
+  "mapId": "desert_village",
+  "name": "沙漠绿洲",
+  "type": "safe",
+  "width": 2496,
+  "height": 1664,
+  "background": "/assets/map/deaddesert.jpg",
+  "spawn": { "x": 1200, "y": 900 },
+  "safeZone": { "x": 1200, "y": 832, "radius": 600 },
+  "levelMin": 30,
+  "levelMax": 50,
+  "castle": "giran",
+  "teleports": [
+    {
+      "id": "tp_to_red_desert",
+      "x": 2400, "y": 832, "radius": 100,
+      "targetMap": "red_desert",
+      "targetX": 120, "targetY": 832
+    }
+  ],
+  "monsterSpawns": [],
+  "npcs": [
+    { "npcId": "shop",           "x": 240,  "y": 760, "name": "沙漠商人" },
+    { "npcId": "blacksmith",     "x": 980,  "y": 720, "name": "鐵匠" },
+    { "npcId": "warehouse",      "x": 420,  "y": 880, "name": "駱駝管理員" },
+    { "npcId": "inn",            "x": 600,  "y": 800, "name": "綠洲旅館" },
+    { "npcId": "bulletin",       "x": 760,  "y": 740, "name": "佈告欄" },
+    { "npcId": "quest",          "x": 880,  "y": 860, "name": "商隊隊長" },
+    { "npcId": "dungeon_master", "x": 1120, "y": 800, "name": "副本管理員" },
+    { "npcId": "premium_shop",   "x": 1040, "y": 900, "name": "高級珠寶商" },
+    { "npcId": "main_quest",     "x": 540,  "y": 920, "name": "沙漠先知" },
+    { "npcId": "guard",          "x": 200,  "y": 680, "name": "绿洲衛隊" },
+    { "npcId": "guard",          "x": 1080, "y": 660, "name": "绿洲衛隊" }
+  ],
+  "bgm": "/assets/audio/bgm_desert.mp3"
+}
