@@ -12861,6 +12861,17 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   .world-unit.hero.transform-rarity-gold .aura-smoke span { filter: blur(2px) !important; }
   .transform-aura .aura-flames span { filter: none !important; }
   .transform-aura .bolt { box-shadow: 0 0 6px #ffd060 !important; }
+  /* v4.4.17：移除大精靈圖上的多層 drop-shadow 外發光。變身切幀時瀏覽器要對
+     1536×2048 大圖反覆做多層高斯陰影光柵化，是手機「尤其變身卡」的主因；
+     手機改為不疊外發光（人物本體完全保留），桌面維持原光效。 */
+  .world-unit.hero-unit[class*="rarity-"] .unit-sprite-img,
+  .world-unit.hero.level-glow .unit-sprite-img,
+  .world-unit.hero.transform-true-gold .unit-sprite-img { filter: none !important; }
+  /* 攻擊瞬間只保留便宜的亮度提升，移除雙層大範圍 drop-shadow */
+  .unit-sprite-wrap.attack-glow .unit-sprite-img,
+  .unit-sprite-wrap.attack-glow .sprite-frame-attack { filter: brightness(1.15) !important; }
+  /* 真金閃電粒子三層 drop-shadow 收斂為單層 */
+  .world-unit.hero.transform-true-gold .aura-lightning .bolt { filter: drop-shadow(0 0 5px currentColor) !important; }
 }
 /* 使用者系統開啟「減少動態效果」時，停用變身粒子動畫 */
 @media (prefers-reduced-motion: reduce) {

@@ -13061,14 +13061,16 @@ function updateLevelGlow() {
 
 function positionUnit(el, x, y, kind) {
   const size = SPRITE_SIZE[kind] || SPRITE_SIZE.hero;
-  // 脚底对齐：精灵图底部 = 地面 y
-  el.style.left = (x - size.w / 2) + 'px';
-  el.style.top = (y - size.h) + 'px';
+  // v4.4.17 效能：數值沒變就不寫 style，避免靜止單位每幀觸發重排
+  const Ls = (x - size.w / 2) + 'px';
+  const Ts = (y - size.h) + 'px';
+  if (el._lastLeft !== Ls) { el.style.left = Ls; el._lastLeft = Ls; }
+  if (el._lastTop !== Ts) { el.style.top = Ts; el._lastTop = Ts; }
   // 深度排序：y 越大越靠前（z-index 越高）
   // 基礎值 10 + y/10，建築用 15，英雄用 20+，確保層級正確
   const baseZ = kind === 'hero' ? 20 : (kind === 'enemy' ? 10 : 12);
   const zIndex = Math.floor(baseZ + y / 8);
-  el.style.zIndex = zIndex;
+  if (el._lastZ !== zIndex) { el.style.zIndex = zIndex; el._lastZ = zIndex; }
   // 視口剔除：屏幕外單位暫停CSS動畫，節省GPU
   // worldW/worldH 是scene的client寬高（即視口大小）
   const margin = 100; // 邊界緩衝，避免邊緣閃爍
@@ -13088,27 +13090,49 @@ function positionUnit(el, x, y, kind) {
 function renderPlayer() {
   if (!GS.player) return; // v2.7.7：null 防衛
   const p = GS.player;
-  // 玩家始終在 worldLayer 中
+  // 玩家始終在 worldLayer 中（v4.4.17：快取子元素，避免每幀 5 次 querySelector）
   const parent = worldLayer;
-  const unit = parent.querySelector('.world-unit.hero');
-  if (!unit) return;
+  let unit = parent._heroUnit;
+  if (!unit || !unit.isConnected) {
+    unit = parent.querySelector('.world-unit.hero');
+    if (!unit) return;
+    parent._heroUnit = unit;
+    unit._hpFill = unit.querySelector('.unit-hp-fill');
+    unit._mpFill = unit.querySelector('.unit-mp-fill');
+    unit._lvTag = unit.querySelector('.unit-level-tag');
+    unit._nameEl = unit.querySelector('.unit-name');
+    unit._lastNameKey = null; unit._lastHp = null; unit._lastMp = null;
+    unit._lastLv = null; unit._lastStateCls = null; unit._lastFacing = null;
+  }
+  // v4.4.17：以下全部「數值/狀態變化才寫 DOM」，靜止時零寫入、零重排
   const hpPct = Math.max(0, (p.hp / getTotalHpMax()) * 100);
-  const hpFill = unit.querySelector('.unit-hp-fill');
-  if (hpFill) hpFill.style.width = hpPct + '%';
-  // MP 條更新
+  if (unit._lastHp !== hpPct) { if (unit._hpFill) unit._hpFill.style.width = hpPct + '%'; unit._lastHp = hpPct; }
   const mpPct = Math.max(0, (p.mp / getTotalMpMax()) * 100);
-  const mpFill = unit.querySelector('.unit-mp-fill');
-  if (mpFill) mpFill.style.width = mpPct + '%';
-  // 更新等級标签
-  const lvTag = unit.querySelector('.unit-level-tag');
-  if (lvTag) lvTag.textContent = 'Lv.' + p.level;
-  // 更新名字旁國旗（加入國家後刷新）
-  updatePlayerNameFlag();
+  if (unit._lastMp !== mpPct) { if (unit._mpFill) unit._mpFill.style.width = mpPct + '%'; unit._lastMp = mpPct; }
+  const lvTxt = 'Lv.' + p.level;
+  if (unit._lastLv !== lvTxt) { if (unit._lvTag) unit._lvTag.textContent = lvTxt; unit._lastLv = lvTxt; }
+  // 名字與國旗只在 name/nation 真的變化時重建（原本每幀 innerHTML，是持續重排大戶）
+  const nameKey = GS.nation + '|' + p.name;
+  if (unit._lastNameKey !== nameKey) {
+    if (unit._nameEl) {
+      const nation = NATIONS.find(nn => nn.id === GS.nation);
+      const flagImg = nation ? safeFlagImg(nation.id, 13) : '';
+      unit._nameEl.innerHTML = `${flagImg}<span style="vertical-align:middle">${p.name}</span>`;
+      unit._nameEl.style.display = 'flex';
+      unit._nameEl.style.alignItems = 'center';
+      unit._nameEl.style.justifyContent = 'center';
+      unit._nameEl.style.gap = '2px';
+    }
+    unit._lastNameKey = nameKey;
+  }
   positionUnit(unit, p.x, p.y, 'hero');
-  unit.classList.toggle('face-left', p.facing === 'left');
-  unit.classList.remove('idle','walking','attacking','casting','hit','dead');
-  if (p.hitTimer > 0) unit.classList.add('hit');
-  else unit.classList.add(p.state);
+  if (unit._lastFacing !== p.facing) { unit.classList.toggle('face-left', p.facing === 'left'); unit._lastFacing = p.facing; }
+  const stateCls = p.hitTimer > 0 ? 'hit' : p.state;
+  if (unit._lastStateCls !== stateCls) {
+    unit.classList.remove('idle','walking','attacking','casting','hit','dead');
+    unit.classList.add(stateCls);
+    unit._lastStateCls = stateCls;
+  }
   // v2.6.0：新動畫引擎 — 計算方向並設定動畫狀態
   let dir = p._lastDir || 'down';
   if (p.state === 'walking' || p.state === 'chasing') {
@@ -14354,7 +14378,8 @@ function updateSpriteFrames(dt) {
   const dtMs = dt * 1000;
   // 玩家
   if (worldLayer && GS.player) {
-    const unit = worldLayer.querySelector('.world-unit.hero');
+    let unit = worldLayer._heroUnit; // v4.4.17：複用 renderPlayer 快取，避免每幀 querySelector
+    if (!unit || !unit.isConnected) unit = worldLayer.querySelector('.world-unit.hero');
     if (unit && !unit._offscreen) {
       const spriteObj = getPlayerSprite();
       tickUnitAnim('player', dtMs, spriteObj, unit);
@@ -25690,18 +25715,19 @@ function updateCamera() {
 
 function applyCameraTransform() {
   const c = CAMERA;
-  // 对世界层应用位移和缩放
+  // 对世界层应用位移和缩放（v4.4.17：transformOrigin 固定值只設一次，不每幀重寫）
   const layers = [worldLayer, npcLayer, damageLayer, effectLayer];
   layers.forEach(layer => {
     if (!layer) return;
     layer.style.transform = `translate(${-c.x * c.zoom}px, ${-c.y * c.zoom}px) scale(${c.zoom})`;
-    layer.style.transformOrigin = '0 0';
+    if (!layer._originSet) { layer.style.transformOrigin = '0 0'; layer._originSet = true; }
   });
   // background 也跟随：与世界坐标1:1对应，滚动完全同步
   if (sceneBg) {
-    sceneBg.style.backgroundSize = `${c.worldWidth * c.zoom}px ${c.worldHeight * c.zoom}px`;
+    const bgSize = `${c.worldWidth * c.zoom}px ${c.worldHeight * c.zoom}px`;
+    if (sceneBg._lastBgSize !== bgSize) { sceneBg.style.backgroundSize = bgSize; sceneBg._lastBgSize = bgSize; }
     sceneBg.style.backgroundPosition = `${-c.x * c.zoom}px ${-c.y * c.zoom}px`;
-    sceneBg.style.backgroundRepeat = 'no-repeat';
+    if (!sceneBg._repeatSet) { sceneBg.style.backgroundRepeat = 'no-repeat'; sceneBg._repeatSet = true; }
   }
 }
 
@@ -25718,6 +25744,10 @@ function zoomReset() { CAMERA.targetZoom = 1; }
 function updateMinimap() {
   const canvas = el.minimapCanvas;
   if (!canvas) return;
+  // v4.4.17：小地圖降頻到約 12fps（每幀全量 canvas 重繪在多實體時是可觀開銷，人眼無需 30fps）
+  const __now = (window.performance && performance.now) ? performance.now() : Date.now();
+  if (updateMinimap._last != null && __now - updateMinimap._last < 80) return;
+  updateMinimap._last = __now;
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
 
