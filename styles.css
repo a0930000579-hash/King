@@ -12708,3 +12708,41 @@ img { display: block; pointer-events: none; }
     transparent 100%);
   box-shadow: 0 0 12px rgba(80,220,80,0.7);
 }
+
+/* ============================================================
+   v4.4.14 統一圓角：去掉四四方方的卡牌/格子造型（純視覺，不影響邏輯）
+   ============================================================ */
+/* 大卡牌：抽卡/變身/圖鑑/裝備卡/地圖卡/城堡/寵物/合成/公會/職業/國家/通用 card */
+.gacha-card, .gacha-flip-card, .tf-card, .codex-card, .transform-card,
+.collection-set-card, .collection-category-card, .map-card, .equip-slot-card,
+.castle-card, .pet-card, .synth-result-card, .guild-donate-card, .guild-card,
+.class-card, .nation-card, .char-create-panel, .settings-panel, .card {
+  border-radius: 14px;
+}
+.gacha-flip-card .gacha-card, .gacha-flip-card > div { border-radius: 14px; }
+/* 格子槽：裝備/寵物/合成/技能/空槽 */
+.char-equip-slot, .equip-slot, .pet-slot, .synth-slot, .skill-slot,
+.log-bar-slot, .empty-slot, .slot {
+  border-radius: 10px;
+}
+/* 技能按鈕與圖標 */
+.skill-btn, .skill-icon, .skill-icon-tiered, .skill-icon-img,
+.skill-learn-item, .skill-upgrade-btn {
+  border-radius: 10px;
+}
+.skill-cd, .skill-bar { border-radius: 8px; }
+/* 底部導航與通用面板/按鈕 */
+.bottom-nav, .bottom-nav * { border-radius: 12px; }
+/* 世界單位：血條/名條/等級標與 fallback 方塊圓潤化（不裁切角色精靈本體） */
+.world-unit { border-radius: 10px; }
+.world-unit .unit-info { border-radius: 8px; }
+.world-unit .unit-hp-bar { border-radius: 6px; overflow: hidden; }
+.world-unit .unit-hp-fill { border-radius: 6px; }
+.world-unit .unit-name,
+.world-unit .unit-level-tag { border-radius: 6px; }
+.world-unit .unit-sprite-wrap { border-radius: 8px; }
+.world-unit .unit-shadow { border-radius: 50%; }
+/* 通用 UI 按鈕/視窗圓角（保留極小輔助元素方形） */
+button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
+  border-radius: 10px;
+}

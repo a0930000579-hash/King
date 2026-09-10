@@ -13292,6 +13292,11 @@ function _fullMapCleanupForZone() {
   if (worldLayer) {
     worldLayer.querySelectorAll('.world-unit:not(.player-sprite):not(.hero)').forEach(n => n.remove());
   }
+  // v4.4.14：同步清空 AOI 實體快取。舊代碼只刪 DOM 沒清 Map，導致換圖後 handleAOIEnter
+  // 誤以為實體已存在而不重建 DOM→新地圖所有人/AI 都看不見。
+  if (typeof window.clearAOIEntities === 'function') {
+    try { window.clearAOIEntities(); } catch (e) {}
+  }
   // NPC 層清空
   if (el.npcLayer) el.npcLayer.innerHTML = '';
   // 動畫狀態快取清空
@@ -25843,6 +25848,10 @@ function gameLoop(ts) {
     if (window.MultiplayerClient && MultiplayerClient.connected) {
       try { MultiplayerClient.tick(dt); } catch (e) { console.error('multiplayer tick error:', e); }
     }
+    // v4.4.14：AOI 實體（伺服器權威的遠端玩家/AI）位置插值。原先誤掛到從未定義的
+    // window._gameLoopTick，導致 tickAOI 從未被呼叫→aoi_update 只設 targetX/Y 卻無人更新 DOM→原地不動。
+    // tickAOI 內部用 (speed*dt)/1000，期望毫秒，故傳 dt*1000。
+    try { if (typeof window._aoiTick === 'function') window._aoiTick(dt * 1000); } catch (e) { console.error('aoiTick error:', e); }
     // v2.7.2：伺服器級 AI 插值更新（權威）
     try { updateServerAIs(dt); } catch (e) { console.error('serverAI tick error:', e); }
     try { renderPlayer(); } catch (e) { console.error('renderPlayer error:', e); }
@@ -28172,23 +28181,26 @@ if (typeof dealDamageToAIPlayer === 'function') {
   const aoiEntities = new Map();
 
   // 取得或建立 AOI 實體的 DOM
+  function _buildEntityEl(data) {
+    if (data.kind === 'player') return createPlayerEntity(data);
+    if (data.kind === 'ai') return createAIEntity(data);
+    return createGenericEntity(data);
+  }
+
   function getOrCreateEntity(data) {
     let ent = aoiEntities.get(data.id);
     if (ent) {
+      // v4.4.14：el 可能因換圖清場(_fullMapCleanupForZone 會移除 .world-unit DOM)而脫離文件，
+      // 但 aoiEntities 還留著舊記錄。此處偵測 el 缺失/脫離 DOM 就重建，否則只更新資料永遠不會重新 append→永久看不見。
+      if (!ent.el || !ent.el.parentNode || !worldLayer.contains(ent.el)) {
+        ent.el = _buildEntityEl(data);
+      }
       updateEntityDOM(ent, data);
       return ent;
     }
     ent = { data, el: null };
     aoiEntities.set(data.id, ent);
-
-    // 根據 kind 建立不同的精靈
-    if (data.kind === 'player') {
-      ent.el = createPlayerEntity(data);
-    } else if (data.kind === 'ai') {
-      ent.el = createAIEntity(data);
-    } else {
-      ent.el = createGenericEntity(data);
-    }
+    ent.el = _buildEntityEl(data);
     return ent;
   }
 
@@ -28281,7 +28293,7 @@ if (typeof dealDamageToAIPlayer === 'function') {
     el.style.width = '40px';
     el.style.height = '50px';
     el.style.background = 'rgba(100,100,100,0.5)';
-    el.style.borderRadius = '4px';
+    el.style.borderRadius = '10px';
     worldLayer.appendChild(el);
     return el;
   }
@@ -28331,13 +28343,21 @@ if (typeof dealDamageToAIPlayer === 'function') {
       const dx = ent.targetX - parseFloat(ent.el.style.left || '0');
       const dy = ent.targetY - parseFloat(ent.el.style.top || '0');
       const dist = Math.hypot(dx, dy);
-      if (dist < 1) continue;
+      if (dist < 1) {
+        // 已到目標：回到 idle
+        if (ent._aoiWalking) { ent.el.classList.remove('walking'); ent.el.classList.add('idle'); ent._aoiWalking = false; }
+        continue;
+      }
       const step = (speed * dt) / 1000;
       const ratio = Math.min(1, step / dist);
       const newX = parseFloat(ent.el.style.left) + dx * ratio;
       const newY = parseFloat(ent.el.style.top) + dy * ratio;
       ent.el.style.left = newX + 'px';
       ent.el.style.top = newY + 'px';
+      // 移動中：切換 walking 姿態（v4.4.14）
+      if (!ent._aoiWalking) { ent.el.classList.remove('idle'); ent.el.classList.add('walking'); ent._aoiWalking = true; }
+      // 朝向（左右）
+      if (Math.abs(dx) > 0.5) ent.el.classList.toggle('face-left', dx < 0);
     }
   }
 
@@ -28379,6 +28399,16 @@ if (typeof dealDamageToAIPlayer === 'function') {
   };
 
   window._aoiTick = tickAOI;
+
+  // v4.4.14：player_move 是全圖即時廣播（比 100ms aoi_update 更快），用它直接刷新 AOI 實體的插值目標，
+  // 讓遠端玩家移動更跟手。實體尚未建立時忽略（等 aoi_enter/aoi_update 建立），避免用不完整資料建立空殼。
+  window._aoiMoveTarget = function(id, x, y, dir) {
+    const ent = aoiEntities.get(id);
+    if (!ent) return;
+    if (x != null) ent.targetX = x;
+    if (y != null) ent.targetY = y;
+    if (dir != null) ent.targetDir = dir;
+  };
 
   // 掛鉤到遊戲主循環
   const origGameLoop = window._gameLoopTick;

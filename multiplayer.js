@@ -1304,6 +1304,8 @@
     p.dir = (data.dir === -1 || data.dir === 1) ? data.dir : (data.dir || 1);
     p.moving = !!data.moving;
     p.lastMoveAt = Date.now();
+    // v4.4.14：真正顯示遠端玩家的是 game.js 的 AOI 實體，player_move 即時刷新其插值目標（serverToWorld 為恆等，用原始座標）
+    try { if (typeof window._aoiMoveTarget === 'function') window._aoiMoveTarget(data.id, data.x, data.y, data.dir); } catch (e) {}
   }
 
   function addOrUpdateRemotePlayer(ent) {
