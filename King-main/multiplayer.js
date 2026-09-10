@@ -611,6 +611,17 @@
           const wsProto = pageProto === 'https:' ? 'wss:' : 'ws:';
           // v3.1.2：直接用根路徑 /，避免子路徑部署下 upgrade 失敗
           wsUrl = wsProto + '//' + pageHost + '/';
+          // v4.4.16：完整 token 放 URL query（走 HTTP Upgrade，不受 WS 單幀 126 位元組截斷限制），
+          // 服務端在 upgrade 階段用簽名「無狀態預認證」，根治進程內 token 快取 miss 導致的靜默逾時。
+          try {
+            const _fullToken = authToken || '';
+            let _acctForQ = '';
+            try { if (typeof AuthSystem !== 'undefined' && AuthSystem.getAccount) _acctForQ = AuthSystem.getAccount() || ''; } catch (e) {}
+            const _qp = [];
+            if (_fullToken) _qp.push('t=' + encodeURIComponent(_fullToken));
+            if (_acctForQ) _qp.push('a=' + encodeURIComponent(_acctForQ));
+            if (_qp.length) wsUrl += '?' + _qp.join('&');
+          } catch (e) { console.warn('[GAME-WS] query token 構建異常:', e.message); }
           console.log('[GAME-WS] ========== WebSocket 連線開始 ==========');
        _wsDebugLog('開始連線 WS URL=' + wsUrl);
           console.log('[GAME-WS] 頁面 URL =', window.location.href);

@@ -371,6 +371,44 @@ function createWsServer(httpServer) {
     };
     clients.set(wsId, client);
 
+    // v4.4.16：URL query 完整 token「無狀態預認證」
+    // 根因：shortToken 只存在進程內存 _wsAccountTokens（僅 HTTP login 寫入），
+    // DO 實例重啟／刷新沒重登／login 與 WS 打到不同實例時快取 miss，舊版此路徑會靜默不回，
+    // 客戶端乾等 5 秒「連線逾時」→ 重試 3 次全滅 → 降級輪詢／踢回首頁 → 看不到任何人。
+    // token 是 payload.sig 自簽名（verifyToken 純計算、不需內存/DB），放 URL query 走 HTTP
+    // Upgrade request-line，不受 DO「單個 WS 文本幀 ≥126 位元組截斷」限制，可在任何實例驗證。
+    try {
+      const u = new URL(req.url, 'http://localhost');
+      const qToken = u.searchParams.get('t') || '';
+      if (qToken && typeof global._wsVerifyToken === 'function') {
+        const qAcc = global._wsVerifyToken(qToken);
+        if (qAcc) {
+          client.account = qAcc;
+          client.authenticated = true;
+          client._preAuthed = true;
+          console.log('[WS][upgrade] ✅ query token 無狀態預認證成功 account=' + qAcc + ' wsId=' + wsId);
+        } else {
+          console.log('[WS][upgrade] ⚠️ query token 簽名無效或過期 wsId=' + wsId + '（仍等待 auth 消息兜底）');
+        }
+      }
+    } catch (e) {
+      console.log('[WS][upgrade] query 預認證異常（忽略，走 auth 消息）:', e.message);
+    }
+
+    // v4.4.16：未認證看門狗——任何情況下 8 秒內沒完成認證就明確回 auth_fail 並斷開，
+    // 杜絕「連上了但服務端靜默不回、客戶端乾等逾時」。認證成功後會清除此計時器。
+    client._authWatchdog = setTimeout(() => {
+      if (!client.authenticated) {
+        console.warn('[WS-Auth] ⏰ 8 秒未完成認證，主動回 auth_fail 並斷開 wsId=' + client.wsId);
+        try { sendJson(client.socket, { type: 'auth_fail', error: 'auth_timeout', reason: 'no_valid_auth_in_8s' }); } catch (e) {}
+        setTimeout(() => { try { client.socket.end(); client.socket.destroy(); } catch (e) {} }, 200);
+      }
+    }, 8000);
+    if (client._preAuthed) {
+      // 已預認證，無需看門狗
+      clearTimeout(client._authWatchdog); client._authWatchdog = null;
+    }
+
     socket.on('data', (chunk) => {
       try {
         _wsLog(' 收到 data chunk, 長度=' + chunk.length + ', wsId=' + client.wsId);
@@ -759,7 +797,8 @@ function createWsServer(httpServer) {
     try {
       _wsLog(' handleAuth 被呼叫, wsId=' + client.wsId + ' hasWsSessionId=' + !!msg.wsSessionId + ' hasSessionId=' + !!msg.sessionId + ' hasToken=' + !!msg.token + ' hasShortToken=' + !!msg.shortToken + ' hasAccount=' + !!msg.account);
       console.log('[WS-Auth] 收到auth: wsId=' + client.wsId + ' tokenLen=' + (msg.token||'').length + ' shortToken=' + (msg.shortToken||'').substring(0,10) + ' account=' + (msg.account||'空') + ' name=' + (msg.name||''));
-      let account = null;
+      let account = (client._preAuthed && client.account) ? client.account : null;
+      if (account) _wsLog(' upgrade 階段已預認證 account=' + account + '，直接通過');
       // v4.0.1：優先使用登入時返回的短wsSessionId（約24位元組，整個auth訊息<126位元組，不會被proxy截斷）
       if (msg.wsSessionId && global._wsSessions) {
         const sess = global._wsSessions.get(msg.wsSessionId);
@@ -830,6 +869,7 @@ function createWsServer(httpServer) {
         }
         client.account = account;
         client.authenticated = true;
+        if (client._authWatchdog) { clearTimeout(client._authWatchdog); client._authWatchdog = null; }
         client.name = msg.name || account;
         client.classId = msg.classId || 'warrior';
         client.level = msg.level || 1;
@@ -839,9 +879,13 @@ function createWsServer(httpServer) {
         sendJson(client.socket, resp);
         _wsLog(' auth_ok 已發送');
       } else {
-        console.warn('[WS][auth] ❌ 認證失敗 wsId=', client.wsId, 'token長度=', (msg.token || '').length, '主動斷線 (code 4001)');
-        const resp = { type: 'auth_fail', error: 'token 無效', reason: 'invalid_token' };
-        _wsLog(' 發送 auth_fail');
+        if (client._authWatchdog) { clearTimeout(client._authWatchdog); client._authWatchdog = null; }
+        console.warn('[WS][auth] ❌ 認證失敗 wsId=', client.wsId, 'token長度=', (msg.token || '').length, 'shortToken長度=', (msg.shortToken || '').length, '主動回 auth_fail 並斷線');
+        // v4.4.16：明確區分「快取 miss（可帶 query token 重連）」與「token 無效」，絕不靜默
+        let reason = 'invalid_token';
+        if (msg.shortToken && !msg.token && !(client._preAuthed)) reason = 'shorttoken_cache_miss';
+        const resp = { type: 'auth_fail', error: 'token 無效', reason };
+        _wsLog(' 發送 auth_fail reason=' + reason);
         sendJson(client.socket, resp);
         _wsLog(' auth_fail 已發送');
         // v3.0.0：auth 失敗後主動斷線，避免客戶端卡在「連上了但沒認證」的狀態
@@ -1075,6 +1119,7 @@ function createWsServer(httpServer) {
 
   function handleDisconnect(client) {
     if (!client || clients.get(client.wsId) !== client) return;
+    if (client._authWatchdog) { clearTimeout(client._authWatchdog); client._authWatchdog = null; }
     clients.delete(client.wsId);
     if (client.mapId && client.serverId) {
       gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);

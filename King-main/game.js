@@ -2,6 +2,36 @@
     君主之刃 · 自由移動 MMORPG - 主逻辑 v3
     ============================================================ */
 
+// v4.4.16：透明去背精靈自動偵測。已去背 PNG（邊緣有 alpha）關閉 mix-blend-mode:screen，
+// 否則 screen 會把角色的黑色盔甲也一併「變透明」；舊式純黑底 JPG 維持 screen 去黑。
+(function () {
+  function probeSpriteAlpha(img) {
+    try {
+      if (!img || !img.naturalWidth) return;
+      var w = Math.min(32, img.naturalWidth), h = Math.min(32, img.naturalHeight);
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var ctx = c.getContext('2d'); ctx.clearRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+      var d = ctx.getImageData(0, 0, w, h).data, hasAlpha = false;
+      for (var y = 0; y < h && !hasAlpha; y++) {
+        for (var x = 0; x < w; x++) {
+          if (x === 0 || y === 0 || x === w - 1 || y === h - 1) {
+            if (d[(y * w + x) * 4 + 3] < 250) { hasAlpha = true; break; }
+          }
+        }
+      }
+      var wrap = (img.closest && img.closest('.unit-sprite-wrap')) || img.parentNode;
+      if (wrap && wrap.classList) { wrap.classList.toggle('sprite-has-alpha', hasAlpha); }
+    } catch (e) { /* 跨域無法讀取時保持原混合模式 */ }
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('load', function (e) {
+      var t = e.target;
+      if (t && t.tagName === 'IMG' && t.classList && t.classList.contains('unit-sprite-img')) probeSpriteAlpha(t);
+    }, true);
+  }
+  if (typeof window !== 'undefined') window._probeSpriteAlpha = probeSpriteAlpha;
+})();
+
 // ==================== 離線模式 / 本地圖資支援 ====================  
 let USE_LOCAL_ASSETS = false;
 try { USE_LOCAL_ASSETS = localStorage.getItem('useLocal') === '1'; } catch(e) {}
@@ -4756,19 +4786,35 @@ const NATION_FLAG_IDS = {
   dion:  'aadkrffmdt4ei_ve_miaoda', // 綠交叉劍
   aden:  'aadkrfkbmmmci_ve_miaoda', // 金皇冠
 };
+// v4.4.16：上述 hash 實為 ASSET MISSING 佔位圖（原始美術從未上傳），
+// 改用內聯 SVG 國家色紋章 data URI，確保排行榜/國家頁/名條永不顯示缺圖。
+const NATION_CREST_SVG = {
+  kent:  { light: '#ff6060', dark: '#a01010', border: '#c02020', emoji: '🦁' },
+  oren:  { light: '#60a0ff', dark: '#103080', border: '#4080ff', emoji: '🦅' },
+  dion:  { light: '#60d060', dark: '#106020', border: '#40c060', emoji: '⚔️' },
+  aden:  { light: '#ffd060', dark: '#a07010', border: '#ffc040', emoji: '👑' },
+};
+function nationFlagDataURI(id) {
+  const c = NATION_CREST_SVG[id] || NATION_CREST_SVG.kent;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>` +
+    `<defs><radialGradient id='g' cx='35%25' cy='30%25'><stop offset='0%25' stop-color='${c.light}'/><stop offset='100%25' stop-color='${c.dark}'/></radialGradient></defs>` +
+    `<circle cx='32' cy='32' r='29' fill='url(%23g)' stroke='${c.border}' stroke-width='2'/>` +
+    `<text x='32' y='44' font-size='30' text-anchor='middle'>${c.emoji}</text></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
 let NATION_FLAGS = {
-  kent:  assetUrl(NATION_FLAG_IDS.kent),
-  oren:  assetUrl(NATION_FLAG_IDS.oren),
-  dion:  assetUrl(NATION_FLAG_IDS.dion),
-  aden:  assetUrl(NATION_FLAG_IDS.aden),
+  kent:  nationFlagDataURI('kent'),
+  oren:  nationFlagDataURI('oren'),
+  dion:  nationFlagDataURI('dion'),
+  aden:  nationFlagDataURI('aden'),
 };
 function refreshNationFlags() {
   try {
-    NATION_FLAGS.kent = assetUrl(NATION_FLAG_IDS.kent);
-    NATION_FLAGS.oren = assetUrl(NATION_FLAG_IDS.oren);
-    NATION_FLAGS.dion = assetUrl(NATION_FLAG_IDS.dion);
-    NATION_FLAGS.aden = assetUrl(NATION_FLAG_IDS.aden);
-  } catch (e) { console.warn('[Assets] 國旗路徑重算失敗:', e); }
+    NATION_FLAGS.kent = nationFlagDataURI('kent');
+    NATION_FLAGS.oren = nationFlagDataURI('oren');
+    NATION_FLAGS.dion = nationFlagDataURI('dion');
+    NATION_FLAGS.aden = nationFlagDataURI('aden');
+  } catch (e) { console.warn('[Assets] 國旗紋章重算失敗:', e); }
 }
 
 // CSS 繪製國旗 fallback（圖片加載失敗時備用：彩色小圓點）
@@ -12586,9 +12632,11 @@ function showNationSelect() {
         ${NATIONS.map(n => {
           const dotBg = { kent: 'radial-gradient(circle at 30% 30%,#ff6060,#a01010)', oren: 'radial-gradient(circle at 30% 30%,#60a0ff,#103080)', dion: 'radial-gradient(circle at 30% 30%,#60d060,#106020)', aden: 'radial-gradient(circle at 30% 30%,#ffd060,#a07010)' }[n.id];
           const borderColor = { kent: '#c02020', oren: '#4080ff', dion: '#40c060', aden: '#ffc040' }[n.id];
+          // v4.4.16：原始國旗 hash 為 ASSET MISSING 佔位圖，改用國家色+紋章 emoji 內聯繪製，永不缺圖
+          const crest = { kent: '🦁', oren: '🦅', dion: '⚔️', aden: '👑' }[n.id] || '🛡️';
           return `
           <div class="nation-card" data-nation="${n.id}">
-            <div class="nation-card-flag" data-flag="${n.id}" style="width:64px;height:64px;margin:0 auto;border-radius:50%;border:2px solid rgba(240,192,64,0.5);overflow:hidden;box-shadow:0 0 12px rgba(240,192,64,0.3);background:${dotBg};border-color:${borderColor}"></div>
+            <div class="nation-card-flag" data-flag="${n.id}" style="width:64px;height:64px;margin:0 auto;border-radius:50%;border:2px solid ${borderColor};box-shadow:0 0 12px rgba(240,192,64,0.3);background:${dotBg};display:flex;align-items:center;justify-content:center;font-size:32px;line-height:1">${crest}</div>
             <div class="nation-card-name">${n.name}</div>
             <div class="nation-card-desc">${n.desc}</div>
           </div>`;
@@ -12597,15 +12645,7 @@ function showNationSelect() {
       <button class="nation-select-skip" id="nation-select-skip">暫不選擇，稍後再加入</button>
     </div>
   `;
-  // 動態注入國旗圖片，失敗則保留CSS背景圓點
-  modal.querySelectorAll('[data-flag]').forEach(div => {
-    const nid = div.dataset.flag;
-    const img = new Image();
-    img.src = NATION_FLAGS[nid] || NATION_FLAGS.kent;
-    img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
-    img.onload = () => { div.innerHTML = ''; div.appendChild(img); };
-    img.onerror = () => { /* 保留 CSS 背景圓點 */ };
-  });
+  // v4.4.16：國旗原始圖為佔位圖，國家選擇頁已改用 emoji 紋章，不再注入缺失圖片
   modal.style.display = 'flex';
 
   modal.querySelectorAll('.nation-card').forEach(card => {
