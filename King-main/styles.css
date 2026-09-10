@@ -12830,3 +12830,21 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
 .unit-sprite-wrap.sprite-has-alpha img {
   mix-blend-mode: normal !important;
 }
+
+/* ============================================================
+   v4.4.16 Foot Anchor 錨點歸一（修復金變/紫變等「跑圖、比例跑掉」）
+   錨點數值由 sprite-anchor.js 量測主體邊界後寫入 CSS 變量；
+   img 只負責靜態對齊，行走/攻擊擺動由 wrap 層承擔，互不覆蓋。
+   ============================================================ */
+.unit-sprite-img.anchor-normalized {
+  object-fit: contain !important;
+  object-position: 0% 0% !important;
+  transform-origin: 0 0 !important;
+  transform: translate(var(--ax, 0px), var(--ay, 0px)) scale(var(--as, 1), var(--as, 1));
+  animation: none !important; /* 關掉 img 層 single-frame-breath 等，避免 transform 覆蓋錨點 */
+}
+/* 面向左：以容器垂直中軸整體鏡像（錨點對齊不變，動態轉向即時響應） */
+.world-unit.face-left .unit-sprite-img.anchor-normalized {
+  transform: translate(calc(100% - var(--ax, 0px)), var(--ay, 0px))
+             scale(calc(var(--as, 1) * -1), var(--as, 1));
+}
