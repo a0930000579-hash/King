@@ -12876,3 +12876,25 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   .transform-aura .aura-flames,
   .transform-aura .aura-lightning { animation: none !important; }
 }
+
+/* ============================================================
+   v4.4.18 圓角總收口：卡牌／槽位／面板／彈窗／按鈕／頭像不再四方
+   只作用在容器型 class，排除純文字/標籤/進度/捲軸等子元素
+   ============================================================ */
+[class*="card"]:not([class*="-name"]):not([class*="-tag"]):not([class*="-text"]):not([class*="-label"]):not([class*="-desc"]):not([class*="-count"]):not([class*="-owner"]):not([class*="-rarity"]):not([class*="pattern"]):not([class*="emblem"]):not([class*="runes"]):not([class*="glow"]):not([class*="inner"]):not([class*="-sprite"]):not([class*="-icon"]),
+[class*="slot"]:not([class*="-name"]):not([class*="-label"]):not([class*="-icon"]),
+[class*="-cell"]:not([class*="-text"]):not([class*="-label"]),
+[class*="item-box"],[class*="item-tile"],[class*="grid-item"] { border-radius: 10px; }
+
+[class*="panel"]:not([class*="-title"]):not([class*="-inner"]),
+[class*="modal-box"],[class*="modal-card"],[class*="-window"],
+[class*="popup-box"],[class*="dialog-box"],[class*="overlay-box"] { border-radius: 16px; }
+
+[class*="btn"]:not([class*="-group"]):not([class*="-wrap"]):not([class*="-text"]),
+[class*="button"]:not([class*="-group"]) { border-radius: 9px; }
+
+.avatar,.avatar-small,.char-avatar,[class*="avatar"]:not([class*="-frame"]):not([class*="-border"]) { border-radius: 12px; }
+
+/* 進度條／血條／捲軸／分割線維持小圓角，不被上面放大 */
+[class*="bar-fill"],[class*="-fill"],[class*="progress"],
+[class*="scrollbar"],[class*="divider"],[class*="-line"] { border-radius: 3px; }

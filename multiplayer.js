@@ -214,14 +214,14 @@
              if (data.webSocket || data.socketIo) {
                _startWsWithRetry();
              } else {
+               // v4.4.18：純 WS——伺服器未啟用 WS 就回登入頁，不進輪詢
                _wsFailureReason = '伺服器未啟用 WebSocket';
-               startPollLoop();
+               _forceBackToLogin('伺服器未啟用 WebSocket，無法進行線上遊戲');
              }
            } else {
-             // health 回來但 status 不是 online → 仍嘗試 WS + LP
-             console.warn('[Multi] health 回應異常，仍嘗試 WS 連線');
+             // health 回來但 status 異常：只重試 WS（v4.4.18 不再並行啟動輪詢）
+             console.warn('[Multi] health 回應異常，重試 WS 連線');
              _startWsWithRetry();
-             startPollLoop();
            }
            // v4.4.9：純WS模式不在此走HTTP /api/mp/join（依賴DB易失敗）；join由auth_ok後_wsAutoJoinWhenReady統一處理
            _wsAutoJoinWhenReady();
@@ -324,9 +324,9 @@
             window._setServerInstanceId(data.instanceId);
           }
           setStatus(STATUS.ONLINE);
-          // v2.7.2：WS 模式下不啟動 long-poll（WS 已處理所有事件）
-          if (!useWebSocket) {
-            startPollLoop();
+          // v4.4.18：純 WS——join 成功但 WS 通道不存在則回登入頁，不啟動 long-poll
+          if (!useWebSocket || !wsConnected) {
+            _forceBackToLogin('WebSocket 未就緒，無法進入遊戲');
           }
            // v3.1.1：WS 連上後，若已 joinWorld 完成（有 myPlayerId），立即發 join_map
            //  修復：WS auth 比 LP join 慢時，auth_ok 後不會自動 join_map 的 bug
@@ -558,7 +558,7 @@
    // v3.1.2：WS 連線 + 重試邏輯（模組級函數，health 成功或失敗都會呼叫）
    function _startWsWithRetry() {
      if (typeof WebSocket === 'undefined') {
-       startPollLoop();
+       _forceBackToLogin('瀏覽器不支援 WebSocket，無法進行線上遊戲'); // v4.4.18：純 WS，不輪詢
        return;
      }
      let wsRetryCount = 0;
@@ -575,16 +575,14 @@
            return new Promise(function(resolve) { setTimeout(resolve, delay); })
              .then(tryWsWithRetry);
          } else {
-           console.warn('[GAME-WS] WS 連線失敗已達', MAX_WS_RETRIES, '次，降級 long-poll');
+           // v4.4.18：純 WS 原則——連線失敗不降級 long-poll／不進離線，直接回登入頁（用戶多次要求嚴禁輪詢）
            _wsFailureReason = e.message || 'WS 連線失敗';
-           useWebSocket = false;
-           _updateWsBadge('offline', 'WS離線');
+           useWebSocket = true; // 保持純 WS，不切換通道
+           _updateWsBadge('offline', 'WS無法連線');
            if (typeof window.addLog === 'function') {
-             try {
-               window.addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），已切換為輪詢模式。錯誤：' + (e.message || '未知'));
-             } catch(_) {}
+             try { window.addLog('system', '⚠️ WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次），返回登入頁。錯誤：' + _wsFailureReason); } catch(_) {}
            }
-           startPollLoop();
+           _forceBackToLogin('WebSocket 連線失敗（已重試' + MAX_WS_RETRIES + '次）：' + _wsFailureReason);
          }
        });
      }
