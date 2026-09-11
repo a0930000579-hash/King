@@ -12869,10 +12869,9 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   .unit-sprite-wrap.attack-glow .sprite-frame-attack { filter: brightness(1.15) !important; }
   /* 真金閃電粒子三層 drop-shadow 收斂為單層 */
   .world-unit.hero.transform-true-gold .aura-lightning .bolt { filter: drop-shadow(0 0 5px currentColor) !important; }
-  /* v4.4.18：手機停用變身持續粒子動畫（煙霧/閃電多 span 無限動畫為多人同屏卡頓大戶），保留靜態光暈；桌面不受影響 */
-  .transform-aura .aura-smoke,
-  .transform-aura .aura-lightning { display: none !important; }
-  .transform-aura .aura-glow-outer { animation: none !important; }
+  /* v4.4.18：變身特效（冒煙/閃電/光環）保留顯示，手機僅降 blur 與動畫時長省效能，不刪特效 */
+  .transform-aura .aura-smoke span { animation-duration: 3.2s !important; }
+  .transform-aura .aura-lightning .bolt { animation-duration: 3.4s !important; }
 }
 /* 使用者系統開啟「減少動態效果」時，停用變身粒子動畫 */
 @media (prefers-reduced-motion: reduce) {
@@ -12903,12 +12902,3 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
 [class*="bar-fill"],[class*="-fill"],[class*="progress"],
 [class*="scrollbar"],[class*="divider"],[class*="-line"] { border-radius: 3px; }
 
-/* ============================================================
-   v4.4.18 世界層精靈：全面關閉「持續變身光環」
-   .aura-glow-outer/smoke/flames/lightning 固定在 wrap 幾何中心，
-   而人物 img 由 sprite-anchor 位移縮放對齊腳點，兩者基準不同，
-   走動時光環與人物分離成「光蛋」、也是手機效能大戶。
-   世界 64×80 小人只保留人物本體（屬性色已由人物與名條體現）；
-   角色面板大圖(.cc-*)、變身成功瞬間 burst 不在 .world-unit 內，不受影響。
-   ============================================================ */
-.world-unit .transform-aura { display: none !important; }
