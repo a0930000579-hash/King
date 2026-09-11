@@ -12869,6 +12869,10 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   .unit-sprite-wrap.attack-glow .sprite-frame-attack { filter: brightness(1.15) !important; }
   /* 真金閃電粒子三層 drop-shadow 收斂為單層 */
   .world-unit.hero.transform-true-gold .aura-lightning .bolt { filter: drop-shadow(0 0 5px currentColor) !important; }
+  /* v4.4.18：手機停用變身持續粒子動畫（煙霧/閃電多 span 無限動畫為多人同屏卡頓大戶），保留靜態光暈；桌面不受影響 */
+  .transform-aura .aura-smoke,
+  .transform-aura .aura-lightning { display: none !important; }
+  .transform-aura .aura-glow-outer { animation: none !important; }
 }
 /* 使用者系統開啟「減少動態效果」時，停用變身粒子動畫 */
 @media (prefers-reduced-motion: reduce) {
