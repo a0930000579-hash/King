@@ -15,15 +15,15 @@
   <meta name="apple-mobile-web-app-title" content="King" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="apple-touch-icon" href="assets/11_ui/apple-touch-icon.jpg" />
-  <link rel="stylesheet" href="styles.css?v=4.4.17" />
-  <link rel="stylesheet" href="auth.css?v=4.4.0" />
+  <link rel="stylesheet" href="styles.css?v=4.4.18" />
+  <link rel="stylesheet" href="auth.css?v=4.4.18" />
   <!-- v2.5.6：移除外部字體CDN，使用系統字型確保離線可用 -->
   <!-- v2.5.9：紫變7隻+紅變7隻真8幀落地，補齊attack_3幀、eightFrame標誌 -->
-  <script src="lang.js?v=4.4.0"></script>
+  <script src="lang.js?v=4.4.18"></script>
   <!-- 多人連線客戶端（socket.io 動態容錯載入；失敗時自動退回單機，不影響遊戲） -->
-  <script src="multiplayer.js?v=4.4.17" defer></script>
-  <script src="bug-report.js?v=4.4.0" defer></script>
-  <script src="auth.js?v=4.4.17" defer></script>
+  <script src="multiplayer.js?v=4.4.18" defer></script>
+  <script src="bug-report.js?v=4.4.18" defer></script>
+  <script src="auth.js?v=4.4.18" defer></script>
   <style>
     /* ========== 首屏骨架（JS 載入前就顯示，杜絕空白） ========== */
     .splash-screen {
@@ -196,7 +196,7 @@
     <div class="splash-title">King</div>
     <div class="splash-subtitle">2.5D LINEAGE MMORPG</div>
     <div class="splash-loading-bar"></div>
-    <div class="splash-version">King v4.4.17</div>
+    <div class="splash-version">King v4.4.18</div>
   </div>
 
   <!-- v2.1.0：預設 game-hidden，玩家真正進入遊戲世界時才顯示 -->
@@ -441,27 +441,28 @@
     <nav class="bottom-nav">
       <div class="nav-buttons">
         <button class="nav-btn active" data-page="hero">
-          <div class="nav-icon nav-icon-text" data-label="人物"></div>
+          <div class="nav-icon nav-icon-text" data-label="人物"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4.2 4.2 0 1 0 0-8.4A4.2 4.2 0 0 0 12 12zm0 2.1c-3.4 0-8 1.7-8 5.1V22h16v-2.8c0-3.4-4.6-5.1-8-5.1z"/></svg></div>
           <span>人物</span>
         </button>
         <button class="nav-btn" data-page="bag">
-          <div class="nav-icon nav-icon-text" data-label="背包"></div>
+          <div class="nav-icon nav-icon-text" data-label="背包"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"><path d="M9.2 7.4V6a2.8 2.8 0 0 1 5.6 0v1.4"/><path d="M5.4 8.2h13.2l-.95 11.1a1.6 1.6 0 0 1-1.6 1.46H7.95a1.6 1.6 0 0 1-1.6-1.46L5.4 8.2z"/></svg></div>
           <span>背包</span>
         </button>
         <button class="nav-btn gacha-btn" data-page="gacha">
-          <div class="nav-icon nav-icon-text gacha" data-label="召喚"></div>
+          <div class="nav-icon nav-icon-text gacha" data-label="召喚"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.2l2.1 6.0 6.3 1.8-4.7 4.6 1.1 6.3L12 17.8l-4.8 3.1 1.1-6.3-4.7-4.6 6.3-1.8L12 2.2z"/></svg></div>
           <span>召喚</span>
         </button>
         <button class="nav-btn" data-page="shop">
-          <div class="nav-icon nav-icon-text" data-label="商店"></div>
+          <div class="nav-icon nav-icon-text" data-label="商店"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 9.5l6.1-6.1a1.6 1.6 0 0 1 2.2 0l6.1 6.1a1.6 1.6 0 0 1 0 2.2l-6.1 6.1a1.6 1.6 0 0 1-2.2 0l-6.1-6.1a1.6 1.6 0 0 1 0-2.2z"/><circle cx="8.7" cy="8.7" r="1.25" fill="currentColor" stroke="none"/></svg></div>
           <span>商店</span>
         </button>
         <button class="nav-btn" data-page="dungeon">
-          <div class="nav-icon nav-icon-text" data-label="副本"></div>
+          <div class="nav-icon nav-icon-text" data-label="副本"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"><path d="M5.5 20.5V5.2a1.5 1.5 0 0 1 1.5-1.5h10a1.5 1.5 0 0 1 1.5 1.5v15.3"/><path d="M5.5 20.5h13M12 3.7v16.8M9.2 9h.01M14.8 9h.01M9.2 13h.01M14.8 13h.01"/></svg></div>
           <span>副本</span>
         </button>
         <button class="nav-btn" id="settings-btn">
           <div class="nav-icon nav-icon-text" data-label="設定" style="position:relative">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94a7.5 7.5 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.34.67.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.25.1.53.02.67-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
             <!-- 連線狀態點：綠=已連線多人、灰=單機模式 -->
             <span id="mp-status-dot" class="mp-status-dot mp-status-offline" title="連線中"></span>
           </div>
@@ -518,7 +519,7 @@
         </button>
       </div>
       <div class="side-menu-footer">
-        <div class="export-tip">King v4.4.17</div>
+        <div class="export-tip">King v4.4.18</div>
       </div>
     </div>
     <div class="side-menu-overlay" id="side-menu-overlay"></div>
@@ -931,14 +932,14 @@
     </div>
   </div>
 
-  <script src="audio.js?v=4.4.0"></script>
-  <script src="audio-manager.js?v=4.4.0"></script>
-  <script src="iso-map.js?v=4.4.0"></script>
-  <script src="equip-icons.js?v=4.4.0"></script>
-  <script src="portrait-generator.js?v=4.4.0"></script>
-  <script src="sprite-atlas.js?v=4.4.17"></script>
-  <script src="sprite-anchor.js?v=4.4.17"></script>
-  <script src="game.js?v=4.4.17"></script>
+  <script src="audio.js?v=4.4.18"></script>
+  <script src="audio-manager.js?v=4.4.18"></script>
+  <script src="iso-map.js?v=4.4.18"></script>
+  <script src="equip-icons.js?v=4.4.18"></script>
+  <script src="portrait-generator.js?v=4.4.18"></script>
+  <script src="sprite-atlas.js?v=4.4.18"></script>
+  <script src="sprite-anchor.js?v=4.4.18"></script>
+  <script src="game.js?v=4.4.18"></script>
   <script>
     // 骨架屏淡出 + 初始化登入系統
     (function() {

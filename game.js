@@ -3871,7 +3871,7 @@ function renderAutoItemsGrid() {
          <span style="font-size:9px;color:var(--gold);font-weight:700;min-width:12px;text-align:center;flex-shrink:0">${idx+1}</span>
          <!-- 圖標 -->
          <div style="width:20px;height:20px;border-radius:4px;background:rgba(0,0,0,0.5);border:1px solid rgba(240,192,64,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">
-           ${iconUrl ? `<img src="${iconUrl}" style="width:14px;height:14px;object-fit:contain;display:block"/>` : '<span style="font-size:10px;color:#555">?</span>'}
+           ${iconUrl ? `<img src="${iconUrl}" style="width:14px;height:14px;object-fit:contain;display:block"/>` : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#777" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l7.5 4.2v9.6L12 21l-7.5-4.2V7.2L12 3z"/><path d="M12 12l7.5-4.8M12 12v9M12 12L4.5 7.2"/></svg>'}
          </div>
          <!-- 下拉選擇 -->
          <select class="auto-item-select" data-idx="${idx}" style="flex:1;min-width:0;padding:2px 14px 2px 2px;font-size:9px;background:rgba(0,0,0,0.6);border:1px solid var(--gold-dark);border-radius:3px;color:var(--parchment-light);font-family:inherit;cursor:pointer">
@@ -8039,15 +8039,18 @@ function createAISprite(ai) {
   elDiv.dataset.id = ai.uid;
   const isEnemy = ai.nation && GS.nation && ai.nation !== GS.nation;
   if (isEnemy) elDiv.classList.add('enemy-ai');
-  const s = ai.sprite || SPRITE.warrior;
+  const _fullS = ai.sprite || SPRITE.warrior;
+  // v4.4.18：伺服器人形 AI 一律用精簡「單張 idle 圖」模式。
+  // 原本對 multiFrame 職業走完整 8 幀，每隻 AI 同時建立 8 張 0.5~1.4MB 大圖 <img>，
+  // 8 隻 AI = 64 張大圖併發，手機連線佇列壅塞→大量 onerror 被隱藏→只剩名字，也造成卡頓。
+  const s = {
+    idle: _fullS.idle,
+    color: _fullS.color, glow: _fullS.glow,
+    useImg: true, coverMode: !!_fullS.coverMode, singleFrame: true,
+  };
   const filter = `drop-shadow(0 0 4px ${s.glow || '#ffe090'}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
-  // v2.9.0：統一用 buildSpriteHTML 完整 8 幀結構，AI 移動/攻擊有正確動畫，不再是單張靜止圖
-  const isMulti = !!(s && s.multiFrame);
-  elDiv.innerHTML = buildSpriteHTML(s, 'hero', !isMulti);
-  if (isMulti) {
-    initUnitAnimState(ai.uid);
-    setUnitAnimState(ai.uid, 'idle', { dir: ai.dir || 'down' });
-  }
+  // AI 精簡單圖：lean=true，不建立多幀/方向層，動畫由 .world-unit 狀態 class 的 CSS 驅動
+  elDiv.innerHTML = buildSpriteHTML(s, 'hero', true);
   // 名字標籤：國旗+名稱（覆蓋 buildSpriteHTML 的預設）
   const nameEl = elDiv.querySelector('.unit-name');
   const n = NATIONS.find(nn => nn.id === ai.nation);
@@ -13061,7 +13064,7 @@ function updateLevelGlow() {
 
 function positionUnit(el, x, y, kind) {
   const size = SPRITE_SIZE[kind] || SPRITE_SIZE.hero;
-  // v4.4.17 效能：數值沒變就不寫 style，避免靜止單位每幀觸發重排
+  // v4.4.18 效能：數值沒變就不寫 style，避免靜止單位每幀觸發重排
   const Ls = (x - size.w / 2) + 'px';
   const Ts = (y - size.h) + 'px';
   if (el._lastLeft !== Ls) { el.style.left = Ls; el._lastLeft = Ls; }
@@ -13090,7 +13093,7 @@ function positionUnit(el, x, y, kind) {
 function renderPlayer() {
   if (!GS.player) return; // v2.7.7：null 防衛
   const p = GS.player;
-  // 玩家始終在 worldLayer 中（v4.4.17：快取子元素，避免每幀 5 次 querySelector）
+  // 玩家始終在 worldLayer 中（v4.4.18：快取子元素，避免每幀 5 次 querySelector）
   const parent = worldLayer;
   let unit = parent._heroUnit;
   if (!unit || !unit.isConnected) {
@@ -13104,7 +13107,7 @@ function renderPlayer() {
     unit._lastNameKey = null; unit._lastHp = null; unit._lastMp = null;
     unit._lastLv = null; unit._lastStateCls = null; unit._lastFacing = null;
   }
-  // v4.4.17：以下全部「數值/狀態變化才寫 DOM」，靜止時零寫入、零重排
+  // v4.4.18：以下全部「數值/狀態變化才寫 DOM」，靜止時零寫入、零重排
   const hpPct = Math.max(0, (p.hp / getTotalHpMax()) * 100);
   if (unit._lastHp !== hpPct) { if (unit._hpFill) unit._hpFill.style.width = hpPct + '%'; unit._lastHp = hpPct; }
   const mpPct = Math.max(0, (p.mp / getTotalMpMax()) * 100);
@@ -14378,7 +14381,7 @@ function updateSpriteFrames(dt) {
   const dtMs = dt * 1000;
   // 玩家
   if (worldLayer && GS.player) {
-    let unit = worldLayer._heroUnit; // v4.4.17：複用 renderPlayer 快取，避免每幀 querySelector
+    let unit = worldLayer._heroUnit; // v4.4.18：複用 renderPlayer 快取，避免每幀 querySelector
     if (!unit || !unit.isConnected) unit = worldLayer.querySelector('.world-unit.hero');
     if (unit && !unit._offscreen) {
       const spriteObj = getPlayerSprite();
@@ -15768,7 +15771,7 @@ function updateSiegeSkillBar() {
         btn.title = s.name;
         btn.classList.remove('empty');
       } else {
-        iconDiv.innerHTML = '<div style="font-size:18px;color:#f88">?</div>';
+        iconDiv.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="rgba(240,192,64,0.4)" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
         iconDiv.style.cssText = 'background:none;';
         btn.classList.add('empty');
       }
@@ -19960,7 +19963,7 @@ const BUFF_ICONS = {
   ironwall:   _buffSVG('#6080a0', '鐵', ''),
 };
 // 找不到類型時的預設 icon
-const DEFAULT_BUFF_ICON = _buffSVG('#888888', '?', '');
+const DEFAULT_BUFF_ICON = _buffSVG('#888888', '✦', '');
 
 // 初始化 activeBuffs
 function initBuffs() {
@@ -22120,7 +22123,7 @@ function renderGachaPage() {
         } else if (activeTab === 'hero') {
           spriteHtml = spriteEmojiHTML(item.sprite, 32);
         } else {
-          spriteHtml = `<div style="font-size:28px;filter:${owned ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.6))' : 'grayscale(1) opacity(0.3)'}">${item.icon || '?'}</div>`;
+          spriteHtml = `<div style="font-size:28px;display:flex;align-items:center;justify-content:center;filter:${owned ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.6))' : 'grayscale(1) opacity(0.3)'}">${item.icon || '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#e8c870" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.5 4.2v9.6L12 21l-7.5-4.2V7.2L12 3z"/><path d="M12 12l7.5-4.8M12 12v9M12 12L4.5 7.2"/></svg>'}</div>`;
         }
         return `
         <div class="gacha-col-item rarity-${item.rarity} ${owned ? 'owned' : 'locked'}">
@@ -25715,7 +25718,7 @@ function updateCamera() {
 
 function applyCameraTransform() {
   const c = CAMERA;
-  // 对世界层应用位移和缩放（v4.4.17：transformOrigin 固定值只設一次，不每幀重寫）
+  // 对世界层应用位移和缩放（v4.4.18：transformOrigin 固定值只設一次，不每幀重寫）
   const layers = [worldLayer, npcLayer, damageLayer, effectLayer];
   layers.forEach(layer => {
     if (!layer) return;
@@ -25744,7 +25747,7 @@ function zoomReset() { CAMERA.targetZoom = 1; }
 function updateMinimap() {
   const canvas = el.minimapCanvas;
   if (!canvas) return;
-  // v4.4.17：小地圖降頻到約 12fps（每幀全量 canvas 重繪在多實體時是可觀開銷，人眼無需 30fps）
+  // v4.4.18：小地圖降頻到約 12fps（每幀全量 canvas 重繪在多實體時是可觀開銷，人眼無需 30fps）
   const __now = (window.performance && performance.now) ? performance.now() : Date.now();
   if (updateMinimap._last != null && __now - updateMinimap._last < 80) return;
   updateMinimap._last = __now;
@@ -27524,18 +27527,20 @@ function updateServerAIs(dt) {
       ai.x += (dx / dist) * step;
       ai.y += (dy / dist) * step;
       // v2.9.0：移動中 → walk 動畫
-      if (ai.state !== 'walking' && ai.sprite?.multiFrame) {
+      if (ai.state !== 'walking') {
         ai.state = 'walking';
+        if (ai.el) ai.el.classList.add('walking'), ai.el.classList.remove('idle');
         // 初始化動畫狀態（若尚未）
-        if (unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
+        if (ai.sprite?.multiFrame && unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
           setUnitAnimState(ai.uid, 'walk', { dir: ai.dir || 'down' });
         }
       }
     } else {
       // 停下 → idle
-      if (ai.state !== 'idle' && ai.sprite?.multiFrame) {
+      if (ai.state !== 'idle') {
         ai.state = 'idle';
-        if (unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
+        if (ai.el) ai.el.classList.add('idle'), ai.el.classList.remove('walking');
+        if (ai.sprite?.multiFrame && unitAnimState && unitAnimState.has && unitAnimState.has(ai.uid)) {
           setUnitAnimState(ai.uid, 'idle', { dir: ai.dir || 'down' });
         }
       }
@@ -28423,9 +28428,11 @@ if (typeof dealDamageToAIPlayer === 'function') {
     el.style.transform = 'translate(-50%, -100%)';
     el.style.zIndex = Math.floor(20 + (data.y || 0) / 8);
 
-    const cls = SPRITE[data.classId] || SPRITE.warrior;
+    const _clsFull = SPRITE[data.classId] || SPRITE.warrior;
+    // v4.4.18：遠端玩家精簡單圖（idle），避免每人 8 張 0.5~1.4MB 大圖，多人同屏嚴重卡頓；移動靠位置插值 + walking class
+    const cls = { idle: _clsFull.idle, color: _clsFull.color, glow: _clsFull.glow, useImg: true, coverMode: !!_clsFull.coverMode, singleFrame: true };
     // v4.4.0：修正buildSpriteHTML調用參數（第二參數是kind字符串，不是options對象）
-    el.innerHTML = buildSpriteHTML(cls, 'hero', false);
+    el.innerHTML = buildSpriteHTML(cls, 'hero', true);
 
     // 設置名字、等級、血條
     const nameEl = el.querySelector('.unit-name');

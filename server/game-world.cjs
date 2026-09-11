@@ -246,6 +246,30 @@ class Zone {
   }
 
   // ===== 玩家移動請求 =====
+  // v4.4.18 server 權威單位軟碰撞：玩家不得與其他玩家/AI 重疊站位。
+  // 只移動玩家本身，其他玩家與 AI 視為障礙（AI 位置由 ai-engine 每 tick 同步，推 AI 會被覆蓋）。
+  _separatePlayer(player) {
+    const MIN_D = 42; // 兩單位中心最小間距（世界座標，約兩個腳底碰撞圓直徑）
+    for (let iter = 0; iter < 2; iter++) {
+      for (const other of this.entities.values()) {
+        if (other === player || other.id === player.id) continue;
+        if (other.x == null || other.y == null) continue;
+        if (other.hp != null && other.hp <= 0) continue; // 死亡單位不擋
+        let dx = player.x - other.x;
+        let dy = player.y - other.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= MIN_D * MIN_D) continue;
+        let d = Math.sqrt(d2);
+        if (d < 0.001) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy) || 1; }
+        const push = (MIN_D - d) / d;
+        player.x += dx * push;
+        player.y += dy * push;
+      }
+    }
+    player.x = Math.max(16, Math.min(this.width - 16, player.x));
+    player.y = Math.min(this.height - 16, Math.max(16, player.y));
+  }
+
   handleMove(wsId, x, y) {
     const player = this.players.get(wsId);
     if (!player) return null;
@@ -257,6 +281,7 @@ class Zone {
     player.moveTarget = null;
     player.state = 'walk';
     player.lastMoveTime = Date.now();
+    this._separatePlayer(player); // v4.4.18：落地即分離，避免點擊穿人
     return player;
   }
 
@@ -317,6 +342,11 @@ class Zone {
           }
         }
       }
+    }
+
+    // v4.4.18：移動插值後統一做單位分離，行走過程也不重疊（玩家間對稱互推、玩家避開 AI）
+    for (const player of this.players.values()) {
+      this._separatePlayer(player);
     }
 
     // AOI 廣播

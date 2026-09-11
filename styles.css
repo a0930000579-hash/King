@@ -3882,13 +3882,10 @@ img { display: block; pointer-events: none; }
   background: radial-gradient(circle at 50% 35%, #2a1d0e 0%, #120b05 70%, #0a0603 100%);
   position: relative;
 }
-.nav-icon-text::before {
-  content: attr(data-label);
-  color: #e8c870;
-  font-size: 14px;
-  font-weight: 700;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-}
+.nav-icon-text::before { content: none; }
+.nav-icon-text svg { width: 23px; height: 23px; color: #e8c870; display:block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8)); }
+.nav-icon-text.gacha svg { color: #e3b6ff; filter: drop-shadow(0 0 5px rgba(200,140,255,0.7)); }
+.nav-btn.active .nav-icon-text svg { color: var(--gold-bright); }
 .nav-icon-text.gacha {
   background: radial-gradient(circle at 50% 35%, #3d2460 0%, #1e1230 70%, #0f0818 100%);
   color: #d8a8ff;
