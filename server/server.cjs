@@ -89,6 +89,7 @@ try { if (!fs.existsSync(AI_DATA_DIR)) fs.mkdirSync(AI_DATA_DIR, { recursive: tr
 function buildAssetIndex(dir) {
   const map = new Map(); // 小寫路徑 -> 真實相對路徑
   if (!fs.existsSync(dir)) return map;
+  const SKIP_DIRS = new Set(['node_modules', '.git', 'zips', 'data', '__pycache__']);
   function walk(current, rel) {
     let entries;
     try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch (e) { return; }
@@ -96,8 +97,10 @@ function buildAssetIndex(dir) {
       const full = path.join(current, ent.name);
       const r = rel ? rel + '/' + ent.name : ent.name;
       if (ent.isDirectory()) {
+        if (SKIP_DIRS.has(ent.name) || ent.name.startsWith('.')) continue;
         walk(full, r);
       } else {
+        if (ent.name.startsWith('.')) continue;
         map.set(r.toLowerCase(), r);
       }
     }
@@ -105,7 +108,9 @@ function buildAssetIndex(dir) {
   walk(dir, '');
   return map;
 }
- let assetIndex = buildAssetIndex(ASSETS_DIR);
+ // v4.4.19：資產索引延後到 bootstrap（listen 前）才建立，避免 require 階段就同步遞迴掃描、
+ //  在記憶體受限的容器（DigitalOcean 512MB）啟動峰值過高被 OOM(exit 137) 殺掉。
+ let assetIndex = new Map();
  // v3.1.1：清理 manifest 中磁碟不存在的條目（舊資料夾刪除後殘留的引用）
  //  不修改原始檔案，只在記憶體中過濾，提供給 /api/diag 和 /assets/assets-manifest.json 用
  let cleanedManifest = null;
@@ -124,10 +129,11 @@ function buildAssetIndex(dir) {
        const full = path.join(dir, ent.name);
        const rel = relBase ? relBase + '/' + ent.name : ent.name;
        if (ent.isDirectory()) {
-         // 跳過 zips 資料夾（更新包）和 data 資料夾
-         if (ent.name === 'zips' || ent.name === 'data') continue;
+         // 跳過非素材目錄（更新包、資料、依賴、版本控制），避免無謂掃描堆高記憶體
+         if (['zips','data','node_modules','.git','__pycache__'].includes(ent.name)) continue;
          walk(full, rel);
        } else {
+         if (ent.name.startsWith('.')) continue;
          // 只加入圖片/音訊/字型/json 等資源檔
          const ext = path.extname(ent.name).toLowerCase();
          const allowedExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp',
@@ -155,17 +161,11 @@ function buildAssetIndex(dir) {
    }
    regeneratedManifest = result;
    console.log('[Manifest] 從磁碟重新生成完成: 總共 ' + count + ' 個檔案');
-   // v3.1.2：將重新生成的 manifest 寫回磁碟（替換舊檔案）
-   //  確保客戶端拿到的就是最新、無失效引用的版本
-   try {
-     const manifestPath = path.join(ASSETS_DIR, 'assets-manifest.json');
-     const sorted = {};
-     Object.keys(result).sort().forEach(function(k) { sorted[k] = result[k]; });
-     fs.writeFileSync(manifestPath, JSON.stringify(sorted, null, 2), 'utf8');
-     console.log('[Manifest] 已寫入 assets-manifest.json, 共 ' + Object.keys(sorted).length + ' 項');
-   } catch(e) {
-     console.warn('[Manifest] 寫入失敗:', e.message);
-   }
+   // v4.4.19：不再於啟動時寫回覆蓋 assets-manifest.json。
+   //  原因：(1) 容器檔案系統通常是暫存的，寫了在重啟後也會丟失；
+   //       (2) 以「檔名去附檔名」重建的 key 可能與隨包部署的 manifest key 格式不同，
+   //           覆蓋後客戶端會反應缺圖（「？」）。客戶端一律讀磁碟上隨包的原檔，
+   //       這裡只在記憶體保留重建結果，供 /api/diag 比對，不落盤。
    return result;
  }
  function cleanManifest() {
@@ -196,8 +196,10 @@ function buildAssetIndex(dir) {
      cleanedManifest = null;
    }
  }
- cleanManifest();
- regenerateManifestFromDisk();
+ // v4.4.19：不在 require 階段同步跑 manifest 掃描（會延遲 listen、堆高啟動記憶體峰值）。
+ //  改於 bootstrap 的 server.listen 成功後，以 setImmediate 背景執行，僅供 /api/diag。
+ // cleanManifest();
+ // regenerateManifestFromDisk();
  function countFiles(dir) {
   if (!fs.existsSync(dir)) return 0;
   let n = 0;
@@ -3081,8 +3083,11 @@ async function initGM() {
     } catch (e) {
       console.error('[Bootstrap] initGM 拋出未預期錯誤（已攔截，不影響服務）:', e.message);
     }
-    // 重掃資產索引（init 前後若有變動）
-    try { assetIndex = buildAssetIndex(ASSETS_DIR); } catch (_) {}
+    // v4.4.19：assetIndex 已在 listen 前建立一次，此處不再重複遞迴掃描（省啟動記憶體）。
+    //  僅在背景補建 manifest 診斷資訊（記憶體、不落盤），失敗也不影響服務。
+    try { regenerateManifestFromDisk(); } catch (e) {
+      console.warn('[Bootstrap] manifest 診斷掃描失敗（不影響服務）:', e.message);
+    }
     console.log('[Bootstrap] 背景初始化完成，目前後端:', db.getBackend());
   })();
 })();
