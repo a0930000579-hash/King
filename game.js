@@ -4382,18 +4382,39 @@ function getSkillIconBgStyle(skill) {
   return `background:${bg};--icon-key:"${key}";position:relative;overflow:hidden;`;
 }
 // 技能圖標 HTML：底層=漸層，上層=img（失敗自動 fallback CDN，再失敗隱藏露出漸層）
+const SKILL_GLYPHS = {
+  sword: 'M14.5 3.5 20.5 9.5 9 21l-4.2 1.1L6 18Z|M9.2 14.8 4.6 10.2',
+  bolt:  'M13 2 4 14h6l-1 8 9-12h-6l1-8Z',
+  ice:   'M12 3v18|M5 7l14 10|M19 7 5 17',
+  shield:'M12 2.5l7.5 2.8v5.6c0 4.6-3.2 7.9-7.5 10.1-4.3-2.2-7.5-5.5-7.5-10.1V5.3L12 2.5Z',
+  cross: 'M12 4.5v15|M5 12h14',
+  arrow: 'M4 20 20 4|M20 4h-6.5|M20 4v6.5',
+  star:  'M12 2.5l2.6 6 6.5.5-5 4.3 1.6 6.4L12 16.4 6.3 19.7l1.6-6.4-5-4.3 6.5-.5L12 2.5Z',
+  up:    'M12 20V6|M6.5 11 12 5.5 17.5 11'
+};
+function _skillKey(skill){
+  return skill ? (SKILL_ICON_KEY_MAP[skill.id] || SKILL_ICON_KEY_MAP[skill.effect] || SKILL_ICON_KEY_MAP[skill.element] || SKILL_ICON_KEY_MAP[skill.category] || SKILL_ICON_KEY_MAP[skill.type] || 'slash') : 'slash';
+}
+function _skillGlyph(key){
+  key = key || 'slash';
+  if (/lightning|dash|crit/.test(key)) return SKILL_GLYPHS.bolt;
+  if (/arrow|dagger/.test(key)) return SKILL_GLYPHS.arrow;
+  if (/ice|poison/.test(key)) return SKILL_GLYPHS.ice;
+  if (/holy|heal/.test(key)) return SKILL_GLYPHS.cross;
+  if (/shield/.test(key)) return SKILL_GLYPHS.shield;
+  if (/buff/.test(key)) return SKILL_GLYPHS.up;
+  if (/dark|summon|stun/.test(key)) return SKILL_GLYPHS.star;
+  return SKILL_GLYPHS.sword;
+}
+// v4.4.20：技能圖標一律程序化內聯 SVG（原本誤指向不存在的 assets/skill/icon_*.jpg，404 後露出「攻/技N」）
 function getSkillIconHTML(skill, size = 32) {
   const style = getSkillIconBgStyle(skill);
-  const key = skill ? (SKILL_ICON_KEY_MAP[skill.id] || SKILL_ICON_KEY_MAP[skill.effect] || SKILL_ICON_KEY_MAP[skill.element] || SKILL_ICON_KEY_MAP[skill.category] || SKILL_ICON_KEY_MAP[skill.type] || 'slash') : 'slash';
-  const imgUrl = assetUrl(SKILL_IMG_MAP[key] || SKILL_IMG_MAP.default);
-  return `<div style="width:${size}px;height:${size}px;border-radius:4px;${style}"><img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;display:block;position:absolute;top:0;left:0" alt="" onerror="handleImgError(this)"/></div>`;
+  return `<div style="width:${size}px;height:${size}px;border-radius:4px;display:flex;align-items:center;justify-content:center;${style}">${getSkillSVG(skill)}</div>`;
 }
-
-// 取技能圖標圖片（替代原SVG圖標）
 function getSkillSVG(skill) {
-  const key = skill ? (SKILL_ICON_KEY_MAP[skill.id] || SKILL_ICON_KEY_MAP[skill.effect] || SKILL_ICON_KEY_MAP[skill.element] || SKILL_ICON_KEY_MAP[skill.category] || SKILL_ICON_KEY_MAP[skill.type] || 'slash') : 'slash';
-  const imgUrl = assetUrl(SKILL_IMG_MAP[key] || SKILL_IMG_MAP.default);
-  return `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;display:block" alt="skill" onerror="handleImgError(this)"/>`;
+  const d = _skillGlyph(_skillKey(skill));
+  const paths = d.split('|').map(dd => `<path d="${dd}"/>`).join('');
+  return `<svg viewBox="0 0 24 24" width="74%" height="74%" fill="none" stroke="#f3d27a" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85))">${paths}</svg>`;
 }
 
 // 世界尺寸（匹配背景图尺寸，确保摄像机滚动範圍内都有内容）
@@ -5835,22 +5856,25 @@ const RARITY_CONFIG = {
   purple: { order: 4, name: '傳說', color: '#c060ff', glow: 'rgba(192,96,255,0.6)' },
   gold:   { order: 5, name: '神話', color: '#ffcc40', glow: 'rgba(255,204,64,0.7)' },
 };
-// 國家旗幟 / 軍團徽章 / 國家 Tab 圖資（全部走 assetUrl，確保 CDN fallback）
-const NATION_TAB_ICONS = {
-  office:   assetUrl('aadkrfgcyuadw_ve_miaoda'), // 官職頭盔
-  legion:   assetUrl('aadkrfdqqacds_ve_miaoda'), // 軍團徽章
-  castle:   assetUrl('aadkrffy7a4cw_ve_miaoda'), // 城堡
-  donate:   assetUrl('aadkrfdnbcygu_ve_miaoda'), // 捐獻錢袋
-  skill:    assetUrl('aadkrfgii4ocw_ve_miaoda'), // 技能樹
-  sword:    assetUrl('aadkrgfjm22sw_ve_miaoda'), // 劍
-  shield:   assetUrl('aadkrglc2tmlw_ve_miaoda'), // 盾
-  crown:    assetUrl('aadkrgnkrywaw_ve_miaoda'), // 王冠
-  gem:      assetUrl('aadkrfex8k9fu_ve_miaoda'), // 寶石
-  scroll:   assetUrl('aadkrfs7r3qws_ve_miaoda'), // 卷軸
-  members:  assetUrl('aadkrgmr7pucs_ve_miaoda'), // 成員
-  war:      assetUrl('aadkrgkym66hs_ve_miaoda'), // 宣戰
-  treasury: assetUrl('aadkrgkf6f2bw_ve_miaoda'), // 國庫
-};
+// 國家旗幟 / 軍團徽章 / 國家 Tab 圖資（v4.4.20 改內聯金屬徽章 data URI，永不 404）
+const NATION_TAB_ICONS = (function () {
+  const u = (k) => (window.KING_ICONS ? window.KING_ICONS.uri(k) : '');
+  return {
+    office:   u('nobility'),  // 官職
+    legion:   u('legion'),    // 軍團徽章
+    castle:   u('castle'),    // 城堡
+    donate:   u('donate'),    // 捐獻
+    skill:    u('skill'),     // 技能樹
+    sword:    u('power'),     // 劍
+    shield:   u('shield'),    // 盾
+    crown:    u('nation'),    // 王冠
+    gem:      u('npc_luxury'),// 寶石
+    scroll:   u('npc_quest'), // 卷軸
+    members:  u('members'),   // 成員
+    war:      u('kills'),     // 宣戰
+    treasury: u('treasury'),  // 國庫
+  };
+})();
 
 const RARITY_ORDER = ['white', 'green', 'blue', 'red', 'purple', 'gold'];
 
@@ -5981,6 +6005,11 @@ function getEquipRarityIcon(type, rarity) {
     sword:'sword' };
   const slot = slotMap[type] || 'sword';
   const r = rarity || 'white';
+  // v4.4.20：裝備圖標統一走程序化 SVG 生成器（暗黑金屬風、部位×品質、永不缺圖），
+  //  不再依賴灰階 jpg（資產缺失或剪影醜陋）。
+  if (window.EquipIconGenerator) {
+    try { return window.EquipIconGenerator.getEquipIconURL(slot, r); } catch (e) {}
+  }
   const icon = EQUIP_RARITY_ICONS[slot]?.[r] || EQUIP_RARITY_ICONS.sword.white;
   // v2.8.3：診斷 log（只在 type 不在 slotMap 或 slot 映射異常時打印，避免刷屏）
   if (!slotMap[type] || !EQUIP_RARITY_ICONS[slot]?.[r]) {
@@ -6027,7 +6056,26 @@ const EQUIP_ICON_MAP = {
   accessory:assetUrl('equip/icon_ring_white.jpg'),
 };
 
-// 道具/消耗品圖標（v2.7.7：全面重製，天堂W寫實風、每種道具獨特識別）
+// v4.4.20：所有「部位類型」裝備圖標統一改走程序化 SVG 生成器（暗黑金屬風、部位×品質），
+//  徹底汰換灰階剪影 jpg，且永不因資產缺失出現破圖。道具（藥水/卷軸/寶石）維持原圖不受影響。
+(function () {
+  if (!window.EquipIconGenerator) return;
+  const g = window.EquipIconGenerator;
+  const GEN = {
+    weapon: 'sword', sword: 'sword', bow: 'bow', staff: 'staff', dagger: 'dagger',
+    armor: 'armor', helmet: 'helmet', boots: 'boots', gloves: 'gloves', belt: 'belt',
+    cape: 'cape', pants: 'pants', necklace: 'necklace', shield: 'shield',
+    ring: 'ring', ring1: 'ring', ring2: 'ring', accessory: 'ring',
+  };
+  try {
+    Object.keys(GEN).forEach(k => {
+      const url = g.getEquipIconURL(GEN[k], 'white');
+      if (typeof EQUIP_ICON_MAP !== 'undefined' && k in EQUIP_ICON_MAP) EQUIP_ICON_MAP[k] = url;
+      if (typeof ITEM_ICONS !== 'undefined' && k in ITEM_ICONS) ITEM_ICONS[k] = url;
+    });
+  } catch (e) { console.warn('[equip-icon] generator bind fail:', e); }
+})();
+
 const ITEM_ICON_MAP = {
   // 藥水系列
   potion_hp:          assetUrl('item/icon_potion_hp.jpg'),
@@ -6245,6 +6293,19 @@ const EQUIP_COMBOS = [
   { id: 'fc_boots',  name: '靴子收藏家',   category: 'full', rarity: 'blue',   items: ['b1','b2','b3','b4','b5','b6'], stats: { moveSpeed: 8, evasion: 10, crit: 8 }, desc: '收集全部靴子' },
   { id: 'fc_cape',   name: '披風收藏家',   category: 'full', rarity: 'blue',   items: ['c1','c2','c3','c4','c5','c6'], stats: { hpMax: 200, def: 30, atk: 15 }, desc: '收集全部披風' },
   { id: 'fc_legend', name: '裝備圖鑑大師', category: 'full', rarity: 'gold',   items: ['w7','a6','g6','b6','p6','c6','n6','r6'], stats: { atk: 100, def: 80, hpMax: 800, crit: 25, critDmg: 40, mpMax: 200 }, desc: '收集全部頂級金裝' },
+
+  // ===== v4.4.20 新增：六職業主題金裝套（6） =====
+  { id: 'pc_warlord',     name: '暴君．戰爭領主', category: 'quality', rarity: 'gold', items: ['w7','a6','p6','g6','c6'],          stats: { atk: 55, def: 45, hpMax: 500, crit: 8 },                 desc: '戰士職業金裝五件套' },
+  { id: 'pc_archmage',    name: '大奧術師',       category: 'quality', rarity: 'gold', items: ['w7','a6','c6','n6','r6'],          stats: { atk: 50, mpMax: 300, crit: 12, critDmg: 20 },           desc: '法師職業金裝五件套' },
+  { id: 'pc_stormranger', name: '風暴遊俠',       category: 'quality', rarity: 'gold', items: ['w7','b6','g6','n6','r6'],          stats: { atk: 45, crit: 22, critDmg: 38, hpMax: 200 },           desc: '弓手職業金裝五件套' },
+  { id: 'pc_shadowblade', name: '暗影之刃',       category: 'quality', rarity: 'gold', items: ['w7','g6','b6','r6','c6'],          stats: { atk: 55, crit: 26, critDmg: 40, hpMax: 150 },           desc: '刺客職業金裝五件套' },
+  { id: 'pc_dawnpaladin', name: '黎明聖騎',       category: 'quality', rarity: 'gold', items: ['w7','a6','p6','c6','n6'],          stats: { def: 55, hpMax: 600, atk: 40, crit: 8 },               desc: '聖騎士職業金裝五件套' },
+  { id: 'pc_divinepriest',name: '神諭祭司',       category: 'quality', rarity: 'gold', items: ['a6','c6','n6','r6','g6'],          stats: { mpMax: 280, def: 40, hpMax: 450, atk: 30 },            desc: '祭司職業金裝五件套' },
+
+  // ===== v4.4.20 新增：終極 Boss 神話套（3） =====
+  { id: 'ub_deathlord',    name: '死亡領主．永夜', category: 'boss', rarity: 'gold', items: ['w7','a6','h5','p6','c6','n6'],     stats: { atk: 80, def: 55, hpMax: 700, crit: 12, critDmg: 25 }, desc: '死亡領主掉落之永夜套' },
+  { id: 'ub_dragonemperor',name: '龍皇．滅世',     category: 'boss', rarity: 'gold', items: ['w7','a6','g6','r6','n6','c6'],     stats: { atk: 90, crit: 18, critDmg: 35, hpMax: 550, def: 40 }, desc: '遠古龍皇掉落之滅世套' },
+  { id: 'ub_ragnarok',     name: '諸神黃昏．終焉', category: 'boss', rarity: 'gold', items: ['w7','a6','b6','p6','g6','c6','n6','r6'], stats: { atk: 120, def: 90, hpMax: 1000, mpMax: 250, crit: 22, critDmg: 45 }, desc: '集滿頂級金裝之終焉神話套' },
 ];
 const EQUIP_COMBOS_COUNT = EQUIP_COMBOS.length; // 66
 
@@ -7483,7 +7544,8 @@ const AI_CLASS_IDS = ['warrior', 'mage', 'archer', 'rogue', 'paladin', 'warlock'
 
 // ==================== 全局 AI 玩家池（跨地圖常駐，最多 90） ====================
 const MAX_AI_PLAYERS = 45;
-const ACTIVE_AI_COUNT = 15;  // 活躍AI數量（真實模擬+渲染）
+// v4.4.20：手機/小螢幕降低活躍 AI（真實模擬＋渲染）數量以減輕卡頓，桌面維持 15
+const ACTIVE_AI_COUNT = (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) || (typeof window !== 'undefined' && window.innerWidth <= 860)) ? 7 : 15;
 const BACKGROUND_AI_UPDATE_INTERVAL = 30; // 背景AI批量更新間隔（秒）
 const GLOBAL_AI_POOL = []; // 全局 AI 池，跨地圖存在
 let aiUidCounter = 1;
@@ -10075,11 +10137,11 @@ function renderRankingPage() {
     if (!GS.rankings) GS.rankings = { level: [], power: [], kills: [], guild: [], nation: [] };
     if (!GS.rankings.level || GS.rankings.level.length === 0) updateRankings();
   const rankIconSVG = {
-    level: '<span style="color:#f0c040;font-weight:700;font-size:12px">等</span>',
-    power: '<span style="color:#f0c040;font-weight:700;font-size:12px">戰</span>',
-    kills: '<span style="color:#f0c040;font-weight:700;font-size:12px">殺</span>',
-    guild: '<span style="color:#f0c040;font-weight:700;font-size:12px">盟</span>',
-    nation: '<span style="color:#f0c040;font-weight:700;font-size:12px">國</span>',
+    level: window.KING_ICONS ? KING_ICONS.svg('level', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">等</span>',
+    power: window.KING_ICONS ? KING_ICONS.svg('power', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">戰</span>',
+    kills: window.KING_ICONS ? KING_ICONS.svg('kills', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">殺</span>',
+    guild: window.KING_ICONS ? KING_ICONS.svg('legion', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">盟</span>',
+    nation: window.KING_ICONS ? KING_ICONS.svg('nation', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">國</span>',
   };
   const tabs = [
     { key: 'level', label: '等級榜' },
@@ -10333,7 +10395,7 @@ function renderNationPageEnhanced() {
       </div>
       <!-- 國王資訊 -->
       <div class="nation-king-row" style="margin-top:14px;padding:10px 12px;background:linear-gradient(135deg, rgba(80,50,20,0.8), rgba(30,18,10,0.7));border:1.5px solid var(--gold);border-radius:10px;display:flex;align-items:center;gap:10px;box-shadow:0 0 14px rgba(240,192,64,0.25), inset 0 0 10px rgba(240,192,64,0.08)">
-        <div style="width:44px;height:44px;border-radius:50%;border:2px solid #ffd040;background:radial-gradient(circle, #ffd04033, transparent 70%);display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(255,208,64,0.5);overflow:hidden"><img src="/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgfjm22sw_ve_miaoda" style="width:130%;height:130%;object-fit:cover;display:block;transform:scale(1.15)"/></div>
+        <div style="width:44px;height:44px;border-radius:50%;border:2px solid #ffd040;background:radial-gradient(circle, #ffd04033, transparent 70%);display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(255,208,64,0.5);overflow:hidden"><img src="${NATION_TAB_ICONS.crown}" style="width:100%;height:100%;object-fit:contain;display:block"/></div>
         <div style="flex:1;min-width:0">
           <div style="font-size:10px;color:var(--gold-bright);font-weight:700">當前國王</div>
           <div style="font-size:14px;font-weight:800;color:var(--gold-bright);text-shadow:0 1px 3px #000">${kingEntry.name}</div>
@@ -10355,16 +10417,16 @@ function renderNationPageEnhanced() {
       <!-- 功能入口網格 -->
       <div class="nation-entry-grid" style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
         ${[
-          { key: 'nobility', name: '官職',   icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgfjm22sw_ve_miaoda' },
-          { key: 'members',  name: '成員',   icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrglc2tmlw_ve_miaoda' },
-          { key: 'legion',   name: '軍團',   icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgmr7pucs_ve_miaoda' },
-          { key: 'castle',   name: '城堡',   icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrggcscsgs_ve_miaoda' },
-          { key: 'treasury', name: '國庫',   icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgkf6f2bw_ve_miaoda' },
-          { key: 'skills',   name: '技能樹', icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrgnkrywaw_ve_miaoda' },
-          { key: 'donate',   name: '貢獻',   icon: '/spark/app/app_17ch22wujxs/runtime/api/v1/storage/object/bucket_aadkq5g4dkmew_static/static%2Faadkrggfwmcou_ve_miaoda' },
+          { key: 'nobility', name: '官職',   icon: 'nobility' },
+          { key: 'members',  name: '成員',   icon: 'members' },
+          { key: 'legion',   name: '軍團',   icon: 'legion' },
+          { key: 'castle',   name: '城堡',   icon: 'castle' },
+          { key: 'treasury', name: '國庫',   icon: 'treasury' },
+          { key: 'skills',   name: '技能樹', icon: 'skill' },
+          { key: 'donate',   name: '貢獻',   icon: 'donate' },
         ].map(e => `
           <button class="nation-entry-btn" data-nation-entry="${e.key}" style="padding:10px 4px;background:linear-gradient(180deg, rgba(50,35,18,0.9), rgba(25,16,8,0.95));border:1px solid var(--gold-dark);border-radius:8px;color:var(--parchment-light);font-size:10px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;box-shadow:inset 0 0 6px rgba(240,192,64,0.08)">
-            <span style="width:28px;height:28px;border-radius:50%;overflow:hidden;border:1.5px solid var(--gold-dark);background:#0f0a05;display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px rgba(240,192,64,0.2)"><img src="${e.icon}" style="width:130%;height:130%;object-fit:cover;display:block;transform:scale(1.15)"/></span>
+            <span style="width:30px;height:30px;border-radius:50%;overflow:hidden;border:1.5px solid var(--gold-dark);background:radial-gradient(circle at 50% 35%, #3a2c16, #140d05);display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px rgba(240,192,64,0.25)">${window.KING_ICONS ? KING_ICONS.svg(e.icon, 20) : e.name.charAt(0)}</span>
             <span>${e.name}</span>
           </button>
         `).join('')}
@@ -11864,7 +11926,7 @@ function buildSpriteHTML(spriteObj, kind, lean) {
         <div class="unit-sprite-emoji" data-sprite-idle="${emojiIdle}" data-sprite-attack="${emojiAttack}" data-sprite-dead="墓" style="color:${color};font-size:${fontSize}px;filter:${baseFilter}">${emojiIdle}</div>
       `}
     </div>
-    <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:-1;overflow:visible">
+    <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;overflow:visible">
       <div class="aura-glow-outer"></div>
       <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <div class="aura-flames"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
@@ -12850,7 +12912,7 @@ function updatePlayerSprite() {
     const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8))';
     const mainSrc = s.walk2 || s.side || s.walk || s.idle;
     const auraHTML = `
-        <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;overflow:visible">
+        <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;overflow:visible">
           <div class="aura-glow-outer"></div>
           <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
           <div class="aura-flames"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
@@ -12865,12 +12927,17 @@ function updatePlayerSprite() {
     if (needRebuild) {
       spriteWrap.classList.add('sprite-single-frame');
       spriteWrap.classList.remove('sprite-multi-frame');
-      spriteWrap.innerHTML = auraHTML + `
+      // v4.4.20：wrap 內只放人物本體；變身光環必須是 wrap 的「兄弟」，
+      //  否則光環會被 wrap 的行走/攻擊 transform 連動而偏移跑版。
+      spriteWrap.innerHTML = `
         <img class="unit-sprite-img sprite-frame-idle" src="${mainSrc}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
         <div class="unit-sprite-tomb">墓</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>
       `;
+      // 若光環不存在或誤存在於 wrap 內，重新插到 wrap 之後（直接子層）
+      let auraEl = unit.querySelector(':scope > .transform-aura');
+      if (!auraEl) spriteWrap.insertAdjacentHTML('afterend', auraHTML);
     } else {
       // 已是單圖結構：只更新主圖 src（相同 src 瀏覽器不會重載）
       const imgIdle = spriteWrap.querySelector('.sprite-frame-idle');
@@ -13563,9 +13630,17 @@ function renderNPCs(map) {
     elDiv.style.left = npc.x + 'px';
     elDiv.style.top = (npc.y - 64) + 'px';
     const spriteKey = npcSpriteMap[npc.id] || 'npc_shop';
-    const sp = SPRITE[spriteKey] || { idle: npc.icon || '師', color: '#c0a060', glow: '#ffe090' };
-    const isImg = !!sp.useImg;
-    const multiFrame = !!sp.multiFrame;
+    const spDef = SPRITE[spriteKey];
+    // v4.4.20：NPC 一律用內聯金屬徽章 data URI（單圖），徹底避免外部 CDN hash 圖在 DO 上 404 → 藍「?」
+    let npcSrc, isImg, multiFrame, sp;
+    if (window.KING_ICONS) {
+      sp = spDef || { color: '#c0a060', glow: '#ffe090' };
+      npcSrc = window.KING_ICONS.uri(spriteKey.replace(/_new$/, ''));
+      isImg = true; multiFrame = false;
+    } else {
+      sp = spDef || { idle: npc.icon || '師', color: '#c0a060', glow: '#ffe090' };
+      npcSrc = sp.idle; isImg = !!sp.useImg; multiFrame = !!sp.multiFrame;
+    }
     const filter = `drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
 
     let spriteHTML = '';
@@ -13590,7 +13665,7 @@ function renderNPCs(map) {
       unitAnimState.set(npcUid, { animFrame: 0, animTimer: Math.random() * 400, state: 'idle', breathPhase: Math.random() * 6 });
     } else if (isImg) {
       spriteHTML = `
-        <img class="npc-sprite-img" src="${sp.idle}" alt="${npc.name}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" onerror="handleImgError(this)"/>
+        <img class="npc-sprite-img" src="${npcSrc}" alt="${npc.name}" style="width:100%;height:100%;object-fit:contain;display:block;filter:${filter}" onerror="handleImgError(this)"/>
       `;
     } else {
       spriteHTML = `<div style="font-size:32px;line-height:48px;filter:${filter};color:${sp.color || '#c0a060'}">${npc.icon || '師'}</div>`;
@@ -15092,6 +15167,17 @@ function doPlayerNormalAttack(target, isAITarget) {
   const p = GS.player;
   if (p.hp <= 0) return;
   p.state = 'attacking';
+  // v4.4.20：每次普攻都強制重啟攻擊動作與揮砍特效。
+  //  連續普攻時 .attacking class 會常駐、CSS 動畫只播第一次，故先移除再強制 reflow 重新觸發。
+  try {
+    const heroUnit = (typeof worldLayer !== 'undefined' && worldLayer) ? worldLayer.querySelector('.world-unit.hero') : null;
+    if (heroUnit) {
+      heroUnit.classList.remove('attacking');
+      void heroUnit.offsetWidth;
+      heroUnit.classList.add('attacking');
+      if (typeof playAttackAnim === 'function') playAttackAnim(heroUnit, null);
+    }
+  } catch (e) { /* 動畫失敗不影響戰鬥 */ }
   // v2.6.0：攻速加成縮短冷卻
   const atkSpeedPct = getTotalAtkSpeedPct();
   const baseCd = p.attackInterval || 1.0;
@@ -15099,9 +15185,10 @@ function doPlayerNormalAttack(target, isAITarget) {
   const atkVal = getTotalAtk();
   const defVal = (isAITarget ? getAITotalDef(target) : (Number(target.def) || 0));
   const dr = Math.min(0.75, defVal * 0.005);
-  const isCrit = Math.random() < (getTotalCrit() || 0) / 100;
+  const critBuff = consumeCriticalBuff();
+  const isCrit = critBuff || Math.random() < (getTotalCrit() || 0) / 100;
   let dmg = Math.max(1, Math.floor(atkVal * (1 - dr) * (0.9 + Math.random() * 0.2)));
-  if (isCrit) dmg = Math.floor(dmg * (1.5 + (getTotalCritDmg() || 50) / 100));
+  if (isCrit) dmg = Math.floor(dmg * (1.5 + ((getTotalCritDmg() || 50) + (critBuff ? 100 : 0)) / 100));
   // 變身 PVP 傷害加成（僅對 AI 玩家目標生效）
   if (isAITarget) {
     const tfInfo = TRANSFORM_POOL.find(t => t.id === p.transformId);
@@ -15368,7 +15455,7 @@ function castSkill(idx) {
       p.state = 'idle';
     });
     spawnEffect(skill.effect, p.x, p.y - 28);
-    addBuff(skill.id, { name: skill.desc });
+    applySkillBuff(skill);
     p.skillCooldowns[idx] = skill.cd;
     addLog('skill-buff', `你施放了【${skill.name}】對【自身】增加【${skill.desc || '強化效果'}】`);
     if (typeof AudioSystem !== 'undefined' && AudioSystem) AudioSystem.sfxSkill(skill.id, p.classId);
@@ -15501,10 +15588,12 @@ function dealSkillDamage(target, baseDmg, effectType, skill, isAoe) {
   const dr = Math.min(0.75, defVal * 0.005);
   let dmg = Math.max(1, atkVal * (1 - dr));
   dmg = Math.floor(dmg * (0.9 + Math.random() * 0.2));
+  const critBuff = consumeCriticalBuff();
   const critVal = Number(getTotalCrit()) || 0;
-  const isCrit = critVal > 0 && Math.random() * 100 < critVal;
+  const isCrit = critBuff || (critVal > 0 && Math.random() * 100 < critVal);
   if (isCrit) {
-    const cdVal = Number(getTotalCritDmg()) || 150;
+    let cdVal = Number(getTotalCritDmg()) || 150;
+    if (critBuff) cdVal += 100; // 致命瞄準：暴傷 +100%
     dmg = Math.floor(dmg * (cdVal / 100));
   }
   if (isNaN(dmg) || dmg < 1) dmg = 1;
@@ -15577,20 +15666,69 @@ function dealSkillDamage(target, baseDmg, effectType, skill, isAoe) {
   return dmg;
 }
 
-function addBuff(buffId, buffDesc) {
+// v4.4.20：技能 buff 效果表（修正舊版兩個同名 addBuff 互相覆蓋、導致技能 buff 完全沒生效的 bug）
+//  type：atkPct/defPct 攻擊防禦百分比、atkSpeed 攻速百分比、dodge 閃避、shield 減傷、critical 下次必暴、vanish 隱身
+const SKILL_BUFF_TABLE = {
+  warcry:     { buffKey: 'warcry',     type: 'atkPct',   value: 30,  duration: 10, name: '戰吼',       desc: '攻擊力 +30%，持續10秒' },
+  rage:       { buffKey: 'rage',       type: 'atkPct',   value: 50,  duration: 15, name: '狂暴',       desc: '攻擊 +50%、防禦 -20%，持續15秒', extra: { defPct: -20 } },
+  rapid:      { buffKey: 'rapid',      type: 'atkSpeed', value: 80,  duration: 8,  name: '急速射擊',   desc: '攻擊速度 +80%，持續8秒' },
+  dodge:      { buffKey: 'dodge',      type: 'dodge',    value: 100, duration: 3,  name: '迴避',       desc: '3秒內閃避所有攻擊' },
+  shield:     { buffKey: 'shield',     type: 'shield',   value: 50,  duration: 8,  name: '聖盾',       desc: '8秒內受到傷害 -50%' },
+  manashield: { buffKey: 'shield',     type: 'shield',   value: 30,  duration: 10, name: '魔法護盾',   desc: '10秒內受到傷害 -30%' },
+  guardian:   { buffKey: 'guardian',   type: 'defPct',   value: 50,  duration: 12, name: '守護祝福',   desc: '防禦 +50%，並立即回復30%生命，持續12秒', healPct: 30 },
+  sacrifice:  { buffKey: 'sacrifice',  type: 'atkPct',   value: 60,  duration: 15, name: '黑暗獻祭',   desc: '消耗20%生命，換取攻擊 +60%，持續15秒', costHpPct: 20 },
+  critical:   { buffKey: 'critical',   type: 'critical', value: 1,   duration: 12, name: '致命瞄準',   desc: '下次攻擊必定暴擊，暴擊傷害 +100%' },
+  vanish:     { buffKey: 'vanish',     type: 'vanish',   value: 1,   duration: 5,  name: '消失',       desc: '隱身5秒，並立即回復15%生命', healPct: 15 },
+};
+
+// 技能 buff：寫入 GS.player.buffs（戰鬥/移動/受擊讀取），同時在 buff 欄顯示圖標、說明與倒數
+function applySkillBuff(skill) {
   const p = GS.player;
+  if (!p) return;
   if (!p.buffs) p.buffs = {};
-  // 直接存buff信息：{ type, value, duration, name }
-  p.buffs[buffId] = {
-    type: buffDesc.type || 'atkPct',
-    value: buffDesc.value || 0,
-    duration: buffDesc.duration || 10,
-    name: buffDesc.name || buffId,
-  };
-  if (buffId === 'warcry') p.buffs.warcry = { type: 'atkPct', value: 30, duration: 10, name: '戰吼' };
-  if (buffId === 'dodge') p.buffs.dodge = { type: 'dodge', value: 100, duration: 3, name: '閃避' };
-  if (buffId === 'shield') p.buffs.shield = { type: 'shield', value: 100, duration: 8, name: '聖盾' };
-  addLog('skill-buff', `你施放了【${buffDesc.name || buffId}】，效果已生效`);
+  const id = skill && skill.id;
+  const cfg = SKILL_BUFF_TABLE[id];
+
+  if (!cfg) {
+    // 未配置效果表的 buff 技能：至少顯示圖標與說明，不寫戰鬥數值
+    if (typeof addBuff === 'function') addBuff(id, skill.name || id, skill.desc || '強化效果', 10, {});
+    addLog('skill-buff', `你施放了【${(skill && skill.name) || id}】，效果已生效`);
+    return;
+  }
+
+  // 生命消耗 / 立即回復
+  if (cfg.costHpPct) p.hp = Math.max(1, p.hp - getTotalHpMax() * cfg.costHpPct / 100);
+  if (cfg.healPct)   p.hp = Math.min(getTotalHpMax(), p.hp + getTotalHpMax() * cfg.healPct / 100);
+
+  // 寫入玩家 buff（受擊閃避/減傷固定讀 p.buffs.dodge / p.buffs.shield，故 manashield 也寫 shield）
+  const entry = { type: cfg.type, value: cfg.value, duration: cfg.duration, name: cfg.name };
+  if (cfg.type === 'atkSpeed') entry.atkSpeedPct = cfg.value; // getTotalAtkSpeedPct 既有迴圈讀此欄位
+  p.buffs[cfg.buffKey] = entry;
+  if (cfg.extra && typeof cfg.extra.defPct === 'number') {
+    p.buffs[cfg.buffKey + '_def'] = { type: 'defPct', value: cfg.extra.defPct, duration: cfg.duration, name: cfg.name };
+  }
+
+  // 同步 UI buff 欄（圖標＋說明＋倒數）
+  const stats = {};
+  if (cfg.type === 'atkPct') stats.atk = cfg.value;
+  if (cfg.type === 'defPct') stats.def = cfg.value;
+  if (cfg.type === 'atkSpeed') stats.atkSpeedPct = cfg.value;
+  if (cfg.extra && typeof cfg.extra.defPct === 'number') stats.def = cfg.extra.defPct;
+  if (typeof addBuff === 'function') addBuff(id, cfg.name, cfg.desc, cfg.duration, stats);
+
+  addLog('skill-buff', `你施放了【${cfg.name}】，${cfg.desc}`);
+  try { if (typeof updateUI === 'function') updateUI(); } catch (e) {}
+}
+
+// v4.4.20：致命瞄準為「下次攻擊必暴」一次性 buff，攻擊判定時呼叫；命中後消耗
+function consumeCriticalBuff() {
+  const p = GS.player;
+  if (p && p.buffs && p.buffs.critical) {
+    delete p.buffs.critical;
+    try { if (typeof removeBuff === 'function') removeBuff('critical'); } catch (e) {}
+    return true;
+  }
+  return false;
 }
 
 function summonDemon() {
@@ -16037,22 +16175,26 @@ function updateMonsters(dt, ts) {
 function damagePlayer(dmg, sourceName) {
   const p = GS.player;
   if (p.hp <= 0) return;
-  if (p.buffs.dodge && typeof p.buffs.dodge === 'object' && p.buffs.dodge.type === 'dodge' && Math.random() < 0.8) {
-    showDamage(p.x, p.y - 55, 'MISS', 'miss');
-    return;
-  }
-  // 舊格式兼容
-  if (p.buffs.dodge && typeof p.buffs.dodge === 'number' && Math.random() < 0.8) {
-    showDamage(p.x, p.y - 55, 'MISS', 'miss');
-    return;
+  // v4.4.20：閃避率讀 buff.value（迴避 value=100 → 100% 閃避），相容舊數字格式
+  const dodgeB = p.buffs.dodge;
+  if (dodgeB) {
+    const chance = typeof dodgeB === 'object' ? Math.min(1, (Number(dodgeB.value) || 80) / 100) : 0.8;
+    if (Math.random() < chance) {
+      showDamage(p.x, p.y - 55, 'MISS', 'miss');
+      return;
+    }
   }
   const pDef = Number(getTotalDef()) || 0;
   const dr = Math.min(0.75, pDef * 0.005);
   dmg = Math.max(1, dmg * (1 - dr));
   dmg = Math.floor(dmg * (0.9 + Math.random() * 0.2));
   if (isNaN(dmg) || dmg < 1) dmg = 1;
-  const hasShield = (typeof p.buffs.shield === 'object' && p.buffs.shield.type === 'shield') || typeof p.buffs.shield === 'number';
-  if (hasShield) dmg = Math.floor(dmg * 0.5);
+  // v4.4.20：減傷比例讀 buff.value（聖盾50%、魔法護盾30%），相容舊數字格式（預設50%）
+  if (p.buffs.shield) {
+    const sb = p.buffs.shield;
+    const sv = typeof sb === 'object' ? (Number(sb.value) || 50) : 50;
+    dmg = Math.floor(dmg * (1 - Math.min(0.9, sv / 100)));
+  }
   p.hp = Math.max(0, p.hp - dmg);
   p.hitTimer = 0.3;
   showDamage(p.x, p.y - 58, dmg, 'normal');
@@ -16063,6 +16205,10 @@ function damagePlayer(dmg, sourceName) {
     void playerEl.offsetWidth;
     playerEl.classList.add('hit-flash-red');
     setTimeout(() => playerEl.classList.remove('hit-flash-red'), 120);
+    // v4.4.20：連續被打也重啟 wrap 的受擊後彈動畫（.hit 常駐時 CSS 不會重播）
+    playerEl.classList.remove('hit');
+    void playerEl.offsetWidth;
+    playerEl.classList.add('hit');
   }
   if (sourceName) addLog('damage-taken', `受到【${sourceName}】的攻擊，造成 ${dmg} 傷害`);
   if (p.hp <= 0) {
@@ -17450,6 +17596,33 @@ function getPetBonus() {
 // ==================== 總速度加成計算（v2.6.0） ====================
 // 疊加所有來源：職業被動、裝備、buff、變身、英雄守護
 // 返回百分比數值（如 35 表示 +35%）
+// v4.4.20：統一彙總「當前生效中」的 buff 數值加成。
+//  來源一：GS.player.buffs（技能 buff，物件 {type,value,duration}，atkPct/defPct）
+//  來源二：GS.activeBuffs（藥水/變身 buff，stats.atk/def/atkSpeedPct/walkSpeedPct，含 endTime）
+//  回傳百分比加成；atkSpeed/walkSpeed 僅彙總 activeBuffs（技能攻速/移速由各屬性函式既有 p.buffs 迴圈處理，避免重複）。
+function getActiveBuffMods() {
+  const mods = { atkPct: 0, defPct: 0, atkSpeedPct: 0, walkSpeedPct: 0 };
+  const p = GS.player;
+  if (p && p.buffs) {
+    for (const k in p.buffs) {
+      const b = p.buffs[k];
+      if (typeof b !== 'object' || !b) continue;
+      if (b.type === 'atkPct') mods.atkPct += Number(b.value) || 0;
+      if (b.type === 'defPct') mods.defPct += Number(b.value) || 0;
+    }
+  }
+  const now = Date.now();
+  (GS.activeBuffs || []).forEach(b => {
+    if (b.endTime && b.endTime <= now) return; // 過期不計
+    const s = b.stats || {};
+    if (s.atk) mods.atkPct += Number(s.atk) || 0;
+    if (s.def) mods.defPct += Number(s.def) || 0;
+    if (s.atkSpeedPct) mods.atkSpeedPct += Number(s.atkSpeedPct) || 0;
+    if (s.walkSpeedPct) mods.walkSpeedPct += Number(s.walkSpeedPct) || 0;
+  });
+  return mods;
+}
+
 function getTotalWalkSpeedPct() {
   let total = 0;
   const p = GS.player;
@@ -17469,6 +17642,7 @@ function getTotalWalkSpeedPct() {
   // 寵物加成
   const petBonus = getPetBonus();
   if (petBonus?.walkSpeedPct) total += petBonus.walkSpeedPct;
+  total += getActiveBuffMods().walkSpeedPct; // v4.4.20：移速藥水等 activeBuffs
   return total;
 }
 
@@ -17490,6 +17664,7 @@ function getTotalAtkSpeedPct() {
   // 寵物加成
   const petBonus = getPetBonus();
   if (petBonus?.atkSpeedPct) total += petBonus.atkSpeedPct;
+  total += getActiveBuffMods().atkSpeedPct; // v4.4.20：攻速藥水等 activeBuffs
   return total;
 }
 
@@ -17533,6 +17708,9 @@ function getTotalAtk() {
   atk += rb.atk || 0;
   // 變身全屬性加成
   if (tfInfo?.stats?.allStatPct) atk = atk * (1 + tfInfo.stats.allStatPct / 100);
+  // v4.4.20：攻擊力 buff（戰吼/狂暴/黑暗獻祭/攻擊藥水等）
+  const _atkBuff = getActiveBuffMods();
+  if (_atkBuff.atkPct) atk = atk * (1 + _atkBuff.atkPct / 100);
   if (isNaN(atk)) atk = 0;
   return atk;
 }
@@ -17574,6 +17752,9 @@ function getTotalDef() {
   def += rb.def || 0;
   // 變身全屬性加成
   if (tfInfo?.stats?.allStatPct) def = def * (1 + tfInfo.stats.allStatPct / 100);
+  // v4.4.20：防禦力 buff（守護祝福/狂暴減防/防禦藥水等，可為負）
+  const _defBuff = getActiveBuffMods();
+  if (_defBuff.defPct) def = def * (1 + _defBuff.defPct / 100);
   if (isNaN(def)) def = 0;
   return def;
 }
@@ -19888,26 +20069,51 @@ function _buffSVG(color, symbol, symbol2) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.95"/><stop offset="100%" stop-color="${color}" stop-opacity="0.6"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="5" fill="url(#g)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/><text x="16" y="21" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff" font-family="Arial, sans-serif" style="text-shadow:0 1px 2px rgba(0,0,0,0.5)">${symbol}</text>${symbol2 ? `<text x="16" y="28" text-anchor="middle" font-size="8" fill="#fff" font-family="Arial" opacity="0.9">${symbol2}</text>` : ''}</svg>`;
   return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
 }
+// v4.4.20：圖形化 buff 圖標（不再用中文單字），body 為 32 viewBox 的白色 SVG 元素
+function _buffIcon(color, body, strokeBody) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.97"/><stop offset="100%" stop-color="${color}" stop-opacity="0.62"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="6" fill="url(#g)" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><g fill="#ffffff">${body}</g>${strokeBody ? `<g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${strokeBody}</g>` : ''}</svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+}
+const _BI = {
+  star:    '<path d="M16 3 L18.6 12.4 L28 13.4 L20.6 19.6 L23 29 L16 23.8 L9 29 L11.4 19.6 L4 13.4 L13.4 12.4 Z"/>',
+  bolt:    '<path d="M17.5 3 L7.5 17.5 H14.5 L13 29 L24.5 13.5 H17.8 Z"/>',
+  wind:    '',
+  sword:   '<path d="M22.5 4 L28 9.5 L13 24.5 L9 25.5 L7.5 21 L7.5 19 Z M8 20 L4 24 L6 26 L8.5 26.5 L12 23 Z M9 27 L7 29 L5 27 L7 25 Z"/>',
+  shield:  '<path d="M16 3.5 L26 7.5 V15.5 C26 21.8 21.4 25.8 16 28.5 C10.6 25.8 6 21.8 6 15.5 V7.5 Z M12.5 15.5 L15 18 L20 12.2" fill="#ffffff" fill-rule="evenodd"/>',
+  fire:    '<path d="M16 3 C17.5 7.5 23 9.5 23 17 a7 7 0 1 1-14 0 C9 13 13.5 12.5 13.5 8 C15 9.8 15.3 11 16 11 C16 8 16 5.5 16 3 Z M16 15 a3.2 3.2 0 1 0 0 6.4 a3.2 3.2 0 0 0 0-6.4 Z"/>',
+  cross:   '<path d="M13 5 H19 V13 H27 V19 H19 V27 H13 V19 H5 V13 H13 Z"/>',
+  drop:    '<path d="M16 3 C12 10.5 8 14.5 8 19.5 a8 8 0 0 0 16 0 C24 14.5 20 10.5 16 3 Z M13 20 a3 3 0 0 0 3 3" fill="#ffffff"/><path d="M13 20 a3 3 0 0 0 3 3" fill="none" stroke="' + '#0a2a5e' + '" stroke-width="1.6"/>',
+  crit:    '<path d="M16 2.5 L18 11 L26.5 8 L20 15 L27 16.5 L19.5 18 L22 26.5 L16 20.5 L10 26.5 L12.5 18 L5 16.5 L12 15 L5.5 8 L14 11 Z"/>',
+  gem:     '<path d="M16 4 L26 12 L16 28 L6 12 Z M6 12 H26 M11 12 L16 4 L21 12 L16 28 Z" fill="#ffffff"/>',
+  upArrow: '<path d="M16 4 L26 15 H20 V28 H12 V15 H6 Z"/>',
+};
 const BUFF_ICONS = {
-  transform:  _buffSVG('#c03030', '变', '身'),
-  atkspd:     _buffSVG('#e09020', '攻', '速'),
-  movespd:    _buffSVG('#30b060', '移', '速'),
-  exp:        _buffSVG('#4080e0', '經', '驗'),
-  drop:       _buffSVG('#b060d0', '掉', '寶'),
-  shield:     _buffSVG('#60a0e0', '盾', ''),
-  atkpot:     _buffSVG('#d04040', '力', ''),
-  defpot:     _buffSVG('#4090d0', '防', ''),
-  berserk:    _buffSVG('#e04040', '狂', ''),
-  dodge:      _buffSVG('#40d0c0', '閃', ''),
-  hp:         _buffSVG('#e06060', '血', ''),
-  mp:         _buffSVG('#6080e0', '魔', ''),
-  atkPct:     _buffSVG('#d04040', '力', '%'),
-  defPct:     _buffSVG('#4090d0', '防', '%'),
-  crit:       _buffSVG('#e0a020', '暴', ''),
-  allStat:    _buffSVG('#c060e0', '全', ''),
-  warcry:     _buffSVG('#d06020', '吼', ''),
-  windwalk:   _buffSVG('#30b0a0', '風', ''),
-  ironwall:   _buffSVG('#6080a0', '鐵', ''),
+  transform:  _buffIcon('#c03030', _BI.star),
+  atkspd:     _buffIcon('#e09020', _BI.bolt),
+  movespd:    _buffIcon('#30b060', '', '<path d="M5 11 H19 a3.5 3.5 0 1 0-3.5-3.5 M5 16 H23 a3.5 3.5 0 1 1-3.5 3.5 M5 21 H15"/>'),
+  exp:        _buffIcon('#4080e0', '', '<path d="M6 25 L13 17 L18 21 L26 9 M26 9 H20 M26 9 V15"/>'),
+  drop:       _buffIcon('#b060d0', _BI.gem),
+  shield:     _buffIcon('#60a0e0', _BI.shield),
+  atkpot:     _buffIcon('#d04040', _BI.upArrow),
+  defpot:     _buffIcon('#4090d0', _BI.shield),
+  berserk:    _buffIcon('#e04040', _BI.fire),
+  rage:       _buffIcon('#e04040', _BI.fire),
+  dodge:      _buffIcon('#40d0c0', '', '<path d="M21 9 a9 9 0 1 0 2 8 M22 6 l3 3 -3 3"/>'),
+  hp:         _buffIcon('#e06060', _BI.cross),
+  mp:         _buffIcon('#6080e0', _BI.drop),
+  atkPct:     _buffIcon('#d04040', _BI.upArrow),
+  defPct:     _buffIcon('#4090d0', _BI.shield),
+  crit:       _buffIcon('#e0a020', _BI.crit),
+  critical:   _buffIcon('#e0a020', _BI.crit),
+  allStat:    _buffIcon('#c060e0', _BI.star),
+  warcry:     _buffIcon('#d06020', '', '<path d="M7 11 a13 13 0 0 1 0 10 M11 8 a18 18 0 0 1 0 16 M15 5.5 a23 23 0 0 1 0 21"/>'),
+  windwalk:   _buffIcon('#30b0a0', '', '<path d="M5 11 H19 a3.5 3.5 0 1 0-3.5-3.5 M5 16 H23 a3.5 3.5 0 1 1-3.5 3.5 M5 21 H15"/>'),
+  ironwall:   _buffIcon('#6080a0', _BI.shield),
+  manashield: _buffIcon('#5078d8', _BI.shield),
+  guardian:   _buffIcon('#e0b040', _BI.shield),
+  rapid:      _buffIcon('#e09020', _BI.bolt),
+  sacrifice:  _buffIcon('#a030d0', _BI.fire),
+  vanish:     _buffIcon('#708090', '', '<path d="M16 7 a9 9 0 1 1-9 9 M12 12 l3 3 -3 3"/>'),
 };
 // 找不到類型時的預設 icon
 const DEFAULT_BUFF_ICON = _buffSVG('#888888', '✦', '');

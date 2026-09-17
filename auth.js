@@ -1484,6 +1484,9 @@
   // ========== 公開 API ==========
   window.AuthSystem = {
     init() {
+      // v4.4.20：init 冪等，任何路徑（DOMContentLoaded / 2s 守備 / onAuthReady）重複呼叫都不重渲染，
+      //  避免登入前官方首頁被重複 switchView('home') 而閃跳。
+      if (this.__inited) return;
       // 建立 auth-overlay 元素
       let overlay = $('auth-overlay');
       if (!overlay) {
@@ -1492,6 +1495,7 @@
         overlay.className = 'auth-overlay';
         document.body.appendChild(overlay);
       }
+      this.__inited = true;
       // v2.0.2 修正：無論是否有 token，一律先顯示官方首頁
       // 玩家必須主動點擊開始 / 登入 / 註冊按鈕才進入下一步
       // 禁止自動跳轉到伺服器選擇或遊戲畫面

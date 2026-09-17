@@ -660,6 +660,10 @@ class GameWorld {
   // 全域 tick：對每個 zone 獨立 tick，並檢查傳送點
   tick(dt) {
     for (const zone of this.zones.values()) {
+      // v4.4.20：無玩家的地圖直接凍結，不跑 AI / 尋路 / 怪物 / AOI，
+      //  避免 17 張地圖每 100ms 全數空轉，顯著降低伺服器 CPU 與手機端同步負擔。
+      //  玩家進入時 playerJoin/playerChangeMap 會 ensureAIEngine 並恢復。
+      if (!zone.players || zone.players.size === 0) continue;
       try {
         // 先檢查傳送點（在 tick 移動之前）
         const teleportResults = zone.checkTeleports();

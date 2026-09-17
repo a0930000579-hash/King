@@ -1,5 +1,5 @@
 /**
- *   King v4.4.19 · 正式營運後端伺服器
+ *   King v4.4.20 · 正式營運後端伺服器
  *
  * 功能：
  *   1. 靜態檔案服務（承接舊版）
@@ -928,9 +928,9 @@ async function handleApi(req, res, pathname, query) {
      return sendJson(res, 200, {
        status: 'online',
        server: 'King',
-      version: '4.4.19',
-      build: '4.4.19-wsauth',
-      buildId: '4.4.19-wsauth',
+      version: '4.4.20',
+      build: '4.4.20-wsauth',
+      buildId: '4.4.20-wsauth',
       instanceId: SERVER_INSTANCE_ID,
       startTime: SERVER_START_TIME,
       time: Date.now(),
@@ -3040,7 +3040,7 @@ async function initGM() {
   // 立即 listen，不 await 任何 DB 操作
   server.listen(PORT, '0.0.0.0', () => {
     console.log('========================================');
-    console.log('  King v4.4.19 · 正式營運伺服器');
+    console.log('  King v4.4.20 · 正式營運伺服器');
     console.log('========================================');
     console.log('  服務位址: http://0.0.0.0:' + PORT + ' (所有介面)');
     console.log('  工作目錄: ' + process.cwd());

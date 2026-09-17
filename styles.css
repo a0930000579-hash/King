@@ -12872,6 +12872,18 @@ button.ui-btn, .ui-btn, .menu-btn, .action-btn, .gold-btn, .primary-btn {
   /* v4.4.18：變身特效（冒煙/閃電/光環）保留顯示，手機僅降 blur 與動畫時長省效能，不刪特效 */
   .transform-aura .aura-smoke span { animation-duration: 3.2s !important; }
   .transform-aura .aura-lightning .bolt { animation-duration: 3.4s !important; }
+  /* v4.4.20：場上 AI／怪物／召喚／寵物數量多，是手機卡頓主因之一。
+     關閉非玩家單位的無限呼吸/待機動畫，並把每單位多層 drop-shadow 收斂為單層便宜陰影。
+     不動 mix-blend-mode（黑底去黑交給 sprite-anchor 依 alpha 自動判定，強制關閉會讓黑底圖變黑方塊）。 */
+  .world-unit:not(.hero) .unit-sprite-img,
+  .world-unit:not(.hero) .sprite-frame-idle,
+  .world-unit:not(.hero) .sprite-single-frame .unit-sprite-img { animation: none !important; }
+  .world-unit:not(.hero) .unit-sprite-img {
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.65)) !important;
+  }
+  /* NPC 徽章為內聯 SVG，本就無動畫，再確保不疊陰影 */
+  .world-unit.unit-npc .npc-sprite-img,
+  .world-unit.unit-npc .unit-sprite-img { filter: none !important; animation: none !important; }
 }
 /* 使用者系統開啟「減少動態效果」時，停用變身粒子動畫 */
 @media (prefers-reduced-motion: reduce) {

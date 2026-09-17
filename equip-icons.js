@@ -190,11 +190,43 @@
         <circle cx="0" cy="6" r="3" fill="${c.accent}" stroke="${c.outer}" stroke-width="0.6"/>
       </g>
     `,
+    // 弓（v4.4.20）
+    bow: (c) => `
+      <g transform="translate(32,32)">
+        <path d="M9,-23 C-9,-9 -9,9 9,23" fill="none" stroke="${c.outer}" stroke-width="3.6" stroke-linecap="round"/>
+        <path d="M9,-23 C-4,-9 -4,9 9,23" fill="none" stroke="${c.inner}" stroke-width="1.4" opacity="0.85"/>
+        <path d="M9,-23 L9,23" stroke="#e8e8e8" stroke-width="1" opacity="0.75"/>
+        <line x1="-15" y1="0" x2="13" y2="0" stroke="#caa46a" stroke-width="2.2" stroke-linecap="round"/>
+        <polygon points="13,0 6,-3.2 6,3.2" fill="${c.accent}" stroke="${c.outer}" stroke-width="0.5"/>
+        <path d="M-15,0 L-19,-3.4 M-15,0 L-19,3.4" stroke="${c.accent}" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      </g>
+    `,
+    // 法杖（v4.4.20）
+    staff: (c) => `
+      <g transform="translate(32,32)">
+        <rect x="-2" y="-6" width="4" height="33" rx="2" fill="#7c5a3a" stroke="#5a3d25" stroke-width="0.5"/>
+        <path d="M-2,-9 C-12,-13 -15,-21 -8,-24 C-6,-17 -4,-12 -2,-10 Z" fill="${c.outer}" opacity="0.92"/>
+        <path d="M2,-9 C12,-13 15,-21 8,-24 C6,-17 4,-12 2,-10 Z" fill="${c.outer}" opacity="0.92"/>
+        <circle cx="0" cy="-16" r="7.5" fill="${c.accent}" stroke="${c.outer}" stroke-width="1.3"/>
+        <circle cx="0" cy="-16" r="3.4" fill="${c.inner}" opacity="0.9"/>
+        <circle cx="-2.4" cy="-18.4" r="2" fill="#ffffff" opacity="0.85"/>
+      </g>
+    `,
+    // 匕首（v4.4.20）
+    dagger: (c) => `
+      <g transform="translate(32,32)">
+        <polygon points="0,-21 3.6,-7 3.6,5 -3.6,5 -3.6,-7" fill="${c.inner}" stroke="${c.outer}" stroke-width="0.7"/>
+        <line x1="0" y1="-18" x2="0" y2="4" stroke="${c.outer}" stroke-width="0.5" opacity="0.6"/>
+        <rect x="-8.5" y="5" width="17" height="3.6" rx="1" fill="${c.accent}" stroke="${c.outer}" stroke-width="0.5"/>
+        <rect x="-2.2" y="8.6" width="4.4" height="9.5" rx="1.2" fill="#7c5a3a" stroke="#5a3d25" stroke-width="0.5"/>
+        <circle cx="0" cy="20" r="2.8" fill="${c.accent}" stroke="${c.outer}" stroke-width="0.5"/>
+      </g>
+    `,
   };
 
-  // 部位別名映射
+  // 部位別名映射（v4.4.20：bow/staff/dagger 已有獨立造型，不再併到劍）
   const PART_ALIAS = {
-    weapon: 'sword', bow: 'sword', staff: 'sword',
+    weapon: 'sword',
     ring1: 'ring', ring2: 'ring', accessory: 'ring',
   };
 
