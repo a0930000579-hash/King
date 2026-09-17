@@ -11647,36 +11647,14 @@ const ANIM_V260_CONFIG = {
   bobPx: 2,             // 走路上下 bob 幅度
 };
 
-// 取得某 unit 當前應顯示的 sprite 圖片 URL（依狀態 + 方向）
+// 取得某 unit 當前應顯示的 sprite 圖片 URL
+// v4.4.19：全面改為「單張側視圖 + 左右鏡像」，不再依動作/方向切換 src。
+//   移動只分左右（.face-left 鏡像），攻擊/受擊完全由外層 wrap 的 CSS 特效
+//   （spriteAttack / spriteHit / slash-effect）表現，避免多幀主體位置不同造成錯版。
 function getUnitFrameSrc(unitAnim, spriteObj) {
   if (!spriteObj || !spriteObj.useImg) return null;
-  const state = unitAnim.state;
-  const dir = unitAnim.dir || 'down';
-  
-  if (state === 'dead') return spriteObj.hit || spriteObj.idle; // 死亡暫用 hit 或 idle，會走 tomb
-  if (state === 'hit') return spriteObj.hit || spriteObj.idle;
-  
-  if (state === 'attack') {
-    const idx = unitAnim.attackIdx || 0;
-    if (idx === 0) return spriteObj.attack || spriteObj.idle;
-    if (idx === 1) return spriteObj.attack2 || spriteObj.attack || spriteObj.idle;
-    return spriteObj.attack3 || spriteObj.attack2 || spriteObj.attack || spriteObj.idle;
-  }
-  
-  if (state === 'walk') {
-    // 踏步：phase=0 顯示 walk[方向]，phase=1 顯示 idle，來回切換
-    if (unitAnim.phase === 0) {
-      if (dir === 'down') return spriteObj.walk || spriteObj.idle;
-      if (dir === 'up') return spriteObj.walk3 || spriteObj.walk || spriteObj.idle;
-      // left / right 都用 walk_side (walk2)
-      return spriteObj.walk2 || spriteObj.walk || spriteObj.idle;
-    } else {
-      return spriteObj.idle;
-    }
-  }
-  
-  // idle
-  return spriteObj.idle;
+  // 固定使用側視圖（walk2=walk_side），沒有則退回 side/walk/idle
+  return spriteObj.walk2 || spriteObj.side || spriteObj.walk || spriteObj.idle;
 }
 
 // 判斷是否需要水平鏡射（只有朝左時）
@@ -11696,30 +11674,17 @@ function applyAnimToDom(unitEl, unitAnim, spriteObj) {
   if (src && mainImg.src !== src) {
     mainImg.src = src;
   }
-  
-  // 水平鏡射
-  const flip = shouldFlipLeft(unitAnim);
-  mainImg.style.transform = flip ? 'scaleX(-1)' : 'none';
-  
-  // 走路 bob：phase 切換時輕微上下移動
-  const wrap = unitEl.querySelector('.unit-sprite-wrap');
-  if (wrap) {
-    if (unitAnim.state === 'walk' && unitAnim.phase === 0) {
-      mainImg.style.marginTop = '0px';
-    } else if (unitAnim.state === 'walk') {
-      mainImg.style.marginTop = ANIM_V260_CONFIG.bobPx + 'px';
-    } else {
-      mainImg.style.marginTop = '0px';
-    }
-  }
-  
-  // 其他 frame 全部隱藏（避免舊 frame 殘留）
+
+  // v4.4.19：不在此設 img.style.transform（會覆蓋 sprite-anchor 的歸位 transform 而跑偏）。
+  //   左右鏡像一律由 .world-unit.face-left + .anchor-normalized 的 CSS 疊加；
+  //   走動踏步 / 攻擊 / 受擊動畫一律作用在外層 .unit-sprite-wrap（見 styles.css）。
+  // 其他 frame 全部隱藏（單圖模式下這些 img 根本不存在，querySelector 為空也安全）
   const allFrames = unitEl.querySelectorAll('.unit-sprite-img:not(.sprite-frame-idle)');
   for (let i = 0; i < allFrames.length; i++) {
     allFrames[i].style.display = 'none';
   }
   mainImg.style.display = 'block';
-  
+
   // tomb 顯示
   const tomb = unitEl.querySelector('.unit-sprite-tomb');
   if (tomb) tomb.style.display = unitAnim.state === 'dead' ? 'flex' : 'none';
@@ -11859,34 +11824,28 @@ function buildSpriteHTML(spriteObj, kind, lean) {
   ` : '';
   
   if (lean && isImg) {
+    // v4.4.19：lean 單位（AI 英雄/怪物/召喚/寵物）統一為「單張側視圖」，廢除 down/up/left/right 方向層
+    //   （方向層素材 cat/frames/* 實際不存在、只會 404，且沒有 JS 切換）。
+    //   左右移動靠 .face-left 鏡像，動作靠 wrap CSS 特效。
+    const leanSrc = s.walk2 || s.side || s.walk || idleSrc;
     return `
       <div class="unit-info">
         <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%"></div></div>
         <div class="unit-name"></div>
         <div class="unit-level-tag"></div>
       </div>
-      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''}${dirClass}" style="width:${size.w}px;height:${size.h}px;background:transparent;">
-        ${hasDir ? '' : `<img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>`}
-        ${dirLayerHTML}
+      <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} sprite-single-frame" style="width:${size.w}px;height:${size.h}px;background:transparent;">
+        <img class="unit-sprite-img sprite-frame-idle" src="${leanSrc}" style="filter:${baseFilter}" alt="" loading="lazy" onerror="handleImgError(this)"/>
         <div class="unit-sprite-tomb" style="display:none"></div>
         <div class="slash-effect"></div>
       </div>
       <div class="unit-shadow"></div>
     `;
   }
-  // 完整模式：8帧结构（玩家/英雄/变身）
-  // v2.4.0-patch：恢復各 frame 真實圖片來源，動畫由 JS 幀切換 + 方向層雙重驅動
-  const idleSrcComputed = isImg ? s.idle : '';
-  const attackSrc = isImg ? (s.attack || s.idle) : '';
-  const attack2Src = isImg ? (s.attack2 || s.attack || s.idle) : '';
-  const walkSrc = isImg ? (s.walk || s.idle) : '';
-  const walk2Src = isImg ? (s.walk2 || s.walk || s.idle) : '';
-  const walk3Src = isImg ? (s.walk3 || s.walk || s.idle) : '';
-  const walk4Src = isImg ? (s.walk4 || s.walk || s.idle) : '';
-  const hitSrc = isImg ? (s.hit || s.attack || s.idle) : '';
-  // onerror 統一使用全域 handleImgError：
-  //   - 本地資源失敗 → 自動切換到 CDN
-  //   - CDN 也失敗 → 隱藏圖片並為父層加上背景占位，避免顯示破裂圖示
+  // v4.4.19：完整模式也改為「單張側視主圖」，不再生成 walk1-4/attack1-3/hit 多幀 img。
+  //   移動靠 .face-left 左右鏡像 + wrap 的 spriteWalk 踏步；攻擊/受擊靠 wrap CSS 特效與 slash-effect。
+  //   單圖使 sprite-anchor 只歸位一次，徹底消除多幀各自位移造成的錯版，並大幅降低 DOM 與記憶體。
+  const mainSrc = isImg ? (s.walk2 || s.side || s.walk || s.idle) : '';
   const onErrorHide = "handleImgError(this)";
   return `
     <div class="unit-info">
@@ -11895,16 +11854,9 @@ function buildSpriteHTML(spriteObj, kind, lean) {
       <div class="unit-name"></div>
       <div class="unit-level-tag"></div>
     </div>
-    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} ${multiFrame ? 'sprite-multi-frame' : ''} ${s.singleFrame ? 'sprite-single-frame' : ''}" style="width:${size.w}px;height:${size.h}px;background:transparent;">
+    <div class="unit-sprite-wrap ${coverMode ? 'sprite-cover-mode' : ''} sprite-single-frame" style="width:${size.w}px;height:${size.h}px;background:transparent;">
       ${isImg ? `
-        <img class="unit-sprite-img sprite-frame-idle" src="${idleSrc}" style="filter:${baseFilter}" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${walkSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${walk2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${walk3Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${walk4Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${attackSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${attack2Src}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
-        <img class="unit-sprite-img sprite-frame-hit" src="${hitSrc}" style="filter:${baseFilter};display:none" alt="" onerror="${onErrorHide}"/>
+        <img class="unit-sprite-img sprite-frame-idle" src="${mainSrc}" style="filter:${baseFilter}" alt="" onerror="${onErrorHide}"/>
         <div class="unit-sprite-tomb">墓</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>
@@ -12010,6 +11962,16 @@ function applyUnitAnimFrame(unitEl, uid, state) {
 
   // 狀態與索引都沒變 → 跳過 DOM 操作
   if (frames.lastState === showFrame && frames.lastIdx === showIdx) return;
+
+  // v4.4.19 單圖模式：僅 idle 一張主圖，走動/攻擊/受擊全靠外層 wrap 的 CSS 動畫與 slash 特效；
+  // 只有死亡切到 tomb。避免把 idle 隱藏後找不到 walk/attack/hit 而空白。
+  if ((!frames.walk || frames.walk.length === 0) && (!frames.attack || frames.attack.length === 0) && !frames.hit) {
+    const deadNow = state === 'dead';
+    if (frames.idle) frames.idle.style.display = deadNow ? 'none' : 'block';
+    if (frames.tomb) frames.tomb.style.display = deadNow ? 'flex' : 'none';
+    frames.lastState = state; frames.lastIdx = 0;
+    return;
+  }
 
   // 全部隱藏再顯示目標（v2.4.0：只用 display 切換，絕不設 opacity/visibility 0 導致閃爍）
   frames.idle.style.display = 'none';
@@ -12884,12 +12846,10 @@ function updatePlayerSprite() {
       spriteWrap.classList.toggle('sprite-cover-mode', coverMode);
       spriteWrap.classList.toggle('sprite-single-frame', !!s.singleFrame);
     }
-    // 检查是否已有8帧结构（通过walk2判断）
-    const has8Frames = unit.querySelector('.sprite-frame-walk-2');
-    if (spriteWrap && !has8Frames) {
-      // 重新建立精靈容器為8帧圖片模式（保留光環 DOM，避免變身位移）
-      const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8))';
-      const auraHTML = `
+    // v4.4.19：變身/職業切換一律使用「單張側視主圖」，不再生成 8 幀（消除錯版、降低 DOM）
+    const baseFilter = 'drop-shadow(0 2px 3px rgba(0,0,0,0.8))';
+    const mainSrc = s.walk2 || s.side || s.walk || s.idle;
+    const auraHTML = `
         <div class="transform-aura" style="visibility:hidden;opacity:0;pointer-events:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;overflow:visible">
           <div class="aura-glow-outer"></div>
           <div class="aura-smoke"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
@@ -12901,33 +12861,20 @@ function updatePlayerSprite() {
             <div class="bolt bolt-4" style="clip-path: polygon(40% 0%, 70% 18%, 38% 33%, 75% 50%, 45% 65%, 80% 100%, 25% 100%, 35% 73%, 15% 55%, 50% 37%, 25% 18%);background:linear-gradient(to bottom,#fff8d0,#ffc040,#a060ff);box-shadow:0 0 8px #ffd060,0 0 16px #a060ff;width:100%;height:100%"></div>
                       </div>
         </div>`;
+    const needRebuild = !spriteWrap.querySelector('.sprite-frame-idle') || !!spriteWrap.querySelector('.sprite-frame-walk-2');
+    if (needRebuild) {
+      spriteWrap.classList.add('sprite-single-frame');
+      spriteWrap.classList.remove('sprite-multi-frame');
       spriteWrap.innerHTML = auraHTML + `
-        <img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${s.walk2 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${s.walk3 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${s.walk4 || s.walk || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-1" src="${s.attack || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-2" src="${s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-attack sprite-frame-attack-3" src="${s.attack3 || s.attack2 || s.attack || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
-        <img class="unit-sprite-img sprite-frame-hit" src="${s.hit || s.idle}" style="filter:${baseFilter};display:none" alt="" onerror="handleImgError(this)"/>
+        <img class="unit-sprite-img sprite-frame-idle" src="${mainSrc}" style="filter:${baseFilter}" alt="" onerror="handleImgError(this)"/>
         <div class="unit-sprite-tomb">墓</div>
         <div class="slash-effect"></div>
         <div class="dust-particles"></div>
       `;
-    } else if (has8Frames) {
-      // 已有8帧结构，更新各帧src
-      const imgIdle = unit.querySelector('.sprite-frame-idle');
-      const walkImgs = unit.querySelectorAll('.sprite-frame-walk');
-      const attackImgs = unit.querySelectorAll('.sprite-frame-attack');
-      const imgHit = unit.querySelector('.sprite-frame-hit');
-      if (imgIdle) imgIdle.src = s.idle;
-      // v2.4.0-patch：恢復各 frame 真實 src（依序對應 walk1-4 / attack1-2-3 / hit）
-      const walkSources = [s.walk, s.walk2, s.walk3, s.walk4];
-      walkImgs.forEach((img, i) => { img.src = walkSources[i] || s.walk || s.idle; });
-      const attackSources = [s.attack, s.attack2, s.attack3];
-      attackImgs.forEach((img, i) => { img.src = attackSources[i] || s.attack || s.idle; });
-      if (imgHit) imgHit.src = s.hit || s.attack || s.idle;
+    } else {
+      // 已是單圖結構：只更新主圖 src（相同 src 瀏覽器不會重載）
+      const imgIdle = spriteWrap.querySelector('.sprite-frame-idle');
+      if (imgIdle) imgIdle.src = mainSrc;
     }
     const emojiEl = unit.querySelector('.unit-sprite-emoji');
     if (emojiEl) emojiEl.remove();

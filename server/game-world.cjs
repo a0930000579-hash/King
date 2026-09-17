@@ -246,7 +246,7 @@ class Zone {
   }
 
   // ===== 玩家移動請求 =====
-  // v4.4.18 server 權威單位軟碰撞：玩家不得與其他玩家/AI 重疊站位。
+  // v4.4.19 server 權威單位軟碰撞：玩家不得與其他玩家/AI 重疊站位。
   // 只移動玩家本身，其他玩家與 AI 視為障礙（AI 位置由 ai-engine 每 tick 同步，推 AI 會被覆蓋）。
   _separatePlayer(player) {
     const MIN_D = 42; // 兩單位中心最小間距（世界座標，約兩個腳底碰撞圓直徑）
@@ -281,7 +281,7 @@ class Zone {
     player.moveTarget = null;
     player.state = 'walk';
     player.lastMoveTime = Date.now();
-    this._separatePlayer(player); // v4.4.18：落地即分離，避免點擊穿人
+    this._separatePlayer(player); // v4.4.19：落地即分離，避免點擊穿人
     return player;
   }
 
@@ -344,7 +344,7 @@ class Zone {
       }
     }
 
-    // v4.4.18：移動插值後統一做單位分離，行走過程也不重疊（玩家間對稱互推、玩家避開 AI）
+    // v4.4.19：移動插值後統一做單位分離，行走過程也不重疊（玩家間對稱互推、玩家避開 AI）
     for (const player of this.players.values()) {
       this._separatePlayer(player);
     }
