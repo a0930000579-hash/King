@@ -726,8 +726,39 @@ function createWsServer(httpServer) {
             });
           }
           
+          // v4.5.0：PvE 玩家打怪（kind:'monster'）— 伺服端唯一權威
+          //  incoming: { type:'attack', targetId, ts }
+          //  走 gameWorld.playerAttackMonster（使用 zone 自己的 aiEngine 實例，怪物是它生成的）
+          if (targetId.startsWith('m:') && attacker) {
+            const target = gameWorld.getEntityById(client.serverId, client.mapId, targetId);
+            if (!target || target.kind !== 'monster') {
+              sendJson(client.socket, { type: 'attack_result', targetId, error: 'invalid_target', time: Date.now() });
+            } else if (target.state === 'dead' || target.hp <= 0) {
+              sendJson(client.socket, { type: 'attack_result', targetId, damage: 0, targetHp: 0, targetMaxHp: target.maxHp, killed: false, exp: 0, gold: 0, drops: [], error: 'target_dead', time: Date.now() });
+            } else {
+              const r = gameWorld.playerAttackMonster(client.serverId, client.mapId, attacker, targetId);
+              if (!r) {
+                sendJson(client.socket, { type: 'attack_result', targetId, error: 'invalid_target', time: Date.now() });
+              } else if (r.error) {
+                sendJson(client.socket, { type: 'attack_result', targetId, error: r.error, time: Date.now() });
+              } else {
+                sendJson(client.socket, {
+                  type: 'attack_result',
+                  targetId,
+                  damage: r.damage,
+                  targetHp: r.hp,
+                  targetMaxHp: r.maxHp,
+                  killed: r.killed,
+                  exp: r.exp,
+                  gold: r.gold,
+                  drops: r.drops,
+                  time: Date.now(),
+                });
+              }
+            }
+          }
           // PvE：玩家打AI
-          if (targetId.startsWith('ai:') && dmg > 0) {
+          else if (targetId.startsWith('ai:') && dmg > 0) {
             const result = damageAI(client.serverId, client.mapId, targetId, dmg, client.playerId || client.account);
             if (result) {
               broadcastToMap(client.serverId, client.mapId, {
@@ -1121,9 +1152,20 @@ function createWsServer(httpServer) {
     if (!client || clients.get(client.wsId) !== client) return;
     if (client._authWatchdog) { clearTimeout(client._authWatchdog); client._authWatchdog = null; }
     clients.delete(client.wsId);
-    if (client.mapId && client.serverId) {
-      gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);
-      getMapState(client.serverId, client.mapId).delete(client.wsId); // v4.4.12
+    // v4.5.0：斷線路徑全面防禦 — 任意一步失敗都不得讓 process 退出
+    try {
+      if (client.mapId && client.serverId) {
+        gameWorld.playerLeave(client.serverId, client.mapId, client.wsId);
+      }
+    } catch (e) {
+      console.error('[WS] playerLeave 異常（已忽略）:', e.message);
+    }
+    try {
+      if (client.mapId && client.serverId) {
+        getMapState(client.serverId, client.mapId).delete(client.wsId); // v4.4.12
+      }
+    } catch (e) {
+      console.error('[WS] getMapState.delete 異常（已忽略）:', e.message);
     }
     console.log(`[WS] 客戶端斷線 wsId=${client.wsId} account=${client.account || '未認證'}`);
   }

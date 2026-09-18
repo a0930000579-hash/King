@@ -76,9 +76,14 @@
   }
 
   function normalize(img) {
-    if (img.__anchorDone) return;
+    if (!img.naturalWidth) return;
     var W = img.naturalWidth, H = img.naturalHeight;
     if (!W || !H) return;
+    // v4.4.21：src 變更（變身/職業切換只換 img.src、重用同一 img 元素）時必須重新量測，
+    //   否則新精靈沿用舊 --ax → 主體偏離 wrap 中心，而兄弟層光環固定在幾何中心，
+    //   看起來「光環在人物左側」。記住已量測的 srcKey，src 變了就重測。
+    var srcKey = img.currentSrc || img.src || (W + 'x' + H);
+    if (img.__anchorDone && img.__anchorSrc === srcKey) return;
     var wrap = (img.closest && img.closest('.unit-sprite-wrap')) || img.parentElement;
     var cw = wrap ? wrap.clientWidth : 0, ch = wrap ? wrap.clientHeight : 0;
     if (!cw || !ch) { // 尚未佈局，下一幀重試一次
@@ -100,9 +105,25 @@
     img.style.objectPosition = '0% 0%';
     img.style.transformOrigin = '0 0';
     // 錨點用 CSS 變量傳遞，最終 transform 由 CSS 組裝（面向左翻轉由 CSS 疊加，動態轉向也能響應）
-    img.style.setProperty('--ax', tx.toFixed(2) + 'px');
-    img.style.setProperty('--ay', ty.toFixed(2) + 'px');
-    img.style.setProperty('--as', s.toFixed(4));
+    var axPx = tx.toFixed(2) + 'px', ayPx = ty.toFixed(2) + 'px', asV = s.toFixed(4);
+    img.style.setProperty('--ax', axPx);
+    img.style.setProperty('--ay', ayPx);
+    img.style.setProperty('--as', asV);
+    // v4.4.21：同組變數廣播到 wrap 與 .world-unit 祖先。
+    //   光環 .transform-aura 是 wrap 的兄弟、與 wrap 同為 .world-unit 子節點，
+    //   靠 CSS 變數向下繼承即可讀到同一組 --ax/--ay/--as，與人物共享同一腳底錨點座標系，
+    //   移動/攻擊/受擊/變身全程不跑版。
+    if (wrap) {
+      wrap.style.setProperty('--ax', axPx);
+      wrap.style.setProperty('--ay', ayPx);
+      wrap.style.setProperty('--as', asV);
+      var unit = wrap.closest ? wrap.closest('.world-unit') : null;
+      if (unit) {
+        unit.style.setProperty('--ax', axPx);
+        unit.style.setProperty('--ay', ayPx);
+        unit.style.setProperty('--as', asV);
+      }
+    }
     img.classList.add('anchor-normalized');
     // 透明 PNG 關閉有害的 screen 混合（避免黑盔甲被弄透）
     var alpha = 0;
@@ -114,6 +135,7 @@
       if (alpha / (48 * 48) > 0.15 && wrap) wrap.classList.add('sprite-has-alpha');
     } catch (e) {}
     img.__anchorDone = true;
+    img.__anchorSrc = srcKey;
   }
 
   // load 不冒泡，用捕獲階段全局接管精靈圖（含動態生成幀）。

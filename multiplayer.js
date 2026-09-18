@@ -485,6 +485,17 @@
       }).catch(() => {});
     },
 
+    // v4.5.0：Server Authoritative 攻擊 — 送 {type:'attack', targetId, ts}
+    //  targetId 為 AOI 怪物實體 id（形如 'm:<mapId>:<idx>'）；實際傷害/血/死亡由 attack_result 回覆
+    sendAttack(targetId) {
+      if (status !== STATUS.ONLINE || !currentMapId) return false;
+      if (useWebSocket && ws && wsConnected) {
+        wsSend({ type: 'attack', targetId: String(targetId), ts: Date.now() });
+        return true;
+      }
+      return false;
+    },
+
     // 回報攻擊（對伺服器 AI 造成傷害）
     reportAttack(targetId, skillId, damage) {
       if (status !== STATUS.ONLINE || !currentMapId) return;
@@ -910,6 +921,12 @@
           window.handleAOILeave(msg.ids);
         }
         break;
+      // v4.5.0：Server Authoritative 攻擊回覆（怪血/死亡/獎勵以伺服端為準）
+      case 'attack_result':
+        if (typeof window.handleAttackResult === 'function') {
+          try { window.handleAttackResult(msg); } catch (e) { console.warn('[WS] attack_result 處理失敗:', e); }
+        }
+        break;
       // v3.1.0：Zone Server 地圖切換事件
       case 'map_change':
         console.log('[WS] 🗺️ map_change - 從', msg.fromMap, '到', msg.targetMap, '實體數=', msg.entities?.length || 0);
@@ -1317,28 +1334,19 @@
     try { if (typeof window._aoiMoveTarget === 'function') window._aoiMoveTarget(data.id, data.x, data.y, data.dir); } catch (e) {}
   }
 
+  // v4.5.0：統一渲染——遠端玩家不再自己建 DOM，全部委派給 game.js 的單一 AOI entity store
   function addOrUpdateRemotePlayer(ent) {
-    if (ent.id === mySocketId) return;
-    let p = remotePlayers.get(ent.id);
-    const wPos = serverToWorld(ent.x || 0, ent.y || 0);
-    if (!p) {
-      p = createRemotePlayer(ent, wPos);
-      remotePlayers.set(ent.id, p);
-    } else {
-      if (ent.name != null) p.name = ent.name;
-      if (ent.class != null) p.classId = ent.class;
-      if (ent.level != null) p.level = ent.level;
-      if (ent.transform != null) p.transformId = ent.transform;
-      if (ent.country != null) p.nation = ent.country;
-      if (ent.x != null) { p.targetX = wPos.x; p.x = wPos.x; }
-      if (ent.y != null) { p.targetY = wPos.y; p.y = wPos.y; }
-      if (ent.dir != null) p.dir = ent.dir;
-      p.moving = !!ent.moving;
-      p.isBot = !!ent.isBot;
-      p.lastMoveAt = Date.now();
-    }
-    if (!p.el) buildRemotePlayerDOM(p);
-    else refreshRemotePlayerVisual(p);
+    if (!ent || !ent.id || ent.id === mySocketId) return null;
+    const p = { id: ent.id, name: ent.name || 'Player', classId: ent.class || ent.classId || 'warrior',
+      level: ent.level || 1, transformId: ent.transform || ent.transformId || null,
+      nation: ent.country || ent.nation || null, x: ent.x || 0, y: ent.y || 0, dir: ent.dir,
+      moving: !!ent.moving, isBot: !!ent.isBot, el: null, lastMoveAt: Date.now() };
+    remotePlayers.set(ent.id, p);
+    // 餵給單一 entity store（idempotent：enter/update 復用同一 el）
+    try { if (typeof window.handleAOIEnter === 'function') window.handleAOIEnter([{
+      id: ent.id, kind: 'player', name: p.name, classId: p.classId, level: p.level,
+      x: ent.x || 0, y: ent.y || 0, dir: ent.dir, nation: p.nation, state: (ent.moving ? 'walk' : 'idle'),
+    }]); } catch (e) {}
     return p;
   }
 
@@ -1365,18 +1373,15 @@
   }
 
   function removeRemotePlayer(id) {
-    const p = remotePlayers.get(id);
-    if (!p) return;
-    if (p.el && p.el.parentNode) p.el.remove();
     remotePlayers.delete(id);
+    // v4.5.0：從單一 entity store 移除
+    try { if (typeof window.handleAOILeave === 'function') window.handleAOILeave([id]); } catch (e) {}
   }
 
   function clearAllRemotePlayers() {
-    for (const id of remotePlayers.keys()) {
-      const p = remotePlayers.get(id);
-      if (p && p.el && p.el.parentNode) p.el.remove();
-    }
     remotePlayers.clear();
+    // v4.5.0：清空單一 entity store（換圖/重連時）
+    try { if (typeof window.clearAOIEntities === 'function') window.clearAOIEntities(); } catch (e) {}
   }
 
   // ========== 渲染（使用現有 window.SPRITE 圖資、8幀動畫） ==========
@@ -1391,236 +1396,36 @@
     return window.SPRITE.warrior || null;
   }
 
-  // v4.4.0：伺服器端AI渲染
+  // v4.5.0：伺服器端 AI 統一委派給 game.js 單一 AOI entity store（kind:'ai'），不再自建 DOM
   function addOrUpdateServerAI(aiData) {
+    if (!aiData || !aiData.id) return;
     try {
-      const aiId = aiData.id;
-      let ai = serverAIs.get(aiId);
-      if (!ai) {
-        ai = {
-          id: aiId,
-          name: aiData.name || 'Monster',
-          level: aiData.level || 1,
-          x: aiData.x || 0,
-          y: aiData.y || 0,
-          hp: aiData.hp || 100,
-          maxHp: aiData.maxHp || 100,
-          nation: aiData.nation || '',
-          state: aiData.state || 'idle',
-          classId: aiData.classId || 'enemy',
-          el: null,
-          _hpFill: null,
-        };
-        buildServerAIDOM(ai);
-        serverAIs.set(aiId, ai);
-      }
-      ai.x = aiData.x != null ? aiData.x : ai.x;
-      ai.y = aiData.y != null ? aiData.y : ai.y;
-      ai.hp = aiData.hp != null ? aiData.hp : ai.hp;
-      ai.maxHp = aiData.maxHp != null ? aiData.maxHp : ai.maxHp;
-      ai.name = aiData.name || ai.name;
-      ai.level = aiData.level || ai.level;
-      ai.state = aiData.state || ai.state;
-      if (ai._hpFill && ai.maxHp) {
-        ai._hpFill.style.width = Math.max(0, (ai.hp / ai.maxHp) * 100) + '%';
+      serverAIs.set(aiData.id, {
+        id: aiData.id, name: aiData.name || 'Monster', level: aiData.level || 1,
+        x: aiData.x || 0, y: aiData.y || 0, hp: aiData.hp || 100, maxHp: aiData.maxHp || 100,
+        nation: aiData.nation || '', state: aiData.state || 'idle', classId: aiData.classId || 'enemy',
+        el: null, _hpFill: null,
+      });
+      if (typeof window.handleAOIEnter === 'function') {
+        window.handleAOIEnter([{
+          id: aiData.id, kind: 'ai', name: aiData.name || 'Player', classId: aiData.classId || 'warrior',
+          level: aiData.level || 1, x: aiData.x || 0, y: aiData.y || 0, dir: 1,
+          nation: aiData.nation || null, hp: aiData.hp || 100, maxHp: aiData.maxHp || 100, state: aiData.state || 'idle',
+        }]);
       }
     } catch(e) { console.error('[ServerAI] addOrUpdate error:', e); }
   }
-  
-  function buildServerAIDOM(ai) {
-    if (typeof document === 'undefined') return;
-    const worldLayer = document.getElementById('world-layer');
-    if (!worldLayer) return;
-    try {
-      const elDiv = document.createElement('div');
-      elDiv.className = 'world-unit ai-player mp-server-ai idle';
-      elDiv.dataset.id = 'mp_ai_' + ai.id.replace(/:/g, '_');
-      elDiv.dataset.remoteId = ai.id;
-      
-      const s = (typeof window.SPRITE !== 'undefined') ? (window.SPRITE[ai.classId] || window.SPRITE.enemy || window.SPRITE.warrior || null) : null;
-      const isImg = !!(s && s.useImg);
-      const glow = s?.glow || '#ff6060';
-      const filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
-      const w = 50, h = 56;
-      
-      elDiv.innerHTML = `
-        <div class="unit-info">
-          <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:#ff5050"></div></div>
-          <div class="unit-name" style="color:#ff8080;font-size:9px">${escapeHtml(ai.name)} Lv.${ai.level}</div>
-        </div>
-        <div class="unit-sprite-wrap" style="width:${w}px;height:${h}px;">
-          ${isImg ? `<img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${filter}" alt="" loading="lazy"/>` : `<div class="unit-sprite-emoji" style="font-size:36px;">👹</div>`}
-        </div>
-        <div class="unit-shadow"></div>
-      `;
-      
-      worldLayer.appendChild(elDiv);
-      ai.el = elDiv;
-      ai._hpFill = elDiv.querySelector('.unit-hp-fill');
-      
-      if (typeof window.positionUnit === 'function') {
-        try { window.positionUnit(elDiv, ai.x, ai.y, 'enemy'); } catch(e) {}
-      } else {
-        elDiv.style.left = (ai.x - w/2) + 'px';
-        elDiv.style.bottom = ai.y + 'px';
-      }
-    } catch(e) { console.error('[ServerAI] buildDOM error:', e); }
-  }
 
-  function buildRemotePlayerDOM(p) {
-    if (typeof document === 'undefined') return;
-    const worldLayer = document.getElementById('world-layer');
-    if (!worldLayer) return;
+  // v4.5.0：DOM 建立已委派給 game.js AOI entity store，此處不再自行 append world-layer
+  function buildServerAIDOM(ai) { /* no-op: 統一由 window.handleAOIEnter 渲染 */ }
 
-    const elDiv = document.createElement('div');
-    elDiv.className = 'world-unit remote-player mp-player idle';
-    elDiv.dataset.id = 'mp_' + p.id;
-    elDiv.dataset.remoteId = p.id;
-    elDiv.dataset.mpId = p.id;
+  function buildRemotePlayerDOM(p) { /* no-op: 統一由 window.handleAOIEnter 渲染 */ }
 
-    const s = getSpriteForRemote(p);
-    const isImg = !!(s && s.useImg);
-    const glow = s?.glow || '#ffe090';
-    const filter = `drop-shadow(0 0 4px ${glow}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`;
-
-    // 國家敵我判定
-    const myNation = (typeof window.GS !== 'undefined') ? (window.GS.nation || null) : null;
-    const isEnemy = p.nation && myNation && p.nation !== myNation;
-    if (isEnemy) elDiv.classList.add('enemy-ai');
-
-    const nameColor = isEnemy ? '#ff8080' : '#80d0ff';
-    const hpColor = isEnemy ? '#ff5050' : '#50c8ff';
-
-    // 國旗
-    let flagImg = '';
-    if (typeof window.NATIONS !== 'undefined' && typeof window.safeFlagImg === 'function' && p.nation) {
-      const n = window.NATIONS.find(nn => nn.id === p.nation);
-      if (n) flagImg = window.safeFlagImg(p.nation, 12);
-    }
-
-    const w = 64, h = 80;
-    const coverMode = s?.coverMode ? 'sprite-cover-mode' : '';
-    const multiFrame = s?.multiFrame ? 'sprite-multi-frame' : '';
-
-    const onErrorStr = (typeof window.handleImgError === 'function')
-      ? 'window.handleImgError(this)'
-      : '';
-
-    let walkImgs = '';
-    if (isImg && s.walk) {
-      walkImgs += `<img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-1" src="${s.walk}" style="filter:${filter};display:none" alt="" onerror="${onErrorStr}"/>`;
-      if (s.walk2) walkImgs += `<img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-2" src="${s.walk2}" style="filter:${filter};display:none" alt="" onerror="${onErrorStr}"/>`;
-      if (s.walk3) walkImgs += `<img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-3" src="${s.walk3}" style="filter:${filter};display:none" alt="" onerror="${onErrorStr}"/>`;
-      if (s.walk4) walkImgs += `<img class="unit-sprite-img sprite-frame-walk sprite-frame-walk-4" src="${s.walk4}" style="filter:${filter};display:none" alt="" onerror="${onErrorStr}"/>`;
-    }
-
-    elDiv.innerHTML = `
-      <div class="unit-info">
-        <div class="unit-hp-bar"><div class="unit-hp-fill" style="width:100%;background:${hpColor}"></div></div>
-        <div class="unit-name" style="color:${nameColor};font-size:10px;display:flex;align-items:center;justify-content:center;gap:2px">${flagImg}<span>${escapeHtml(p.name)}</span></div>
-        <div class="unit-level-tag" style="display:none">Lv.${p.level}</div>
-      </div>
-      <div class="unit-sprite-wrap ${coverMode} ${multiFrame}" style="width:${w}px;height:${h}px;background:radial-gradient(ellipse at 50% 70%, rgba(100,70,40,0.25), transparent 70%);">
-        ${isImg ? `
-          <img class="unit-sprite-img sprite-frame-idle" src="${s.idle}" style="filter:${filter}" alt="" loading="lazy" onerror="${onErrorStr}"/>
-          ${walkImgs}
-          <div class="unit-sprite-tomb" style="display:none"></div>
-          <div class="dust-particles"></div>
-        ` : `
-          <div class="unit-sprite-emoji" style="color:${s?.color || '#c0a060'};font-size:52px;filter:${filter}">&#9876;</div>
-        `}
-      </div>
-      <div class="unit-shadow"></div>
-    `;
-
-    worldLayer.appendChild(elDiv);
-    p.el = elDiv;
-
-    if (typeof window.initUnitAnimState === 'function') {
-      try { window.initUnitAnimState('mp_' + p.id); } catch (e) { /* ignore */ }
-    }
-    if (typeof window.positionUnit === 'function') {
-      try { window.positionUnit(elDiv, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
-    } else {
-      elDiv.style.left = (p.x - w / 2) + 'px';
-      elDiv.style.bottom = p.y + 'px';
-    }
-    if (p.dir === -1) elDiv.classList.add('face-left');
-  }
-
-  function refreshRemotePlayerVisual(p) {
-    if (!p.el) return;
-    if (p.el.parentNode) {
-      p.el.remove();
-      p.el = null;
-    }
-    buildRemotePlayerDOM(p);
-  }
+  function refreshRemotePlayerVisual(p) { /* no-op: 統一由 window.handleAOIEnter 渲染 */ }
 
   // ========== 每幀內插 ==========
-  function updateRemotePlayers(dt) {
-    if (remotePlayers.size === 0 && serverAIs.size === 0) return;
-    const lerpFactor = 1 - Math.pow(0.001, dt);
-
-    for (const p of remotePlayers.values()) {
-      if (!p.el) continue;
-
-      const dx = p.targetX - p.x;
-      const dy = p.targetY - p.y;
-      const dist = Math.hypot(dx, dy);
-
-      if (dist > 0.5) {
-        p.x += dx * lerpFactor;
-        p.y += dy * lerpFactor;
-        if (Math.abs(dx) > 1) {
-          const newDir = dx > 0 ? 1 : -1;
-          if (newDir !== p.dir) {
-            p.dir = newDir;
-            p.el.classList.toggle('face-left', p.dir === -1);
-          }
-        }
-        if (dist > 4 && !p._wasWalking) {
-          p.el.classList.remove('idle');
-          p.el.classList.add('walking');
-          p._wasWalking = true;
-        }
-      } else {
-        if (p._wasWalking) {
-          p.el.classList.remove('walking');
-          p.el.classList.add('idle');
-          p._wasWalking = false;
-        }
-      }
-
-      if (typeof window.positionUnit === 'function') {
-        try { window.positionUnit(p.el, p.x, p.y, 'hero'); } catch (e) { /* ignore */ }
-      } else {
-        p.el.style.left = (p.x - 32) + 'px';
-        p.el.style.bottom = p.y + 'px';
-      }
-
-      if (typeof window.applyUnitAnimFrame === 'function') {
-        try {
-          const state = p._wasWalking ? 'walking' : 'idle';
-          window.applyUnitAnimFrame(p.el, 'mp_' + p.id, state);
-        } catch (e) { /* ignore */ }
-      }
-    }
-    
-    // v4.4.0：更新伺服器AI位置
-    for (const ai of serverAIs.values()) {
-      if (!ai.el) continue;
-      if (typeof window.positionUnit === 'function') {
-        try { window.positionUnit(ai.el, ai.x, ai.y, 'enemy'); } catch(e) {}
-      } else {
-        ai.el.style.left = (ai.x - 25) + 'px';
-        ai.el.style.bottom = ai.y + 'px';
-      }
-      if (ai._hpFill && ai.maxHp) {
-        ai._hpFill.style.width = Math.max(0, (ai.hp / ai.maxHp) * 100) + '%';
-      }
-    }
-  }
+  // v4.5.0：位置插值已統一由 game.js AOI entity store（tickAOI）處理；此處保留空殼避免呼叫點報錯
+  function updateRemotePlayers(dt) { /* no-op */ }
 
    // v3.1.2：遊戲畫面左上角 WS 狀態標籤（肉眼可見，不只在 console）
    let _wsBadgeEl = null;

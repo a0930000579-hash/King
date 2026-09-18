@@ -147,6 +147,8 @@ function createMonster(monsterType, level, mapId, idx) {
   const baseHp = 20 + level * 12;
   const baseAtk = 3 + level * 1.8;
   const baseDef = 1 + level * 0.8;
+  const sx = 200 + Math.floor(rng() * 1600);
+  const sy = 200 + Math.floor(rng() * 1000);
   return {
     id: `mon_${mapId}_${monsterType}_${idx}`,
     uid: `mon_${mapId}_${monsterType}_${idx}`,
@@ -159,8 +161,16 @@ function createMonster(monsterType, level, mapId, idx) {
     atk: baseAtk,
     def: baseDef,
     speed: 30 + level * 0.5,
-    x: 200 + Math.floor(rng() * 1600),
-    y: 200 + Math.floor(rng() * 1000),
+    x: sx,
+    y: sy,
+    // v4.5.0：怪物伺服端權威移動所需欄位
+    homeX: sx,            // 駐地（巡邏/重生回此附近）
+    homeY: sy,
+    wanderX: sx,          // 目前巡邏目標
+    wanderY: sy,
+    wanderTimer: Math.floor(rng() * 40) / 10, // 下次換巡邏點
+    aggroUid: null,       // 被玩家打後追擊的玩家 id
+    aggroTimer: 0,        // 仇恨剩餘秒數
     dead: false,
     respawnTimer: 0,
     attackCooldown: 0,
@@ -410,13 +420,21 @@ function createAIEngine(options = {}) {
             mon.hp = mon.hpMax;
             mon.attackCooldown = 0;
             mon.targetUid = null;
-            mon.x = 200 + Math.random() * 1600;
-            mon.y = 200 + Math.random() * 1000;
+            mon.aggroUid = null;
+            mon.aggroTimer = 0;
+            // v4.5.0：重生回駐地附近（而非全圖隨機），位置可預期且兩端一致
+            const hx = mon.homeX != null ? mon.homeX : mon.x;
+            const hy = mon.homeY != null ? mon.homeY : mon.y;
+            mon.x = Math.max(40, Math.min(WORLD_W - 40, hx + (Math.random() - 0.5) * 120));
+            mon.y = Math.max(40, Math.min(WORLD_H - 40, hy + (Math.random() - 0.5) * 120));
+            mon.wanderX = mon.x;
+            mon.wanderY = mon.y;
             mon.state = 'idle';
           }
           continue;
         }
         if (mon.attackCooldown > 0) mon.attackCooldown -= dt;
+        if (mon.aggroTimer > 0) mon.aggroTimer -= dt;
       }
 
       // ===== AI 行為 =====
@@ -724,6 +742,43 @@ function createAIEngine(options = {}) {
         return { dead: true, hp: 0, damage: actualDmg, killed, goldDrop, expDrop };
       }
       return { dead: false, hp: ai.hp, damage: actualDmg, killed: false };
+    },
+
+    // v4.5.0：玩家攻擊怪物（伺服端唯一權威扣血）
+    //  baseAtk 為玩家基礎攻擊力（game-world 依 classId+level 用 calcBaseStats 算）
+    //  回傳 { damage, hp, maxHp, killed, exp, gold, drops, dead }
+    damageMonster(serverId, mapId, monsterUid, baseAtk, attackerInfo) {
+      const monsterState = getMonsterState(serverId, mapId);
+      const mon = monsterState.get(monsterUid);
+      if (!mon || mon.dead) return { damage: 0, hp: mon ? mon.hp : 0, maxHp: mon ? mon.hpMax : 0, killed: false, exp: 0, gold: 0, drops: [], dead: mon ? mon.dead : true };
+      const atk = Math.max(1, Math.floor(baseAtk || 10));
+      const actualDmg = Math.max(1, Math.floor(atk * (0.9 + Math.random() * 0.2) - mon.def * 0.5));
+      mon.hp = Math.max(0, mon.hp - actualDmg);
+      // 被打 → 記住仇恨對象，Zone tick 會驅動它追擊
+      mon.aggroUid = (attackerInfo && attackerInfo.id) ? attackerInfo.id : null;
+      mon.aggroTimer = 4; // 追擊 4 秒
+      let killed = false;
+      let exp = 0, gold = 0;
+      const drops = [];
+      if (mon.hp <= 0 && !mon.dead) {
+        mon.dead = true;
+        mon.state = 'dead';
+        mon.respawnTimer = 0;
+        mon.aggroUid = null;
+        mon.aggroTimer = 0;
+        killed = true;
+        exp = Math.floor(mon.level * 8 + 20);
+        gold = Math.floor(mon.level * 3 + 5 + Math.random() * 10);
+        if (onMonsterKilled) {
+          try { onMonsterKilled(serverId, mapId, mon, attackerInfo || { name: 'Player' }, exp, gold); } catch(e) {}
+        }
+      }
+      return { damage: actualDmg, hp: mon.hp, maxHp: mon.hpMax, killed, exp, gold, drops, dead: mon.dead };
+    },
+
+    // v4.5.0：取得某圖怪物清單（給 Zone 建實體鏡像用）
+    getMonsterList(serverId, mapId) {
+      return Array.from(getMonsterState(serverId, mapId).values());
     },
 
     start,

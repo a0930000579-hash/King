@@ -418,7 +418,7 @@ function assetUrl(id) {
     if (/\.(jpg|jpeg|png|webp|gif)$/i.test(id)) return 'assets/' + id;
     // 沒副檔名 → 依路徑前綴決定預設副檔名
     const lowId = id.toLowerCase();
-    if (lowId.startsWith('monster/') || lowId.startsWith('sprite/') || lowId.startsWith('npc/') || lowId.startsWith('hero/') || lowId.startsWith('pet/') || lowId.startsWith('transform/') || lowId.startsWith('boss/') || lowId.startsWith('warrior/') || lowId.startsWith('mage/') || lowId.startsWith('archer/')) {
+    if (lowId.startsWith('monster/') || lowId.startsWith('sprite/') || lowId.startsWith('npc/') || lowId.startsWith('hero/') || lowId.startsWith('pet/') || lowId.startsWith('transform/') || lowId.startsWith('boss/') || lowId.startsWith('warrior/') || lowId.startsWith('mage/') || lowId.startsWith('archer/') || lowId.startsWith('class/')) {
       return 'assets/' + pureId + '.png';
     }
     return 'assets/' + pureId + '.jpg';
@@ -3871,7 +3871,7 @@ function renderAutoItemsGrid() {
          <span style="font-size:9px;color:var(--gold);font-weight:700;min-width:12px;text-align:center;flex-shrink:0">${idx+1}</span>
          <!-- 圖標 -->
          <div style="width:20px;height:20px;border-radius:4px;background:rgba(0,0,0,0.5);border:1px solid rgba(240,192,64,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">
-           ${iconUrl ? `<img src="${iconUrl}" style="width:14px;height:14px;object-fit:contain;display:block"/>` : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#777" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l7.5 4.2v9.6L12 21l-7.5-4.2V7.2L12 3z"/><path d="M12 12l7.5-4.8M12 12v9M12 12L4.5 7.2"/></svg>'}
+           ${iconUrl ? `<img src="${iconUrl}" style="width:14px;height:14px;object-fit:contain;display:block"/>` : kingIconImg('bag', 13, 'filter:grayscale(1) brightness(1.6);')}
          </div>
          <!-- 下拉選擇 -->
          <select class="auto-item-select" data-idx="${idx}" style="flex:1;min-width:0;padding:2px 14px 2px 2px;font-size:9px;background:rgba(0,0,0,0.6);border:1px solid var(--gold-dark);border-radius:3px;color:var(--parchment-light);font-family:inherit;cursor:pointer">
@@ -4412,9 +4412,13 @@ function getSkillIconHTML(skill, size = 32) {
   return `<div style="width:${size}px;height:${size}px;border-radius:4px;display:flex;align-items:center;justify-content:center;${style}">${getSkillSVG(skill)}</div>`;
 }
 function getSkillSVG(skill) {
-  const d = _skillGlyph(_skillKey(skill));
-  const paths = d.split('|').map(dd => `<path d="${dd}"/>`).join('');
-  return `<svg viewBox="0 0 24 24" width="74%" height="74%" fill="none" stroke="#f3d27a" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85))">${paths}</svg>`;
+  // v4.5.0：去 inline SVG → <img>。glyph 對應到 KING_ICONS key（後備 uri 圖片）。
+  const g = _skillGlyph(_skillKey(skill));
+  const map = { sword: 'skill', bolt: 'power', ice: 'shield', cross: 'donate', shield: 'shield', arrow: 'kills', star: 'star', up: 'level' };
+  const key = map[g] || 'skill';
+  const src = kingIconSrc(key) || kingIconSrc('skill');
+  if (!src) return '<span style="font-size:18px;color:#f3d27a">技</span>';
+  return '<img src="' + src + '" style="width:74%;height:74%;object-fit:contain;display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85))" alt=""/>';
 }
 
 // 世界尺寸（匹配背景图尺寸，确保摄像机滚动範圍内都有内容）
@@ -4807,8 +4811,47 @@ const NATION_FLAG_IDS = {
   dion:  'aadkrffmdt4ei_ve_miaoda', // 綠交叉劍
   aden:  'aadkrfkbmmmci_ve_miaoda', // 金皇冠
 };
+// v4.5.0：統一圖標接線 helper（去 inline SVG，一律 <img>）。
+//  別的代理正在把 KING_ICONS[key] 改成 PNG 相對路徑；此 helper 同時相容：
+//   1) KING_ICONS[key] 為 PNG 路徑字串 → 直接當 <img src>
+//   2) KING_ICONS.icon(key) helper 存在 → 用它
+//   3) 目前後備 KING_ICONS.uri(key) → 回傳 data: 圖片 URI（包在 <img> 內，DOM 無內嵌向量圖元素）
+function kingIconSrc(key) {
+  try {
+    const K = window.KING_ICONS;
+    if (!K) return '';
+    const direct = K[key];
+    if (typeof direct === 'string' && /\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(direct)) return direct;
+    if (typeof K.icon === 'function') { const u = K.icon(key); if (u) return u; }
+    if (typeof K.uri === 'function') return K.uri(key);
+  } catch (e) {}
+  return '';
+}
+function kingIconImg(key, size, extraStyle) {
+  const src = kingIconSrc(key);
+  if (!src) return '';
+  const s = size || 22;
+  return '<img src="' + src + '" width="' + s + '" height="' + s + '" alt="" class="king-icon-img" loading="lazy" style="display:block;width:' + s + 'px;height:' + s + 'px;object-fit:contain;' + (extraStyle || '') + '"/>';
+}
+window.kingIconSrc = kingIconSrc;
+window.kingIconImg = kingIconImg;
+// v4.5.0：把 [data-king-img] 佔位 span 填成 <img>（取代舊 [data-king-icon] 由 icons.js paint 注入 inline svg）
+window._paintKingImgs = function(root) {
+  try {
+    (root || document).querySelectorAll('[data-king-img]').forEach(function(el) {
+      if (el.getAttribute('data-king-img-painted') === '1') return;
+      const k = el.getAttribute('data-king-img');
+      const sz = parseInt(el.getAttribute('data-king-size') || '22', 10);
+      el.outerHTML = kingIconImg(k, sz, 'display:inline-block;vertical-align:middle;');
+    });
+  } catch (e) {}
+};
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { window._paintKingImgs(document); });
+  else window._paintKingImgs(document);
+}
 // v4.4.16：上述 hash 實為 ASSET MISSING 佔位圖（原始美術從未上傳），
-// 改用內聯 SVG 國家色紋章 data URI，確保排行榜/國家頁/名條永不顯示缺圖。
+// 改用 canvas 繪製國家色紋章 PNG data URL，確保排行榜/國家頁/名條永不顯示缺圖。
 const NATION_CREST_SVG = {
   kent:  { light: '#ff6060', dark: '#a01010', border: '#c02020', emoji: '🦁' },
   oren:  { light: '#60a0ff', dark: '#103080', border: '#4080ff', emoji: '🦅' },
@@ -4817,11 +4860,22 @@ const NATION_CREST_SVG = {
 };
 function nationFlagDataURI(id) {
   const c = NATION_CREST_SVG[id] || NATION_CREST_SVG.kent;
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>` +
-    `<defs><radialGradient id='g' cx='35%25' cy='30%25'><stop offset='0%25' stop-color='${c.light}'/><stop offset='100%25' stop-color='${c.dark}'/></radialGradient></defs>` +
-    `<circle cx='32' cy='32' r='29' fill='url(%23g)' stroke='${c.border}' stroke-width='2'/>` +
-    `<text x='32' y='44' font-size='30' text-anchor='middle'>${c.emoji}</text></svg>`;
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    const g = ctx.createRadialGradient(22, 18, 4, 32, 34, 30);
+    g.addColorStop(0, c.light); g.addColorStop(1, c.dark);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(32, 34, 29, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = c.border; ctx.stroke();
+    ctx.font = '28px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(c.emoji, 32, 36);
+    return cv.toDataURL('image/png');
+  } catch (e) {
+    // 非瀏覽器環境（node --check）回退空字串
+    return '';
+  }
 }
 let NATION_FLAGS = {
   kent:  nationFlagDataURI('kent'),
@@ -10137,11 +10191,11 @@ function renderRankingPage() {
     if (!GS.rankings) GS.rankings = { level: [], power: [], kills: [], guild: [], nation: [] };
     if (!GS.rankings.level || GS.rankings.level.length === 0) updateRankings();
   const rankIconSVG = {
-    level: window.KING_ICONS ? KING_ICONS.svg('level', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">等</span>',
-    power: window.KING_ICONS ? KING_ICONS.svg('power', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">戰</span>',
-    kills: window.KING_ICONS ? KING_ICONS.svg('kills', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">殺</span>',
-    guild: window.KING_ICONS ? KING_ICONS.svg('legion', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">盟</span>',
-    nation: window.KING_ICONS ? KING_ICONS.svg('nation', 20) : '<span style="color:#f0c040;font-weight:700;font-size:12px">國</span>',
+    level: kingIconImg('level', 20) || '',
+    power: kingIconImg('power', 20) || '',
+    kills: kingIconImg('kills', 20) || '',
+    guild: kingIconImg('legion', 20) || '',
+    nation: kingIconImg('nation', 20) || '',
   };
   const tabs = [
     { key: 'level', label: '等級榜' },
@@ -10426,7 +10480,7 @@ function renderNationPageEnhanced() {
           { key: 'donate',   name: '貢獻',   icon: 'donate' },
         ].map(e => `
           <button class="nation-entry-btn" data-nation-entry="${e.key}" style="padding:10px 4px;background:linear-gradient(180deg, rgba(50,35,18,0.9), rgba(25,16,8,0.95));border:1px solid var(--gold-dark);border-radius:8px;color:var(--parchment-light);font-size:10px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;box-shadow:inset 0 0 6px rgba(240,192,64,0.08)">
-            <span style="width:30px;height:30px;border-radius:50%;overflow:hidden;border:1.5px solid var(--gold-dark);background:radial-gradient(circle at 50% 35%, #3a2c16, #140d05);display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px rgba(240,192,64,0.25)">${window.KING_ICONS ? KING_ICONS.svg(e.icon, 20) : e.name.charAt(0)}</span>
+            <span style="width:30px;height:30px;border-radius:50%;overflow:hidden;border:1.5px solid var(--gold-dark);background:radial-gradient(circle at 50% 35%, #3a2c16, #140d05);display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px rgba(240,192,64,0.25)">${kingIconImg(e.icon, 20) || ''}</span>
             <span>${e.name}</span>
           </button>
         `).join('')}
@@ -13546,6 +13600,11 @@ function _fullMapCleanupForZone() {
 
 // 從伺服器 mapConfig 渲染 NPC
 function _renderNPCsFromConfig(npcs) {
+  // v4.5.0：NPC 由 AOI kind:'npc' 渲染，本地 config 不再生 NPC DOM
+  if (el && el.npcLayer) { try { el.npcLayer.innerHTML = ''; } catch (e) {} }
+  return;
+}
+function _renderNPCsFromConfig_DISABLED(npcs) {
   if (!el.npcLayer) return;
   el.npcLayer.innerHTML = '';
   // 使用現有 NPC sprite 映射（從 renderNPCs 借用）
@@ -13595,6 +13654,12 @@ window.handleMapChange = handleMapChange;
 
 // v4.4.8 修復：補回丟失的 renderNPCs 函數聲明（此前函數體懸空導致整個 game.js 語法錯誤、全文不執行）
 function renderNPCs(map) {
+  // v4.5.0：NPC 改由伺服端 AOI kind:'npc' 實體渲染。這裡只清掉舊的本地 npcLayer DOM，不再本地生 NPC。
+  if (typeof npcLayer !== 'undefined' && npcLayer) { try { npcLayer.innerHTML = ''; } catch (e) {} }
+  if (typeof window.NPC_SPRITE_MAP === 'undefined') { /* keep */ }
+  return;
+}
+function renderNPCs_DISABLED(map) {
   if (!map) return;
   npcLayer.innerHTML = '';
   if (!map.npcs) return;
@@ -13839,6 +13904,11 @@ function closeMapModal() { el.mapModal.classList.remove('open'); }
 
 // ==================== 怪物生成 ====================
 function spawnMonsters() {
+  // v4.5.0：怪物改由伺服端 AOI kind:'monster' 實體渲染，本地不再生成怪物 DOM。
+  // 實際戰鬥/掉落/經驗由伺服端 attack_result 驅動。保留空函式避免既有呼叫點報錯。
+  return;
+}
+function spawnMonsters_DISABLED() {
   const allMaps = getAllMaps();
   const map = allMaps[GS.currentMap];
   if (!map || map.type !== 'battle') return;
@@ -14638,11 +14708,56 @@ function updateNPCAnimFrames(dt) {
   });
 }
 
+// ===== 變身幀條接線（美術已產 assets/frames/transform/gold/true_<形態>/{attack,hit,death}.png）=====
+// 變身 key（t_true_death_knight 等）-> 幀條目錄 true_<形態>
+const _FRAME_STRIP_DIRS = {
+  t_true_death_knight: 'true_death_knight',
+  t_true_death_mage: 'true_death_mage',
+  t_true_death_archer: 'true_death_archer',
+  t_true_death_assassin: 'true_death_assassin',
+  t_true_death_sorcerer: 'true_death_sorcerer',
+  t_true_fallen_paladin: 'true_fallen_paladin',
+};
+function _frameStripPath(transformId, kind) {
+  const dir = _FRAME_STRIP_DIRS[transformId];
+  if (!dir) return null;
+  return 'assets/frames/transform/gold/' + dir + '/' + kind + '.png';
+}
+function _unitTransformId(unitEl) {
+  if (!unitEl) return null;
+  if (unitEl.dataset && unitEl.dataset.transformId) return unitEl.dataset.transformId;
+  if (typeof GS !== 'undefined' && GS.player && GS.player.transformId) return GS.player.transformId;
+  return null;
+}
+// kind: 'attack' | 'hit' | 'death'；在 .unit-sprite-wrap 上加 .frame-armed 並設對應 CSS 變數
+function _armFrameStrip(unitEl, kind) {
+  if (!unitEl) return false;
+  const wrap = unitEl.querySelector('.unit-sprite-wrap');
+  if (!wrap) return false;
+  const tid = _unitTransformId(unitEl);
+  if (!tid) return false;
+  const path = _frameStripPath(tid, kind);
+  if (!path) return false;
+  wrap.classList.add('frame-armed');
+  const varName = (kind === 'attack') ? '--atk-sheet' : (kind === 'hit' ? '--hit-sheet' : '--death-sheet');
+  wrap.style.setProperty(varName, path);
+  return true;
+}
+function _disarmFrameStrip(unitEl) {
+  if (!unitEl) return;
+  const wrap = unitEl.querySelector('.unit-sprite-wrap');
+  if (wrap) wrap.classList.remove('frame-armed');
+}
+try { window._armFrameStrip = _armFrameStrip; window._disarmFrameStrip = _disarmFrameStrip; } catch (e) {}
+
 // 攻擊动画：单图模式下通过 CSS .attacking 类实现冲刺缩放
 // 只需在动画结束后移除 attacking 类即可
 function playAttackAnim(unitEl, onComplete, opts = {}) {
   if (unitEl) {
     unitEl.classList.add('attack-dash');
+    // v4.x：變身幀條——需要 .world-unit.attacking 觸發 CSS 橫條動畫
+    unitEl.classList.add('attacking');
+    try { _armFrameStrip(unitEl, 'attack'); } catch (e) {}
     // 挥砍弧线特效 + 职业颜色
     const slash = unitEl.querySelector('.slash-effect');
     if (slash) {
@@ -14664,7 +14779,10 @@ function playAttackAnim(unitEl, onComplete, opts = {}) {
       wrap.classList.add('attack-glow');
       setTimeout(() => wrap.classList.remove('attack-glow'), 350);
     }
-    setTimeout(() => unitEl.classList.remove('attack-dash'), 350);
+    setTimeout(() => {
+      unitEl.classList.remove('attack-dash', 'attacking');
+      try { _disarmFrameStrip(unitEl); } catch (e) {}
+    }, 350);
   }
   // CSS 动画自動播放，0.35s 后触发回调
   setTimeout(() => {
@@ -15856,7 +15974,7 @@ function updateSiegeSkillBar() {
         btn.title = s.name;
         btn.classList.remove('empty');
       } else {
-        iconDiv.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="rgba(240,192,64,0.4)" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+        iconDiv.innerHTML = '<span style="font-size:20px;line-height:1;color:rgba(240,192,64,0.4);font-weight:700;display:inline-block;transform:translateY(-1px)">+</span>';
         iconDiv.style.cssText = 'background:none;';
         btn.classList.add('empty');
       }
@@ -17463,10 +17581,15 @@ function spawnSoulDissolve(x, y) {
 // 受擊閃紅反饋
 function triggerHitFlash(unitEl, isCrit, direction) {
   if (!unitEl) return;
-  unitEl.classList.remove('hit-flash-red', 'hit-knockback');
+  unitEl.classList.remove('hit-flash-red', 'hit-knockback', 'hit');
   void unitEl.offsetWidth;
-  unitEl.classList.add('hit-flash-red');
-  setTimeout(() => unitEl.classList.remove('hit-flash-red'), 120);
+  unitEl.classList.add('hit-flash-red', 'hit');
+  // v4.x：變身受擊幀條（CSS 以 .world-unit.hit .frame-armed 觸發）
+  try { _armFrameStrip(unitEl, 'hit'); } catch (e) {}
+  setTimeout(() => {
+    unitEl.classList.remove('hit-flash-red', 'hit');
+    try { _disarmFrameStrip(unitEl); } catch (e) {}
+  }, 250);
   if (isCrit) {
     unitEl.style.setProperty('--kb', (direction === 'left' ? '' : '-') + '8px');
     unitEl.classList.add('hit-knockback');
@@ -17481,6 +17604,8 @@ function triggerDeathFade(unitEl, x, y) {
     return;
   }
   unitEl.classList.add('dead-fade');
+  // v4.x：變身死亡幀條（屍體/淡出，不需 disarm）
+  try { _armFrameStrip(unitEl, 'death'); } catch (e) {}
   spawnSoulDissolve(x, y);
 }
 
@@ -20063,60 +20188,196 @@ function useTransformTicket(tfId) {
 
 // 檢查變身是否到期
 // ==================== Buff 系統 ====================
-// v2.7.1: buff icon 全部替換為有色彩文字的圓角方塊（原 assetUrl 指向深灰佔位檔 → 顯示問號）
-// v2.7.3：buff icon 改用內聯 SVG，確保不依賴外部檔案、不會出現 ?
-function _buffSVG(color, symbol, symbol2) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.95"/><stop offset="100%" stop-color="${color}" stop-opacity="0.6"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="5" fill="url(#g)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/><text x="16" y="21" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff" font-family="Arial, sans-serif" style="text-shadow:0 1px 2px rgba(0,0,0,0.5)">${symbol}</text>${symbol2 ? `<text x="16" y="28" text-anchor="middle" font-size="8" fill="#fff" font-family="Arial" opacity="0.9">${symbol2}</text>` : ''}</svg>`;
-  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+// v4.4.21：buff 圖標全面改為光柵 PNG（離屏 Canvas 程序化繪製，A 方案），
+// 暗黑金屬圓角底 + 白色圖形，輸出 image/png data URI；不使用任何向量標記、不依賴外部檔案、不會出現 ?。
+function _hexToRgba(hex, a) {
+  let h = String(hex || '#888888').replace('#', '');
+  if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
 }
-// v4.4.20：圖形化 buff 圖標（不再用中文單字），body 為 32 viewBox 的白色 SVG 元素
-function _buffIcon(color, body, strokeBody) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.97"/><stop offset="100%" stop-color="${color}" stop-opacity="0.62"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="6" fill="url(#g)" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><g fill="#ffffff">${body}</g>${strokeBody ? `<g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${strokeBody}</g>` : ''}</svg>`;
-  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+function _rr(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
-const _BI = {
-  star:    '<path d="M16 3 L18.6 12.4 L28 13.4 L20.6 19.6 L23 29 L16 23.8 L9 29 L11.4 19.6 L4 13.4 L13.4 12.4 Z"/>',
-  bolt:    '<path d="M17.5 3 L7.5 17.5 H14.5 L13 29 L24.5 13.5 H17.8 Z"/>',
-  wind:    '',
-  sword:   '<path d="M22.5 4 L28 9.5 L13 24.5 L9 25.5 L7.5 21 L7.5 19 Z M8 20 L4 24 L6 26 L8.5 26.5 L12 23 Z M9 27 L7 29 L5 27 L7 25 Z"/>',
-  shield:  '<path d="M16 3.5 L26 7.5 V15.5 C26 21.8 21.4 25.8 16 28.5 C10.6 25.8 6 21.8 6 15.5 V7.5 Z M12.5 15.5 L15 18 L20 12.2" fill="#ffffff" fill-rule="evenodd"/>',
-  fire:    '<path d="M16 3 C17.5 7.5 23 9.5 23 17 a7 7 0 1 1-14 0 C9 13 13.5 12.5 13.5 8 C15 9.8 15.3 11 16 11 C16 8 16 5.5 16 3 Z M16 15 a3.2 3.2 0 1 0 0 6.4 a3.2 3.2 0 0 0 0-6.4 Z"/>',
-  cross:   '<path d="M13 5 H19 V13 H27 V19 H19 V27 H13 V19 H5 V13 H13 Z"/>',
-  drop:    '<path d="M16 3 C12 10.5 8 14.5 8 19.5 a8 8 0 0 0 16 0 C24 14.5 20 10.5 16 3 Z M13 20 a3 3 0 0 0 3 3" fill="#ffffff"/><path d="M13 20 a3 3 0 0 0 3 3" fill="none" stroke="' + '#0a2a5e' + '" stroke-width="1.6"/>',
-  crit:    '<path d="M16 2.5 L18 11 L26.5 8 L20 15 L27 16.5 L19.5 18 L22 26.5 L16 20.5 L10 26.5 L12.5 18 L5 16.5 L12 15 L5.5 8 L14 11 Z"/>',
-  gem:     '<path d="M16 4 L26 12 L16 28 L6 12 Z M6 12 H26 M11 12 L16 4 L21 12 L16 28 Z" fill="#ffffff"/>',
-  upArrow: '<path d="M16 4 L26 15 H20 V28 H12 V15 H6 Z"/>',
+function _starPath(ctx, cx, cy, outer, inner, points, rot) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const rad = (i % 2 === 0) ? outer : inner;
+    const ang = (rot == null ? -Math.PI / 2 : rot) + i * Math.PI / points;
+    const x = cx + Math.cos(ang) * rad, y = cy + Math.sin(ang) * rad;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+const _BUFF_GLYPHS = {
+  star: function (ctx) { _starPath(ctx, 16, 17, 10.5, 4.4, 5); ctx.fill(); },
+  sparkle: function (ctx) { _starPath(ctx, 16, 16, 10.5, 2.8, 4); ctx.fill(); },
+  bolt: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(17.5, 3); ctx.lineTo(7.5, 17.5); ctx.lineTo(14.2, 17.5);
+    ctx.lineTo(13, 29); ctx.lineTo(24.5, 13.5); ctx.lineTo(17.8, 13.5);
+    ctx.closePath(); ctx.fill();
+  },
+  upArrow: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(16, 4); ctx.lineTo(26, 15); ctx.lineTo(20, 15); ctx.lineTo(20, 28);
+    ctx.lineTo(12, 28); ctx.lineTo(12, 15); ctx.lineTo(6, 15);
+    ctx.closePath(); ctx.fill();
+  },
+  cross: function (ctx) {
+    ctx.beginPath();
+    ctx.rect(12.6, 5, 6.8, 22); ctx.rect(5, 12.6, 22, 6.8);
+    ctx.fill();
+  },
+  shield: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(16, 3.5); ctx.lineTo(26, 7.5); ctx.lineTo(26, 15.5);
+    ctx.bezierCurveTo(26, 22, 21.4, 25.6, 16, 28.5);
+    ctx.bezierCurveTo(10.6, 25.6, 6, 22, 6, 15.5);
+    ctx.lineTo(6, 7.5); ctx.closePath(); ctx.fill();
+  },
+  fire: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(16, 3);
+    ctx.bezierCurveTo(17.6, 7.6, 23, 9.6, 23, 17);
+    ctx.bezierCurveTo(23, 22.2, 19.6, 25, 16, 25);
+    ctx.bezierCurveTo(12.4, 25, 9, 22.2, 9, 17);
+    ctx.bezierCurveTo(9, 13.2, 13.2, 12.6, 13.4, 8.4);
+    ctx.bezierCurveTo(14.8, 10.2, 15.4, 11.4, 16, 11);
+    ctx.bezierCurveTo(16, 8, 15.8, 5.4, 16, 3);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(30,10,0,0.28)';
+    ctx.beginPath();
+    ctx.moveTo(16, 13);
+    ctx.bezierCurveTo(18, 16, 19.2, 17.4, 19.2, 19.4);
+    ctx.bezierCurveTo(19.2, 22, 17.8, 23.4, 16, 23.4);
+    ctx.bezierCurveTo(14.2, 23.4, 12.8, 22, 12.8, 19.4);
+    ctx.bezierCurveTo(12.8, 17.6, 14.6, 16.6, 16, 13);
+    ctx.closePath(); ctx.fill();
+  },
+  drop: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(16, 4);
+    ctx.bezierCurveTo(12, 11, 8, 15, 8, 19.6);
+    ctx.bezierCurveTo(8, 24.4, 11.6, 27.5, 16, 27.5);
+    ctx.bezierCurveTo(20.4, 27.5, 24, 24.4, 24, 19.6);
+    ctx.bezierCurveTo(20, 15, 16, 11, 16, 4);
+    ctx.closePath(); ctx.fill();
+  },
+  gem: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(16, 4); ctx.lineTo(26, 12); ctx.lineTo(16, 28); ctx.lineTo(6, 12);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(25,16,10,0.6)'; ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(6, 12); ctx.lineTo(26, 12);
+    ctx.moveTo(11, 12); ctx.lineTo(16, 4); ctx.lineTo(21, 12); ctx.lineTo(16, 28);
+    ctx.stroke();
+  },
+  crit: function (ctx) { _starPath(ctx, 16, 16, 12, 4.6, 6); ctx.fill(); },
+  wind: function (ctx) {
+    const rows = [[11, 18], [16, 22], [21, 14]];
+    rows.forEach(function (r) {
+      const y = r[0], x = r[1];
+      ctx.beginPath(); ctx.moveTo(5, y); ctx.lineTo(x, y); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, y); ctx.lineTo(x - 3, y - 2.4);
+      ctx.moveTo(x, y); ctx.lineTo(x - 3, y + 2.4);
+      ctx.stroke();
+    });
+  },
+  exp: function (ctx) {
+    ctx.beginPath();
+    ctx.moveTo(6, 25); ctx.lineTo(13, 17); ctx.lineTo(18, 21); ctx.lineTo(25, 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(25, 10); ctx.lineTo(20, 10);
+    ctx.moveTo(25, 10); ctx.lineTo(25, 15);
+    ctx.stroke();
+  },
+  warcry: function (ctx) {
+    [8, 12, 16].forEach(function (r) {
+      ctx.beginPath(); ctx.arc(8, 16, r, -0.85, 0.85); ctx.stroke();
+    });
+  },
+  _arcArrow: function (ctx, cw, dashed) {
+    ctx.save();
+    if (dashed) ctx.setLineDash([3, 3]);
+    const start = cw ? -0.55 : 0.55;
+    const end = cw ? Math.PI * 1.35 : -Math.PI * 1.35;
+    ctx.beginPath(); ctx.arc(16, 16, 9, start, end, !cw); ctx.stroke();
+    ctx.setLineDash([]);
+    const ex = 16 + 9 * Math.cos(end), ey = 16 + 9 * Math.sin(end);
+    const tx = cw ? -Math.sin(end) : Math.sin(end);
+    const ty = cw ? Math.cos(end) : -Math.cos(end);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey); ctx.lineTo(ex - tx * 4 + ty * 3, ey - ty * 4 - tx * 3);
+    ctx.moveTo(ex, ey); ctx.lineTo(ex - tx * 4 - ty * 3, ey - ty * 4 + tx * 3);
+    ctx.stroke();
+    ctx.restore();
+  },
+  dodge: function (ctx) { _BUFF_GLYPHS._arcArrow(ctx, true, false); },
+  vanish: function (ctx) { _BUFF_GLYPHS._arcArrow(ctx, false, true); },
 };
+function _buffTile(color, glyph) {
+  try {
+    const S = 32, dpr = 2;
+    const cv = document.createElement('canvas');
+    cv.width = S * dpr; cv.height = S * dpr;
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const g = ctx.createLinearGradient(0, 1, 0, 31);
+    g.addColorStop(0, _hexToRgba(color, 0.97));
+    g.addColorStop(1, _hexToRgba(color, 0.6));
+    ctx.fillStyle = g; _rr(ctx, 1, 1, 30, 30, 6); ctx.fill();
+    ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    _rr(ctx, 1.7, 1.7, 28.6, 28.6, 5.5); ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const fn = _BUFF_GLYPHS[glyph] || _BUFF_GLYPHS.sparkle;
+    fn(ctx);
+    return cv.toDataURL('image/png');
+  } catch (e) {
+    return '';
+  }
+}
 const BUFF_ICONS = {
-  transform:  _buffIcon('#c03030', _BI.star),
-  atkspd:     _buffIcon('#e09020', _BI.bolt),
-  movespd:    _buffIcon('#30b060', '', '<path d="M5 11 H19 a3.5 3.5 0 1 0-3.5-3.5 M5 16 H23 a3.5 3.5 0 1 1-3.5 3.5 M5 21 H15"/>'),
-  exp:        _buffIcon('#4080e0', '', '<path d="M6 25 L13 17 L18 21 L26 9 M26 9 H20 M26 9 V15"/>'),
-  drop:       _buffIcon('#b060d0', _BI.gem),
-  shield:     _buffIcon('#60a0e0', _BI.shield),
-  atkpot:     _buffIcon('#d04040', _BI.upArrow),
-  defpot:     _buffIcon('#4090d0', _BI.shield),
-  berserk:    _buffIcon('#e04040', _BI.fire),
-  rage:       _buffIcon('#e04040', _BI.fire),
-  dodge:      _buffIcon('#40d0c0', '', '<path d="M21 9 a9 9 0 1 0 2 8 M22 6 l3 3 -3 3"/>'),
-  hp:         _buffIcon('#e06060', _BI.cross),
-  mp:         _buffIcon('#6080e0', _BI.drop),
-  atkPct:     _buffIcon('#d04040', _BI.upArrow),
-  defPct:     _buffIcon('#4090d0', _BI.shield),
-  crit:       _buffIcon('#e0a020', _BI.crit),
-  critical:   _buffIcon('#e0a020', _BI.crit),
-  allStat:    _buffIcon('#c060e0', _BI.star),
-  warcry:     _buffIcon('#d06020', '', '<path d="M7 11 a13 13 0 0 1 0 10 M11 8 a18 18 0 0 1 0 16 M15 5.5 a23 23 0 0 1 0 21"/>'),
-  windwalk:   _buffIcon('#30b0a0', '', '<path d="M5 11 H19 a3.5 3.5 0 1 0-3.5-3.5 M5 16 H23 a3.5 3.5 0 1 1-3.5 3.5 M5 21 H15"/>'),
-  ironwall:   _buffIcon('#6080a0', _BI.shield),
-  manashield: _buffIcon('#5078d8', _BI.shield),
-  guardian:   _buffIcon('#e0b040', _BI.shield),
-  rapid:      _buffIcon('#e09020', _BI.bolt),
-  sacrifice:  _buffIcon('#a030d0', _BI.fire),
-  vanish:     _buffIcon('#708090', '', '<path d="M16 7 a9 9 0 1 1-9 9 M12 12 l3 3 -3 3"/>'),
+  transform: _buffTile('#c03030', 'star'),
+  atkspd: _buffTile('#e09020', 'bolt'),
+  movespd: _buffTile('#30b060', 'wind'),
+  exp: _buffTile('#4080e0', 'exp'),
+  drop: _buffTile('#b060d0', 'gem'),
+  shield: _buffTile('#60a0e0', 'shield'),
+  atkpot: _buffTile('#d04040', 'upArrow'),
+  defpot: _buffTile('#4090d0', 'shield'),
+  berserk: _buffTile('#e04040', 'fire'),
+  rage: _buffTile('#e04040', 'fire'),
+  dodge: _buffTile('#40d0c0', 'dodge'),
+  hp: _buffTile('#e06060', 'cross'),
+  mp: _buffTile('#6080e0', 'drop'),
+  atkPct: _buffTile('#d04040', 'upArrow'),
+  defPct: _buffTile('#4090d0', 'shield'),
+  crit: _buffTile('#e0a020', 'crit'),
+  critical: _buffTile('#e0a020', 'crit'),
+  allStat: _buffTile('#c060e0', 'star'),
+  warcry: _buffTile('#d06020', 'warcry'),
+  windwalk: _buffTile('#30b0a0', 'wind'),
+  ironwall: _buffTile('#6080a0', 'shield'),
+  manashield: _buffTile('#5078d8', 'shield'),
+  guardian: _buffTile('#e0b040', 'shield'),
+  rapid: _buffTile('#e09020', 'bolt'),
+  sacrifice: _buffTile('#a030d0', 'fire'),
+  vanish: _buffTile('#708090', 'vanish'),
 };
-// 找不到類型時的預設 icon
-const DEFAULT_BUFF_ICON = _buffSVG('#888888', '✦', '');
+const DEFAULT_BUFF_ICON = _buffTile('#888888', 'sparkle');
 
 // 初始化 activeBuffs
 function initBuffs() {
@@ -22276,7 +22537,7 @@ function renderGachaPage() {
         } else if (activeTab === 'hero') {
           spriteHtml = spriteEmojiHTML(item.sprite, 32);
         } else {
-          spriteHtml = `<div style="font-size:28px;display:flex;align-items:center;justify-content:center;filter:${owned ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.6))' : 'grayscale(1) opacity(0.3)'}">${item.icon || '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#e8c870" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.5 4.2v9.6L12 21l-7.5-4.2V7.2L12 3z"/><path d="M12 12l7.5-4.8M12 12v9M12 12L4.5 7.2"/></svg>'}</div>`;
+          spriteHtml = `<div style="font-size:28px;display:flex;align-items:center;justify-content:center;filter:${owned ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.6))' : 'grayscale(1) opacity(0.3)'}">${item.icon || kingIconImg('bag', 30, '')}</div>`;
         }
         return `
         <div class="gacha-col-item rarity-${item.rarity} ${owned ? 'owned' : 'locked'}">
@@ -27527,6 +27788,26 @@ let _lastServerAICount = 0;
  *  v2.7.5：數量未變時只更新屬性（位置/HP），不重建DOM；大幅降低卡頓
  */
 function renderServerAIsToWorld(ais) {
+  // v4.5.0：伺服器 AI 統一委派給單一 AOI entity store（kind:'ai'），不再自建第三條 DOM 路徑
+  if (!worldLayer) return;
+  const validAis = (ais && Array.isArray(ais))
+    ? ais.filter(a => a && typeof a === 'object' && a.id)
+    : [];
+  if (typeof handleAOIEnter === 'function') {
+    try {
+      handleAOIEnter(validAis.map(a => ({
+        id: a.id, kind: 'ai', name: a.name || 'Player', classId: a.classId || 'warrior',
+        level: a.level || 1, x: a.x || 0, y: a.y || 0, dir: a.dir || 1,
+        nation: a.nation || null, hp: a.hp || 100, maxHp: a.maxHp || 100, state: a.state || 'idle',
+      })));
+    } catch (e) {}
+  }
+  // 清掉舊的本地/雙重 AI DOM，避免打架
+  try { worldLayer.querySelectorAll('.world-unit.ai-player').forEach(el => { if (!el.dataset.aoiKind) el.remove(); }); } catch (e) {}
+  if (GS.aiPlayers) GS.aiPlayers = [];
+  return;
+}
+function renderServerAIsToWorld_UNUSED(ais) {
   if (!worldLayer) return;
 
   // v2.7.7：修復 AI:local 根因 —  validAis 從未在函式內定義，導致 ReferenceError
@@ -28544,126 +28825,150 @@ if (typeof dealDamageToAIPlayer === 'function') {
 //  客戶端只負責渲染，不生成本地 AI/怪物
 // ============================================================
 (function() {
-  // AOI 實體快取：id -> entity data + DOM element
+  // AOI 實體快取：id -> entity record { data, el, kind, renderX, renderY, targetX, targetY, ... }
   const aoiEntities = new Map();
 
-  // 取得或建立 AOI 實體的 DOM
+  // NPC id/type -> KING_ICONS 徽章 key（與 renderNPCs 的 npcSpriteMap 保持一致）
+  const NPC_ICON_MAP = {
+    shop: 'npc_shop', blacksmith: 'npc_blacksmith', warehouse: 'npc_warehouse',
+    quest: 'npc_quest', premium_shop: 'npc_luxury', inn: 'npc_inn',
+    bulletin: 'npc_board', dungeon_master: 'npc_dungeon', main_quest: 'npc_priest',
+    arena_master: 'npc_arena', witch: 'npc_witch', guard: 'npc_guard',
+    healer: 'npc_healer', wizard: 'npc_wizard', postman: 'npc_postman', trader: 'npc_merchant_new',
+  };
+  function _npcIconKey(data) {
+    const t = data.type || data.classId || data.npcId || data.id || '';
+    if (NPC_ICON_MAP[t]) return NPC_ICON_MAP[t];
+    // 由 id 'n:<map>:<idx>' 無法得知類型，退回 shop
+    return 'npc_shop';
+  }
+
+  // 實體 -> DOM：依 kind 分派
   function _buildEntityEl(data) {
     if (data.kind === 'player') return createPlayerEntity(data);
-    if (data.kind === 'ai') return createAIEntity(data);
-    return createGenericEntity(data);
+    if (data.kind === 'ai')     return createAIEntity(data);
+    if (data.kind === 'monster') return createMonsterEntity(data);
+    if (data.kind === 'npc')     return createNpcEntity(data);
+    return createMonsterEntity(data); // 未知 kind 預設當怪物渲染（不再灰色占位框）
   }
 
   function getOrCreateEntity(data) {
+    if (!data || !data.id) return null;
     let ent = aoiEntities.get(data.id);
     if (ent) {
-      // v4.4.14：el 可能因換圖清場(_fullMapCleanupForZone 會移除 .world-unit DOM)而脫離文件，
-      // 但 aoiEntities 還留著舊記錄。此處偵測 el 缺失/脫離 DOM 就重建，否則只更新資料永遠不會重新 append→永久看不見。
-      if (!ent.el || !ent.el.parentNode || !worldLayer.contains(ent.el)) {
+      // el 可能因換圖清場而脫離文件，偵測後重建
+      if (!ent.el || !ent.el.parentNode || (typeof worldLayer !== 'undefined' && worldLayer && !worldLayer.contains(ent.el))) {
         ent.el = _buildEntityEl(data);
       }
       updateEntityDOM(ent, data);
       return ent;
     }
-    ent = { data, el: null };
+    ent = {
+      data: data, el: null, kind: data.kind || 'monster',
+      renderX: data.x || 0, renderY: data.y || 0,
+      targetX: data.x || 0, targetY: data.y || 0,
+      targetDir: data.dir || 1, dead: (data.state === 'dead'),
+      _wasWalking: false, hpFill: null, nameEl: null,
+    };
     aoiEntities.set(data.id, ent);
     ent.el = _buildEntityEl(data);
+    updateEntityDOM(ent, data);
     return ent;
   }
 
-  function createPlayerEntity(data) {
+  // 共用：建立 unit 外殼（世界座標、positionUnit 定位、translate 不手設——交給 positionUnit）
+  function _unitShell(data, cls, kindForPos, zBase) {
     const el = document.createElement('div');
-    el.className = 'world-unit remote-player idle';
+    el.className = 'world-unit ' + cls + ' idle';
     el.dataset.id = data.id;
+    el.dataset.aoiKind = data.kind || '';
     el.style.position = 'absolute';
-    el.style.left = data.x + 'px';
-    el.style.top = data.y + 'px';
-    el.style.transform = 'translate(-50%, -100%)';
-    el.style.zIndex = Math.floor(20 + (data.y || 0) / 8);
+    el.style.left = '0px';
+    el.style.top = '0px';
+    el.style.zIndex = Math.floor((zBase) + (data.y || 0) / 8);
+    if (typeof worldLayer !== 'undefined' && worldLayer) worldLayer.appendChild(el);
+    return el;
+  }
 
+  function createPlayerEntity(data) {
+    const el = _unitShell(data, 'remote-player', 'hero', 20);
     const _clsFull = SPRITE[data.classId] || SPRITE.warrior;
-    // v4.4.18：遠端玩家精簡單圖（idle），避免每人 8 張 0.5~1.4MB 大圖，多人同屏嚴重卡頓；移動靠位置插值 + walking class
     const cls = { idle: _clsFull.idle, color: _clsFull.color, glow: _clsFull.glow, useImg: true, coverMode: !!_clsFull.coverMode, singleFrame: true };
-    // v4.4.0：修正buildSpriteHTML調用參數（第二參數是kind字符串，不是options對象）
     el.innerHTML = buildSpriteHTML(cls, 'hero', true);
-
-    // 設置名字、等級、血條
     const nameEl = el.querySelector('.unit-name');
-    if (nameEl) {
-      nameEl.textContent = data.name || 'Player';
-      nameEl.style.color = '#7ec8ff';
-      nameEl.style.display = 'block';
-    }
+    if (nameEl) { nameEl.textContent = data.name || 'Player'; nameEl.style.color = '#7ec8ff'; nameEl.style.display = 'block'; }
     const levelTag = el.querySelector('.unit-level-tag');
-    if (levelTag && data.level != null) {
-      levelTag.textContent = 'Lv.' + data.level;
-      levelTag.style.display = 'block';
-    }
-    const hpFill = el.querySelector('.unit-hp-fill');
-    if (hpFill && data.maxHp) {
-      hpFill.style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
-    }
-    // 國家敵對判斷
+    if (levelTag && data.level != null) { levelTag.textContent = 'Lv.' + data.level; levelTag.style.display = 'block'; }
+    el._hpFill = el.querySelector('.unit-hp-fill');
+    el._nameEl = nameEl; el._levelTag = levelTag;
+    // 國家敵對
     if (data.nation && typeof GS !== 'undefined' && GS.nation && data.nation !== GS.nation) {
       el.classList.add('enemy-ai');
       if (nameEl) nameEl.style.color = '#ff8080';
     }
-
-    worldLayer.appendChild(el);
-    console.log('[AOI] 創建遠端玩家:', data.id, data.name, 'pos=', data.x, data.y);
     return el;
   }
 
   function createAIEntity(data) {
-    const el = document.createElement('div');
-    el.className = 'world-unit ai-player idle';
-    el.dataset.id = data.id;
-    el.style.position = 'absolute';
-    el.style.left = data.x + 'px';
-    el.style.top = data.y + 'px';
-    el.style.transform = 'translate(-50%, -100%)';
-    el.style.zIndex = Math.floor(10 + (data.y || 0) / 8);
-
-    const cls = SPRITE[data.classId] || SPRITE.enemy || SPRITE.warrior;
-    // v4.4.0：修正buildSpriteHTML調用參數，AI用精簡模式
+    const el = _unitShell(data, 'ai-player', 'enemy', 10);
+    // v4.4.21：classId 對不到真圖（emoji/未知）時一律用 warrior PNG，杜絕中文站位字卡
+    let _aicls = SPRITE[data.classId];
+    if (!_aicls || !_aicls.useImg) _aicls = SPRITE.warrior;
+    const cls = _aicls;
     el.innerHTML = buildSpriteHTML(cls, 'enemy', true);
-
-    // 設置名字、等級、血條
     const nameEl = el.querySelector('.unit-name');
-    if (nameEl) {
-      nameEl.textContent = (data.name || 'Monster') + (data.level != null ? ' Lv.' + data.level : '');
-      nameEl.style.color = '#ff8080';
-      nameEl.style.display = 'block';
-      nameEl.style.fontSize = '9px';
-    }
-    const hpFill = el.querySelector('.unit-hp-fill');
-    if (hpFill && data.maxHp) {
-      hpFill.style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
-      hpFill.style.background = '#ff5050';
-    }
-    // 敵對國家上色
-    if (data.nation && typeof GS !== 'undefined' && GS.nation && data.nation !== GS.nation) {
-      el.classList.add('enemy-ai');
-    }
-
-    worldLayer.appendChild(el);
-    console.log('[AOI] 創建伺服器AI:', data.id, data.name, 'pos=', data.x, data.y);
+    if (nameEl) { nameEl.textContent = (data.name || 'Player') + (data.level != null ? ' Lv.' + data.level : ''); nameEl.style.color = '#b0e0ff'; nameEl.style.display = 'block'; nameEl.style.fontSize = '10px'; }
+    el._hpFill = el.querySelector('.unit-hp-fill');
+    el._nameEl = nameEl;
+    if (data.nation && typeof GS !== 'undefined' && GS.nation && data.nation !== GS.nation) el.classList.add('enemy-ai');
     return el;
   }
 
-  function createGenericEntity(data) {
-    const el = document.createElement('div');
-    el.className = 'world-unit';
-    el.dataset.id = data.id;
-    el.style.position = 'absolute';
-    el.style.left = data.x + 'px';
-    el.style.top = data.y + 'px';
-    el.style.transform = 'translate(-50%, -100%)';
-    el.style.width = '40px';
-    el.style.height = '50px';
-    el.style.background = 'rgba(100,100,100,0.5)';
-    el.style.borderRadius = '10px';
-    worldLayer.appendChild(el);
+  function createMonsterEntity(data) {
+    const el = _unitShell(data, 'monster-unit enemy-ai', 'enemy', 10);
+    // monster type key -> MONSTER_SPRITES（getMonsterSprite 已含中文/大類 fallback）
+    let cls;
+    try { cls = (typeof getMonsterSprite === 'function') ? getMonsterSprite(data.type) : (SPRITE[data.type] || SPRITE.goblin); }
+    catch (e) { cls = SPRITE.goblin; }
+    cls = cls || SPRITE.goblin;
+    el.innerHTML = buildSpriteHTML(cls, 'enemy', true);
+    const nameEl = el.querySelector('.unit-name');
+    if (nameEl) { nameEl.textContent = (data.name || '怪物') + (data.level != null ? ' Lv.' + data.level : ''); nameEl.style.color = '#ffb0a0'; nameEl.style.display = 'block'; nameEl.style.fontSize = '9px'; }
+    el._hpFill = el.querySelector('.unit-hp-fill');
+    el._nameEl = nameEl;
+    if (el._hpFill) el._hpFill.style.background = '#ff5050';
+    // 點怪物 -> 送攻擊（Server Authoritative）
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      try { window._clientAttackAOIMonster(data.id, el); } catch (err) {}
+    });
+    return el;
+  }
+
+  function createNpcEntity(data) {
+    const el = _unitShell(data, 'npc-unit', 'enemy', 8);
+    el.style.width = '56px'; el.style.height = '64px';
+    const key = _npcIconKey(data);
+    let badgeSrc = '';
+    try { if (window.KING_ICONS && typeof window.KING_ICONS.uri === 'function') badgeSrc = window.KING_ICONS.uri(key); } catch (e) {}
+    if (!badgeSrc) { const sp = SPRITE[key]; badgeSrc = (sp && sp.idle) ? sp.idle : ''; }
+    el.innerHTML =
+      '<div class="npc-sprite" style="position:relative;width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center;">' +
+        (data.quest ? '<div class="npc-quest-mark">!</div>' : '') +
+        (badgeSrc ? '<img class="npc-sprite-img" src="' + badgeSrc + '" alt="" style="width:44px;height:52px;object-fit:contain;display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.8))" onerror="window.handleImgError&&window.handleImgError(this)"/>'
+                  : '<div style="font-size:32px;line-height:52px">👤</div>') +
+      '</div>' +
+      '<div class="npc-name" style="position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);font-size:10px;color:#fff;background:rgba(0,0,0,0.6);padding:1px 5px;border-radius:3px;white-space:nowrap;">' + (data.name || 'NPC') + '</div>';
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      try {
+        const npcObj = { id: (data.type || data.npcId || data.id), npcId: (data.type || data.npcId), name: data.name };
+        if (typeof handleNPCClick === 'function') handleNPCClick(npcObj);
+        else if (typeof window.handleNPCClick === 'function') window.handleNPCClick(npcObj);
+      } catch (err) {}
+    });
     return el;
   }
 
@@ -28671,133 +28976,197 @@ if (typeof dealDamageToAIPlayer === 'function') {
     ent.data = data;
     const el = ent.el;
     if (!el) return;
-    // 位置插值目標（由 tick 做平滑移動）
-    ent.targetX = data.x;
-    ent.targetY = data.y;
-    ent.targetDir = data.dir || ent.targetDir || 'down';
-    // HP/MP 更新
-    const hpFill = el.querySelector('.unit-hp-fill');
-    if (hpFill && data.maxHp) {
-      hpFill.style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
+    // v4.x：遠端玩家/AI 變身形態同步到 dataset，供幀條接線判斷
+    if (data.transformId != null) { try { el.dataset.transformId = data.transformId; } catch (e) {} }
+    // 插值目標
+    ent.targetX = (data.x != null) ? data.x : ent.targetX;
+    ent.targetY = (data.y != null) ? data.y : ent.targetY;
+    if (data.dir != null) ent.targetDir = data.dir;
+    // 死亡狀態
+    const isDead = (data.state === 'dead' || data.hp === 0);
+    if (isDead && !ent.dead) {
+      ent.dead = true;
+      el.classList.remove('walking', 'attacking');
+      el.classList.add('dead');
+      const tomb = el.querySelector('.unit-sprite-tomb');
+      if (tomb) { tomb.style.display = 'block'; }
+    } else if (!isDead && ent.dead) {
+      // 重生
+      ent.dead = false;
+      el.classList.remove('dead');
+      const tomb = el.querySelector('.unit-sprite-tomb');
+      if (tomb) tomb.style.display = 'none';
     }
-    // 等級更新
-    const levelTag = el.querySelector('.unit-level-tag');
-    if (levelTag && data.level != null) {
-      levelTag.textContent = 'Lv.' + data.level;
-      levelTag.style.display = 'block';
+    // HP 條
+    if (ent._hpFill && data.maxHp) {
+      const pct = Math.max(0, Math.min(100, ((data.hp || 0) / data.maxHp) * 100));
+      ent._hpFill.style.width = pct + '%';
     }
-    // 名字更新
-    const nameEl = el.querySelector('.unit-name');
-    if (nameEl && data.name && !nameEl.textContent) {
-      nameEl.textContent = data.name;
+    // 名字/等級
+    if (ent._nameEl && data.name && !ent._nameEl.dataset.static) {
+      // 名字只在第一次或變更時更新
+      const txt = (data.name) + (data.kind === 'player' || data.kind === 'ai' ? '' : '') + (data.level != null ? ' Lv.' + data.level : '');
+      if (ent._nameEl.textContent !== txt) ent._nameEl.textContent = txt;
     }
-    // z-index隨y變化
-    el.style.zIndex = Math.floor((data.kind === 'player' ? 20 : 10) + (data.y || 0) / 8);
+    // z 排序
+    const zBase = (data.kind === 'player') ? 20 : (data.kind === 'npc' ? 8 : 10);
+    el.style.zIndex = Math.floor(zBase + (ent.targetY || 0) / 8);
   }
 
   function removeEntity(id) {
     const ent = aoiEntities.get(id);
-    if (ent && ent.el) {
-      ent.el.remove();
+    if (ent && ent.el && ent.el.parentNode) {
+      try { ent.el.remove(); } catch (e) {}
     }
     aoiEntities.delete(id);
   }
 
-  // AOI tick：平滑插值移動所有實體
+  // 平滑插值：約 80~120ms 內趨近伺服器座標，用 positionUnit 定位
   function tickAOI(dt) {
     if (aoiEntities.size === 0) return;
-    const speed = 200; // 插值速度，越大越緊貼伺服器位置
+    // 指數趨近：dt 約 16ms 時 factor≈0.18，~6 幀(~100ms)貼齊目標
+    const factor = 1 - Math.pow(0.0001, dt / 1000);
     for (const ent of aoiEntities.values()) {
       if (ent.targetX == null || !ent.el) continue;
-      const dx = ent.targetX - parseFloat(ent.el.style.left || '0');
-      const dy = ent.targetY - parseFloat(ent.el.style.top || '0');
+      const dx = ent.targetX - ent.renderX;
+      const dy = ent.targetY - ent.renderY;
       const dist = Math.hypot(dx, dy);
-      if (dist < 1) {
-        // 已到目標：回到 idle
-        if (ent._aoiWalking) { ent.el.classList.remove('walking'); ent.el.classList.add('idle'); ent._aoiWalking = false; }
-        continue;
+      const kindForPos = (ent.kind === 'player') ? 'hero' : 'enemy';
+      if (dist > 0.6) {
+        ent.renderX += dx * factor;
+        ent.renderY += dy * factor;
+        // 朝向左右鏡像
+        if (Math.abs(dx) > 1) ent.el.classList.toggle('face-left', dx < 0);
+        // 走路姿態
+        if (!ent._wasWalking) { ent.el.classList.remove('idle'); ent.el.classList.add('walking'); ent._wasWalking = true; }
+      } else {
+        ent.renderX = ent.targetX; ent.renderY = ent.targetY;
+        if (ent._wasWalking) { ent.el.classList.remove('walking'); ent.el.classList.add('idle'); ent._wasWalking = false; }
       }
-      const step = (speed * dt) / 1000;
-      const ratio = Math.min(1, step / dist);
-      const newX = parseFloat(ent.el.style.left) + dx * ratio;
-      const newY = parseFloat(ent.el.style.top) + dy * ratio;
-      ent.el.style.left = newX + 'px';
-      ent.el.style.top = newY + 'px';
-      // 移動中：切換 walking 姿態（v4.4.14）
-      if (!ent._aoiWalking) { ent.el.classList.remove('idle'); ent.el.classList.add('walking'); ent._aoiWalking = true; }
-      // 朝向（左右）
-      if (Math.abs(dx) > 0.5) ent.el.classList.toggle('face-left', dx < 0);
+      try {
+        if (typeof positionUnit === 'function') positionUnit(ent.el, ent.renderX, ent.renderY, kindForPos);
+      } catch (e) {}
     }
   }
 
   // 對外 API（給 multiplayer.js 呼叫）
   window.handleAOIEnter = function(entities) {
+    if (!Array.isArray(entities)) return;
     for (const data of entities) {
-      try { getOrCreateEntity(data); } catch(e) { console.warn('[AOI] enter 失敗:', e.message, data); }
+      try { getOrCreateEntity(data); } catch (e) { console.warn('[AOI] enter 失敗:', e && e.message, data); }
     }
   };
 
   window.handleAOIUpdate = function(entities) {
+    if (!Array.isArray(entities)) return;
     for (const data of entities) {
-      try { getOrCreateEntity(data); } catch(e) { /* ignore */ }
+      try { getOrCreateEntity(data); } catch (e) { /* ignore */ }
     }
   };
 
   window.handleAOILeave = function(ids) {
-    for (const id of ids) {
-      removeEntity(id);
-    }
+    if (!Array.isArray(ids)) return;
+    for (const id of ids) removeEntity(id);
   };
 
-  window.setAOIRadius = function(r) {
-    console.log('[AOI] 可見半徑 =', r, 'px');
-  };
+  window.setAOIRadius = function(r) { console.log('[AOI] 可見半徑 =', r, 'px'); };
 
   window.setServerSelfState = function(self) {
-    console.log('[AOI] 伺服器端自身狀態:', self);
-    // 將來可用於伺服器端糾正位置
+    // 伺服端回傳自身位置，用於誤差校正
+    try {
+      if (self && (self.x != null) && typeof GS !== 'undefined' && GS.player) {
+        // 只在誤差過大時拉回（>40px），避免干擾本地預測
+        const dx = self.x - GS.player.x, dy = self.y - GS.player.y;
+        if (Math.hypot(dx, dy) > 40) { GS.player.x = self.x; GS.player.y = self.y; }
+      }
+    } catch (e) {}
   };
 
   // 清除所有 AOI 實體（切換地圖/登出時呼叫）
   window.clearAOIEntities = function() {
-    for (const ent of aoiEntities.values()) {
-      if (ent.el) ent.el.remove();
-    }
+    for (const ent of aoiEntities.values()) { if (ent.el && ent.el.parentNode) { try { ent.el.remove(); } catch (e) {} } }
     aoiEntities.clear();
-    console.log('[AOI] 已清除所有實體');
   };
 
   window._aoiTick = tickAOI;
 
-  // v4.4.15：manifest / 精靈預載就緒後，對已建立的 AOI 實體重設一次 idle src，
-  //   命中瀏覽器快取即可立即顯示本體（根治「先出名字標籤、數秒後才補圖」）
+  // 預載就緒後重設 idle src
   window._refreshAOISprites = function() {
     let n = 0;
     for (const ent of aoiEntities.values()) {
       try {
         if (!ent.el || !ent.data) continue;
-        const cls = SPRITE[ent.data.classId] || SPRITE.enemy || SPRITE.warrior;
-        const idle = cls && cls.idle;
+        let cls;
+        try { cls = (ent.kind === 'monster' && typeof getMonsterSprite === 'function') ? getMonsterSprite(ent.data.type) : (SPRITE[ent.data.classId] || SPRITE.enemy || SPRITE.warrior); }
+        catch (e) { cls = SPRITE.warrior; }
+        const idle = cls && (cls.idle || cls.walk2 || cls.side || cls.walk);
         if (!idle) continue;
         const idleImg = ent.el.querySelector('img.sprite-frame-idle, img.unit-sprite-img');
-        if (idleImg && idleImg.dataset.presetSrc !== idle) {
-          idleImg.src = idle;
-          idleImg.dataset.presetSrc = idle;
-          n++;
-        }
+        if (idleImg && idleImg.dataset.presetSrc !== idle) { idleImg.src = idle; idleImg.dataset.presetSrc = idle; n++; }
       } catch (e) {}
     }
     if (n) console.log('[AOI] 預載就緒，刷新', n, '個實體精靈');
   };
 
-  // v4.4.14：player_move 是全圖即時廣播（比 100ms aoi_update 更快），用它直接刷新 AOI 實體的插值目標，
-  // 讓遠端玩家移動更跟手。實體尚未建立時忽略（等 aoi_enter/aoi_update 建立），避免用不完整資料建立空殼。
+  // player_move 即時刷新插值目標
   window._aoiMoveTarget = function(id, x, y, dir) {
     const ent = aoiEntities.get(id);
     if (!ent) return;
-    if (x != null) ent.targetX = x;
-    if (y != null) ent.targetY = y;
+    if (x != null) { ent.targetX = x; }
+    if (y != null) { ent.targetY = y; }
     if (dir != null) ent.targetDir = dir;
+  };
+
+  // ===== 攻擊路徑（Server Authoritative）=====
+  // 點 AOI 怪物 -> 送 {type:'attack', targetId, ts}
+  window._clientAttackAOIMonster = function(targetId, el) {
+    try {
+      if (window.MultiplayerClient && typeof MultiplayerClient.sendAttack === 'function') {
+        MultiplayerClient.sendAttack(targetId);
+      }
+      // 本地預播攻擊動畫（實際數字以 attack_result 為準）
+      if (el) {
+        el.classList.add('attacking');
+        setTimeout(function() { if (el.parentNode) el.classList.remove('attacking'); }, 320);
+      }
+    } catch (e) {}
+  };
+
+  // 收到伺服端 attack_result：跳傷害數字、更新怪血條、死亡/經驗
+  window.handleAttackResult = function(msg) {
+    if (!msg) return;
+    const targetId = msg.targetId;
+    const ent = targetId ? aoiEntities.get(targetId) : null;
+    const dmg = msg.damage || 0;
+    // 飄傷害數字
+    if (dmg > 0 && (typeof damageLayer !== 'undefined') && damageLayer) {
+      try {
+        const t = document.createElement('div');
+        t.className = 'damage-number' + (msg.isCrit ? ' crit' : '');
+        t.textContent = (msg.isCrit ? '暴擊 ' : '-') + dmg;
+        t.style.cssText = 'position:absolute;left:' + ((ent ? ent.renderX : 0) - 20) + 'px;top:' + ((ent ? ent.renderY : 0) - 60) + 'px;pointer-events:none;font-weight:700;color:' + (msg.isCrit ? '#ffd040' : '#fff') + ';text-shadow:0 1px 2px #000;z-index:9999;';
+        damageLayer.appendChild(t);
+        let o = 0;
+        const rise = setInterval(function() {
+          o += 1; t.style.top = (parseFloat(t.style.top) - 1.5) + 'px'; t.style.opacity = String(1 - o / 40);
+          if (o >= 40) { clearInterval(rise); if (t.parentNode) t.remove(); }
+        }, 16);
+      } catch (e) {}
+    }
+    // 更新怪物血條與狀態
+    if (ent) {
+      if (msg.targetMaxHp) ent.data.maxHp = msg.targetMaxHp;
+      if (msg.targetHp != null) ent.data.hp = msg.targetHp;
+      updateEntityDOM(ent, ent.data);
+    }
+    // 獎勵（伺服端為準）
+    if (msg.exp && typeof GS !== 'undefined' && GS.player) { GS.player.exp = (GS.player.exp || 0) + msg.exp; }
+    if (msg.gold && typeof GS !== 'undefined' && GS.resources) { GS.resources.gold = (GS.resources.gold || 0) + msg.gold; }
+    if (msg.killed) {
+      console.log('[AOI] 怪物被擊殺:', targetId);
+    }
+    // 刷新 UI（金幣/經驗條）
+    try { if (typeof updateUI === 'function') updateUI(); } catch (e) {}
   };
 
   // 掛鉤到遊戲主循環
@@ -28807,9 +29176,17 @@ if (typeof dealDamageToAIPlayer === 'function') {
       origGameLoop(dt);
       tickAOI(dt);
     };
+  } else if (typeof window._gameLoopTick !== 'function') {
+    // 沒有主循環掛鉤時，自己跑一個 rAF 插值
+    let _last = performance.now();
+    (function loop(now) {
+      const dt = now - _last; _last = now;
+      tickAOI(dt);
+      requestAnimationFrame(loop);
+    })(_last);
   }
 
-  console.log('[v3.0] AOI 實體管理模組已載入');
+  console.log('[v3.0] AOI 實體管理模組已載入（統一 entity store）');
 })();
 
 // v4.4.9：GS/SPRITE 等是751行大IIFE的私有const，外部腳本(multiplayer.js)訪問不到，

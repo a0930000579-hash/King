@@ -741,9 +741,6 @@ img { display: block; pointer-events: none; }
   pointer-events: none;
   z-index: -1;
 }
-  z-index: 0;
-  filter: blur(1.5px);
-}
 /* 怪物單位：偏紅色血光暈 */
 .world-unit.enemy .unit-sprite-wrap::before,
 .world-unit.monster .unit-sprite-wrap::before {
@@ -1235,6 +1232,47 @@ img { display: block; pointer-events: none; }
   animation: sprite-hit-8frame 0.3s ease-out;
 }
 
+/* ============================================================
+   任務二A：光柵攻擊/受擊幀條（steps 播放）
+   橫條由 matte_work/gen_frames.py 以現有單張側視精靈 PIL 產出：
+     assets/frames/<形態>/attack.png  (4 幀橫條)
+     assets/frames/<形態>/hit.png      (3 幀橫條)
+     assets/frames/<形態>/death.png    (2 幀橫條)
+   接線方式（給客戶端代理，game.js 切幀時）：
+     1) 在 .unit-sprite-wrap 上加 .frame-armed
+     2) 攻擊時設 wrap.style.setProperty('--atk-sheet', 'assets/frames/<形態>/attack.png')
+     3) 受擊時設 wrap.style.setProperty('--hit-sheet',  'assets/frames/<形態>/hit.png')
+   未設 --atk-sheet / 未加 .frame-armed 時，完全沿用舊的 wrap 脈衝特效（不回歸）。
+   面向左由 .face-left 對整體鏡像，橫條不需另產左版。
+   ============================================================ */
+.unit-sprite-wrap.frame-armed {
+  background-repeat: no-repeat;
+  background-position: left bottom;
+}
+.world-unit.attacking .unit-sprite-wrap.frame-armed {
+  background-image: var(--atk-sheet, none);
+  background-size: 400% 100%;
+  animation: sprite-attack-strip 0.35s steps(4) forwards;
+}
+.world-unit.hit .unit-sprite-wrap.frame-armed {
+  background-image: var(--hit-sheet, none);
+  background-size: 300% 100%;
+  animation: sprite-hit-strip 0.25s steps(3) forwards;
+}
+/* 播放幀條時暫藏單張 idle 主圖（幀條本身就是人物動作），結束自動回復 */
+.world-unit.attacking .unit-sprite-wrap.frame-armed .unit-sprite-img,
+.world-unit.hit      .unit-sprite-wrap.frame-armed .unit-sprite-img {
+  opacity: 0;
+}
+@keyframes sprite-attack-strip {
+  from { background-position-x: 0%; }
+  to   { background-position-x: -300%; }   /* 4 幀：0 / -100% / -200% / -300% */
+}
+@keyframes sprite-hit-strip {
+  from { background-position-x: 0%; }
+  to   { background-position-x: -200%; }   /* 3 幀：0 / -100% / -200% */
+}
+
 /* 英雄/守護/Boss 用稍慢的節奏，體現重量感 */
 .world-unit.hero.idle .unit-sprite img {
   animation-duration: 2s;
@@ -1693,10 +1731,6 @@ img { display: block; pointer-events: none; }
 .skill-equip-btn:hover, .skill-upgrade-btn:hover {
   filter: brightness(1.1);
 }
-  border-radius: 50%;
-  z-index: -1; pointer-events: none;
-  filter: blur(1.5px);
-}
 .world-unit.summon .unit-shadow { width: 26px; height: 6px; bottom: -1px; }
 .world-unit.enemy .unit-shadow { width: 28px; height: 7px; }
 /* v2.7.1: 世界層所有單位統一腳下橢圓半透明黑色接觸陰影（英雄也不例外） */
@@ -1988,6 +2022,17 @@ img { display: block; pointer-events: none; }
   transition: opacity 0.3s, visibility 0.3s;
   transform: scale(1);
   transform-origin: center bottom;
+}
+
+/* v4.4.21：光環與人物共享同一「腳底錨點座標系」。
+   sprite-anchor.js 量測主體後把 --ax/--ay/--as 廣播到 .world-unit（光環與 wrap 同為其子節點，
+   靠 CSS 變數向下繼承讀到同組值）。主體水平中心被錨點校正到 wrap 水平中心、腳底到 wrap 底；
+   光環 left:50%/margin-left:-36 正落在同一水平中心、bottom:0 落在同一腳底，故與人物貼齊。
+   （關鍵修復在 sprite-anchor：變身換 src 後會重新量測，新精靈不再沿用舊 --ax 導致主體偏右、
+     光環留在中心而看起來「光環在人物左側」。）面向左時人物鏡像但主體水平中心不變，
+   光環本來左右對稱，不需翻轉；移動/攻擊/受擊時 wrap 做短暫位移而光環固定在腳底，符合地面魔法陣。 */
+.world-unit.hero .transform-aura {
+  will-change: transform;
 }
 
 /* ===== 四周发光（角色周围光晕脉动） ===== */
@@ -2658,16 +2703,6 @@ img { display: block; pointer-events: none; }
 @keyframes target-bob {
   0%   { transform: translateY(0); }
   100% { transform: translateY(-6px); }
-}
-  width: 26px; height: 26px;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: contain;
-  display: block;
-  font-size: 16px;
-  line-height: 1;
-  border-radius: 3px;
-  overflow: hidden;
 }
 .skill-btn .skill-icon svg {
   width: 100%;
@@ -5825,10 +5860,6 @@ img { display: block; pointer-events: none; }
   border-radius: 3px;
   border: 1px solid #d4a84a;
   text-shadow: 0 1px 1px rgba(0,0,0,0.8);
-}
-  z-index: 4;
-  letter-spacing: 0.5px;
-  line-height: 1.2;
 }
 @keyframes newTagBlink {
   0%, 100% { opacity: 1; }

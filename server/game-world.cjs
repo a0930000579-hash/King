@@ -26,7 +26,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { createAIEngine } = require('./ai-engine.cjs');
+const { createAIEngine, calcBaseStats } = require('./ai-engine.cjs');
 
 // ============================================================
 //  常數設定
@@ -44,6 +44,8 @@ function _diagLog(msg) {
 const AOI_RADIUS = 800;
 const MOVE_SPEED = 180;
 const TELEPORT_COOLDOWN_MS = 3000; // 傳送冷卻，避免來回彈跳
+// v4.5.0：怪物移動 aoi_update 節流門檻（ms）。hp/state 變更仍即時，不受此限制。
+const MONSTER_MOVE_BC_MS = 350;
 
 // ============================================================
 //  地圖配置載入
@@ -94,8 +96,42 @@ class Zone {
     this.players = new Map();     // wsId -> entity（快速索引）
     this.aiEngine = null;
     this._aiInitialized = false;
+    this._monsterEntities = new Map(); // monsterUid -> entity（怪物實體鏡像索引）
     this.lastTickTime = Date.now();
     this._teleportCooldowns = new Map(); // wsId -> lastTeleportTime
+    // v4.5.0：從地圖設定 npcs[] 建立靜態 NPC 實體（固定座標，無移動）
+    this._buildNpcEntities();
+  }
+
+  // ===== 建立 NPC 實體（kind:'npc'，靜態） =====
+  // 來源：this.config.npcs[] = [{ npcId, x, y, name }]
+  //  id 命名：'n:' + mapId + ':' + npcIdx；type=npcId；npcType=npcId
+  _buildNpcEntities() {
+    const npcs = this.config.npcs || [];
+    npcs.forEach((npc, idx) => {
+      const entity = {
+        id: `n:${this.mapId}:${idx}`,
+        kind: 'npc',
+        name: npc.name || npc.npcId || 'NPC',
+        classId: null,
+        level: 1,
+        x: Math.round(npc.x || 0),
+        y: Math.round(npc.y || 0),
+        hp: 100000,
+        maxHp: 100000,
+        mp: 0,
+        maxMp: 0,
+        nation: '',
+        state: 'idle',
+        dir: 'down',
+        type: npc.npcId || ('npc_' + idx),
+        npcType: npc.npcId || null,
+      };
+      this.entities.set(entity.id, entity);
+    });
+    if (npcs.length > 0) {
+      console.log(`[Zone] ${this.mapId}: 建立 ${npcs.length} 個靜態 NPC 實體`);
+    }
   }
 
   get width() { return this.config.width || 2000; }
@@ -123,6 +159,12 @@ class Zone {
     for (const ai of aiList) {
       const entity = this._aiToEntity(ai);
       this.entities.set(entity.id, entity);
+    }
+    // v4.5.0：把 ai-engine 生成的怪物包成 kind:'monster' 實體放入 entities
+    try {
+      this._syncMonsters(0);
+    } catch(e) {
+      console.warn(`[Zone] ${this.mapId}: _syncMonsters 失敗（不影響玩家）:`, e.message);
     }
     this.aiEngine.onAIChange = (srvId, mpId, aiList) => {
       if (srvId !== this.serverId || mpId !== this.mapId) return;
@@ -161,6 +203,141 @@ class Zone {
       target: ai.target || null,
       lastMoveTime: Date.now(),
     };
+  }
+
+  // v4.5.0：把一隻 ai-engine 怪物包成 Zone 實體（kind:'monster'）
+  //  entity id = 'm:' + mapId + ':' + (idx+1)；monsterUid 指回 ai-engine 原始怪物 id
+  _monsterToEntity(mon, idx) {
+    return {
+      id: `m:${this.mapId}:${idx + 1}`,
+      kind: 'monster',
+      monsterUid: mon.uid || mon.id,
+      name: mon.name || mon.type,
+      classId: null,
+      level: mon.level || 1,
+      x: Math.round(mon.x),
+      y: Math.round(mon.y),
+      hp: mon.hp,
+      maxHp: mon.hpMax || mon.maxHp || mon.hp,
+      mp: 0,
+      maxMp: 0,
+      nation: '',
+      state: mon.dead ? 'dead' : (mon.state || 'idle'),
+      dir: 'down',
+      type: mon.type,
+      npcType: null,
+      speed: mon.speed || 40,
+    };
+  }
+
+  // v4.5.0：怪物伺服端權威 — 閒置巡邏 / 被打追擊 / 死亡重生，並鏡像進 entities
+  //  在 aiEngine.tick() 之後呼叫（此時怪物重生/AI 打擊已生效）
+  _syncMonsters(dtMs) {
+    if (!this.aiEngine || typeof this.aiEngine.getMonsterList !== 'function') return;
+    let list;
+    try { list = this.aiEngine.getMonsterList(this.serverId, this.mapId) || []; }
+    catch(e) { return; }
+    const dt = Math.max(0, dtMs || 0) / 1000; // 秒
+    const LEASH = 240;        // 追擊脫離距離（離駐地太遠就放棄）
+    const CHASE_SPEED = 50;   // 追擊速度 px/s
+    const WANDER_SPEED = 12;  // 巡邏速度 px/s（放慢，避免客戶端插值追趕疲勞）
+    const HOME_R = 110;       // 巡邏半徑（圍繞駐地，幅度小）
+
+    list.forEach((mon, idx) => {
+      const eid = `m:${this.mapId}:${idx + 1}`;
+      let entity = this.entities.get(eid);
+
+      // ---- 死亡：不從 entities 刪除，只標 dead / hp=0，由 aoi_update 廣播屍體 ----
+      if (mon.dead) {
+        if (!entity) {
+          entity = this._monsterToEntity(mon, idx);
+          this.entities.set(eid, entity);
+          this._monsterEntities.set(mon.uid, entity);
+        } else {
+          entity.x = Math.round(mon.x);
+          entity.y = Math.round(mon.y);
+          entity.hp = 0;
+          entity.maxHp = mon.hpMax || entity.maxHp;
+          entity.state = 'dead';
+          entity.type = mon.type;
+          entity.name = mon.name || entity.name;
+          entity.level = mon.level || entity.level;
+        }
+        return;
+      }
+
+      // ---- 活著的怪物：巡邏 / 追擊 ----
+      // 1) 決定目標點
+      let tx = mon.wanderX, ty = mon.wanderY;
+      let chasing = false;
+      if (mon.aggroUid && mon.aggroTimer > 0) {
+        const tgt = this.players.get(this._wsIdByPlayerId(mon.aggroUid));
+        if (tgt) {
+          const dHome = Math.hypot(tgt.x - (mon.homeX ?? mon.x), tgt.y - (mon.homeY ?? mon.y));
+          if (dHome <= LEASH) { tx = tgt.x; ty = tgt.y; chasing = true; }
+          else mon.aggroTimer = 0; // 追出脫離範圍 → 放棄
+        }
+      }
+      // 2) 巡邏換點
+      if (!chasing) {
+        mon.wanderTimer -= dt;
+        if (mon.wanderTimer <= 0) {
+          mon.wanderTimer = 2 + Math.random() * 3;
+          const hx = mon.homeX ?? mon.x, hy = mon.homeY ?? mon.y;
+          mon.wanderX = Math.max(40, Math.min(this.width - 40, hx + (Math.random() - 0.5) * HOME_R * 2));
+          mon.wanderY = Math.max(40, Math.min(this.height - 40, hy + (Math.random() - 0.5) * HOME_R * 2));
+          tx = mon.wanderX; ty = mon.wanderY;
+        }
+      }
+      // 3) 移動一步
+      const mdx = tx - mon.x, mdy = ty - mon.y;
+      const mdist = Math.hypot(mdx, mdy);
+      let moved = false;
+      if (mdist > 6) {
+        const speed = chasing ? CHASE_SPEED : WANDER_SPEED;
+        const step = Math.min(mdist, speed * dt);
+        mon.x += (mdx / mdist) * step;
+        mon.y += (mdy / mdist) * step;
+        if (Math.abs(mdx) > Math.abs(mdy)) mon.dir = mdx >= 0 ? 'right' : 'left';
+        else mon.dir = mdy >= 0 ? 'down' : 'up';
+        moved = true;
+      }
+      // 邊界 + 駐地軟束縛（非追擊時離駐地太遠則拉回）
+      mon.x = Math.max(20, Math.min(this.width - 20, mon.x));
+      mon.y = Math.max(20, Math.min(this.height - 20, mon.y));
+      if (!chasing) {
+        const hx = mon.homeX ?? mon.x, hy = mon.homeY ?? mon.y;
+        const dh = Math.hypot(mon.x - hx, mon.y - hy);
+        if (dh > HOME_R) {
+          mon.x += (hx - mon.x) * 0.1;
+          mon.y += (hy - mon.y) * 0.1;
+        }
+      }
+
+      // 4) 鏡像進 entities
+      if (!entity) {
+        entity = this._monsterToEntity(mon, idx);
+        this.entities.set(eid, entity);
+        this._monsterEntities.set(mon.uid, entity);
+      } else {
+        entity.x = Math.round(mon.x);
+        entity.y = Math.round(mon.y);
+        entity.hp = mon.hp;
+        entity.maxHp = mon.hpMax || entity.maxHp;
+        entity.state = moved ? 'walk' : 'idle';
+        entity.type = mon.type;
+        entity.name = mon.name || entity.name;
+        entity.level = mon.level || entity.level;
+      }
+    });
+  }
+
+  // 依 player id（實體 id）反查 wsId（玩家實體 id == playerId）
+  _wsIdByPlayerId(playerId) {
+    for (const [wsId, p] of this.players) {
+      if (p.id === playerId) return wsId;
+    }
+    return null;
   }
 
   // ===== 隨機出生點：基於spawn點在±100範圍內生成10個隨機點 =====
@@ -240,7 +417,10 @@ class Zone {
     if (!entity) return null;
     this.entities.delete(entity.id);
     this.players.delete(wsId);
-    this._broadcastLeave(entity.id, wsId);
+    // v4.5.0：斷線廣播失敗不得影響移除流程
+    try { this._broadcastLeave(entity.id, wsId); } catch (e) {
+      console.error(`[Zone] ${this.mapId}: _broadcastLeave 異常（已忽略）:`, e.message);
+    }
     console.log(`[Zone] ${this.mapId}: 玩家離開 ${entity.name}, 剩餘玩家=${this.players.size}`);
     return entity;
   }
@@ -319,6 +499,11 @@ class Zone {
       }
     }
 
+    // v4.5.0：怪物伺服端權威移動/重生，並鏡像進 entities（在 aiEngine.tick 之後）
+    try {
+      this._syncMonsters(dt);
+    } catch (e) {}
+
     // 玩家移動
     for (const player of this.players.values()) {
       if (player.moveTarget && player.state === 'walk') {
@@ -362,24 +547,56 @@ class Zone {
       const enterEntities = [];
       const moveEntities = [];
       let checkedCount = 0;
+      if (!player._lastSent) player._lastSent = new Map(); // entityId -> {fp, t}
 
       for (const entity of this.entities.values()) {
+        try {
         if (entity.id === player.id) continue;
+        // v4.5.0 防禦：跳過座標不完整的殘留實體，避免 NaN/undefined 傳播
+        if (!entity || typeof entity.x !== 'number' || typeof entity.y !== 'number' ||
+            !isFinite(entity.x) || !isFinite(entity.y) ||
+            typeof player.x !== 'number' || typeof player.y !== 'number') continue;
         checkedCount++;
+        let ser;
+        try { ser = this._serializeEntity(entity); } catch (e) { continue; }
         const dist = Math.hypot(entity.x - player.x, entity.y - player.y);
         if (dist <= AOI_RADIUS) {
-          visibleIds.add(entity.id);
+          // v4.5.0 降載：對「已見過」的實體做指紋比對，hp/state/位置有變才進 update；
+          //  怪物移動另加時間門檻（MONSTER_MOVE_BC_MS），避免每 tick 把全場怪物全量重送。
+          //  enter/leave 永遠即時；NPC 靜態 → 進 enter 後不再重送。
           if (player.seenEntities.has(entity.id)) {
-            moveEntities.push(this._serializeEntity(entity));
+            const fp = ser.x + '|' + ser.y + '|' + ser.hp + '|' + ser.maxHp + '|' + ser.state + '|' + (ser.dir || '');
+            const last = player._lastSent.get(entity.id);
+            const fpChanged = !last || last.fp !== fp;
+            const now = Date.now();
+            let include = fpChanged;
+            if (!include && entity.kind === 'monster') {
+              // 怪物位置性變化未到時間門檻就先不送（hp/state 變化已由 fpChanged 涵蓋，即時）
+              if (!last || (now - (last.t || 0)) >= MONSTER_MOVE_BC_MS) include = true;
+            }
+            if (include) {
+              moveEntities.push(ser);
+              player._lastSent.set(entity.id, { fp, t: now });
+            }
           } else {
-            enterEntities.push(this._serializeEntity(entity));
+            enterEntities.push(ser);
+            player._lastSent.set(entity.id, {
+              fp: ser.x + '|' + ser.y + '|' + ser.hp + '|' + ser.maxHp + '|' + ser.state + '|' + (ser.dir || ''),
+              t: Date.now(),
+            });
           }
+        }
+        } catch (e) {
+          console.error('[BC-ERR] entity=' + (entity && entity.id) + ' err=' + e.message);
         }
       }
 
       const leaveIds = [];
       for (const oldId of player.seenEntities) {
-        if (!visibleIds.has(oldId)) leaveIds.push(oldId);
+        if (!visibleIds.has(oldId)) {
+          leaveIds.push(oldId);
+          player._lastSent.delete(oldId);
+        }
       }
 
       player.seenEntities = visibleIds;
@@ -483,6 +700,9 @@ class Zone {
       nation: e.nation,
       state: e.state,
       dir: e.dir,
+      // v4.5.0：擴充怪物/NPC 辨識（玩家/AI 為 null）
+      type: e.type || null,       // 怪物=monster type key；NPC=npcId；玩家/ai 空
+      npcType: e.npcType || null, // NPC 細類（選用）
     };
   }
 
@@ -582,6 +802,41 @@ class GameWorld {
       if (p.id === playerId) return p;
     }
     return null;
+  }
+
+  // v4.5.0：依實體 id 取得任一實體（玩家/AI/怪物/NPC）
+  getEntityById(mapId, entityId) {
+    const zone = this.zones.get(mapId);
+    if (!zone) return null;
+    return zone.entities.get(entityId) || null;
+  }
+
+  // v4.5.0：攻擊怪物後立即同步怪物狀態並觸發 AOI 廣播（降低延遲）
+  syncMonstersNow(mapId) {
+    const zone = this.zones.get(mapId);
+    if (!zone) return;
+    try { zone._syncMonsters(0); } catch(e) {}
+    try { zone._broadcastAOI(); } catch(e) {}
+  }
+
+  // v4.5.0：玩家攻擊怪物（權威）。必須用 zone 自己的 aiEngine 實例
+  //  （怪物由該 engine 生成/持有；ws-server 另有獨立 engine 實例，不可混用）
+  //  attacker 為玩家實體；回傳 damageMonster 結果或 null（無效目標）
+  playerAttackMonster(mapId, attacker, targetEntityId) {
+    const zone = this.zones.get(mapId);
+    if (!zone || !attacker) return null;
+    const target = zone.entities.get(targetEntityId);
+    if (!target || target.kind !== 'monster') return null;
+    if (!zone.aiEngine || typeof zone.aiEngine.damageMonster !== 'function') return null;
+    const AOI_R = AOI_RADIUS;
+    const dist = Math.hypot(attacker.x - target.x, attacker.y - target.y);
+    if (dist > AOI_R) return { error: 'out_of_range' };
+    const baseAtk = computePlayerAtk(attacker.classId, attacker.level);
+    const r = zone.aiEngine.damageMonster(this.serverId, mapId, target.monsterUid, baseAtk, { id: attacker.id, name: attacker.name });
+    // 同步怪物 hp/state 並經 aoi_update 廣播給附近所有人
+    try { zone._syncMonsters(0); } catch(e) {}
+    try { zone._broadcastAOI(); } catch(e) {}
+    return r;
   }
 
   // 地圖切換（從 fromMap 移到 toMap）
@@ -777,6 +1032,38 @@ function getPlayerById(serverId, mapId, playerId) {
   return gw.getPlayerById(mapId, playerId);
 }
 
+// v4.5.0：依實體 id 取得實體（攻擊怪物路由用）
+function getEntityById(serverId, mapId, entityId) {
+  const gw = gameWorlds.get(serverId);
+  if (!gw) return null;
+  return gw.getEntityById(mapId, entityId);
+}
+
+// v4.5.0：攻擊怪物後立即同步並廣播
+function syncMonstersNow(serverId, mapId) {
+  const gw = gameWorlds.get(serverId);
+  if (!gw) return;
+  gw.syncMonstersNow(mapId);
+}
+
+// v4.5.0：玩家攻擊怪物（由 ws-server 呼叫，傳入攻擊者實體）
+function playerAttackMonster(serverId, mapId, attacker, targetEntityId) {
+  const gw = gameWorlds.get(serverId);
+  if (!gw) return null;
+  return gw.playerAttackMonster(mapId, attacker, targetEntityId);
+}
+
+// v4.5.0：玩家基礎攻擊力（伺服端權威計算，與 ai-engine calcBaseStats 同源，確保兩端一致）
+//  classId+level 決定 atk，外加等級微幅成長；預設 warrior/1 ≈ 8
+function computePlayerAtk(classId, level) {
+  try {
+    const s = calcBaseStats(classId || 'warrior', Math.max(1, level || 1));
+    return s.atk;
+  } catch (e) {
+    return 8;
+  }
+}
+
 // 玩家主動切換地圖（由 WS message 觸發，例如回城卷軸）
 function playerChangeMap(serverId, fromMap, toMap, wsId, targetX, targetY) {
   const gw = gameWorlds.get(serverId);
@@ -842,6 +1129,10 @@ module.exports = {
   playerChangeMap,
   getPlayerByWsId,
   getPlayerById,
+  getEntityById,
+  syncMonstersNow,
+  playerAttackMonster,
+  computePlayerAtk,
   startTick,
   getStats,
   AOI_RADIUS,
