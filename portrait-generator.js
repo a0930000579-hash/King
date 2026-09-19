@@ -200,6 +200,11 @@
   }
 
   function classPortraitToDataURL(classId, size) {
+    // v4.4.22：優先回傳真實職業 portrait PNG（assets/class/<class>/portrait.png），
+    //   不再用 Canvas 畫雙劍圓圈佔位。缺檔才退回 Canvas 光柵。
+    if (CLASS_STYLES[classId]) {
+      return 'assets/class/' + classId + '/portrait.png';
+    }
     const style = CLASS_STYLES[classId] || { color: '#888888', accent: '#aaaaaa', bg: '#222222' };
     return generatePortraitPNG(style, 'class', size);
   }

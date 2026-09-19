@@ -27,6 +27,11 @@
     'back','close','quest','bag','star','shop','shield',
     // 戰鬥/技能/道具
     'sword','lightning','ice','heal','arrow','person','dungeon','summon','scroll','potion',
+    // 金幣
+    'coin',
+    // 技能圖標（客戶端依職業/元素對應）
+    'skill_melee','skill_basic','skill_bow','skill_fire','skill_heal','skill_shield',
+    'skill_lightning','skill_ice','skill_rage','skill_dash','skill_aoe',
     // NPC 徽章
     'npc_shop','npc_luxury','npc_warehouse','npc_quest','npc_inn','npc_priest',
     'npc_dungeon','npc_board','npc_guard','npc_healer','npc_wizard','npc_postman',

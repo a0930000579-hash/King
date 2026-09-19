@@ -808,6 +808,14 @@ img { display: block; pointer-events: none; }
   transform-origin: center bottom;
 }
 
+/* v4.4.22：光環必須等 sprite-anchor 量測完成（.anchor-ready）才淡入，
+   避免首次 spawn/變身瞬間圖片未 decode、--ax 為預設值時光環先顯示在錯位位置。 */
+.world-unit.hero.anchor-ready .transform-aura {
+  visibility: visible;
+  opacity: 1;
+  transform: scale(1);
+}
+
 .unit-sprite-img {
   position: absolute;
   top: 0; left: 0;

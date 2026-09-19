@@ -76,14 +76,28 @@
   }
 
   function normalize(img) {
-    if (!img.naturalWidth) return;
+    if (!img.naturalWidth) {
+      // v4.4.22：圖片尚未 decode（首次 spawn / 變身換 src 瞬間）。
+      //   掛一次性 onload，load 完成後必重算錨點——不要因為 __anchorDone 就跳過。
+      if (!img.__anchorLoading) {
+        img.__anchorLoading = true;
+        img.addEventListener('load', function onl() {
+          img.__anchorLoading = false;
+          img.__anchorDone = false;   // 強制重測
+          try { normalize(img); } catch (_) {}
+        }, { once: true });
+      }
+      return;
+    }
     var W = img.naturalWidth, H = img.naturalHeight;
     if (!W || !H) return;
     // v4.4.21：src 變更（變身/職業切換只換 img.src、重用同一 img 元素）時必須重新量測，
     //   否則新精靈沿用舊 --ax → 主體偏離 wrap 中心，而兄弟層光環固定在幾何中心，
     //   看起來「光環在人物左側」。記住已量測的 srcKey，src 變了就重測。
     var srcKey = img.currentSrc || img.src || (W + 'x' + H);
-    if (img.__anchorDone && img.__anchorSrc === srcKey) return;
+    // v4.4.22：若圖片剛 load 完成（__anchorDirty），即使 srcKey 相同也強制重測一次。
+    if (img.__anchorDone && img.__anchorSrc === srcKey && !img.__anchorDirty) return;
+    img.__anchorDirty = false;
     var wrap = (img.closest && img.closest('.unit-sprite-wrap')) || img.parentElement;
     var cw = wrap ? wrap.clientWidth : 0, ch = wrap ? wrap.clientHeight : 0;
     if (!cw || !ch) { // 尚未佈局，下一幀重試一次
@@ -122,6 +136,8 @@
         unit.style.setProperty('--ax', axPx);
         unit.style.setProperty('--ay', ayPx);
         unit.style.setProperty('--as', asV);
+        // v4.4.22：錨點就緒，才顯示光環（CSS：.transform-aura 預設透明，anchor-ready 才淡入）
+        unit.classList.add('anchor-ready');
       }
     }
     img.classList.add('anchor-normalized');
@@ -144,7 +160,10 @@
     return t && t.tagName === 'IMG' && t.classList && t.classList.contains('unit-sprite-img');
   }
   document.addEventListener('load', function (e) {
-    if (isSprite(e.target)) { try { normalize(e.target); } catch (_) {} }
+    if (isSprite(e.target)) {
+      e.target.__anchorDirty = true;  // 標記「剛 load 完」，強制重測
+      try { normalize(e.target); } catch (_) {}
+    }
   }, true);
   // 對載入快取、load 事件已過的圖，補一輪
   document.addEventListener('DOMContentLoaded', function () {

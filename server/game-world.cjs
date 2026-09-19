@@ -42,10 +42,12 @@ function _diagLog(msg) {
   } catch(e) {}
 }
 const AOI_RADIUS = 800;
+const AOI_LEAVE_RADIUS = 900; // v4.4.22：AOI 遲滯 — 進入 800、離開 900，消除邊界反覆 enter/leave
 const MOVE_SPEED = 180;
 const TELEPORT_COOLDOWN_MS = 3000; // 傳送冷卻，避免來回彈跳
 // v4.5.0：怪物移動 aoi_update 節流門檻（ms）。hp/state 變更仍即時，不受此限制。
-const MONSTER_MOVE_BC_MS = 350;
+const MONSTER_MOVE_BC_MS = 600; // v4.4.22：怪物/AI 移動廣播節流（ms），hp/state 變更仍即時
+const MOVE_QUANTUM_PX = 6;      // v4.4.22：位移未超過此 px 不視為移動變化（過濾巡邏抖動）
 
 // ============================================================
 //  地圖配置載入
@@ -560,22 +562,30 @@ class Zone {
         let ser;
         try { ser = this._serializeEntity(entity); } catch (e) { continue; }
         const dist = Math.hypot(entity.x - player.x, entity.y - player.y);
-        if (dist <= AOI_RADIUS) {
-          // v4.5.0 降載：對「已見過」的實體做指紋比對，hp/state/位置有變才進 update；
-          //  怪物移動另加時間門檻（MONSTER_MOVE_BC_MS），避免每 tick 把全場怪物全量重送。
-          //  enter/leave 永遠即時；NPC 靜態 → 進 enter 後不再重送。
+        const alreadySeen = player.seenEntities.has(entity.id);
+        // v4.4.22 AOI 遲滯：在 800 內才 enter；已見者在 900 內仍保持可見，避免邊界抖動
+        const visibleNow = (dist <= AOI_RADIUS) || (alreadySeen && dist <= AOI_LEAVE_RADIUS);
+        if (visibleNow) {
+          visibleIds.add(entity.id);
+          // v4.4.22 降載：指紋用量子化座標（過濾巡邏抖動），hp/state 變更仍即時；
+          //  怪物/AI 移動另加時間門檻；aoi_update 只送動態欄位（id/x/y/hp/maxHp/state/dir）。
           if (player.seenEntities.has(entity.id)) {
-            const fp = ser.x + '|' + ser.y + '|' + ser.hp + '|' + ser.maxHp + '|' + ser.state + '|' + (ser.dir || '');
+            const qx = Math.round(ser.x / MOVE_QUANTUM_PX) * MOVE_QUANTUM_PX;
+            const qy = Math.round(ser.y / MOVE_QUANTUM_PX) * MOVE_QUANTUM_PX;
+            const fp = qx + '|' + qy + '|' + ser.hp + '|' + ser.maxHp + '|' + ser.state + '|' + (ser.dir || '');
             const last = player._lastSent.get(entity.id);
             const fpChanged = !last || last.fp !== fp;
             const now = Date.now();
             let include = fpChanged;
-            if (!include && entity.kind === 'monster') {
-              // 怪物位置性變化未到時間門檻就先不送（hp/state 變化已由 fpChanged 涵蓋，即時）
+            if (!include && (entity.kind === 'monster' || entity.kind === 'ai')) {
               if (!last || (now - (last.t || 0)) >= MONSTER_MOVE_BC_MS) include = true;
             }
             if (include) {
-              moveEntities.push(ser);
+              // 只送動態欄位（client 已有 enter 時的完整實體，依 id merge）
+              moveEntities.push({
+                id: ser.id, x: ser.x, y: ser.y, hp: ser.hp,
+                maxHp: ser.maxHp, state: ser.state, dir: ser.dir,
+              });
               player._lastSent.set(entity.id, { fp, t: now });
             }
           } else {
